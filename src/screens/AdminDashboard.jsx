@@ -1,7 +1,6 @@
 
 import React, { useMemo, useState } from 'react';
-import { Header, Input, SectionLabel, EmptyState } from '../components/ui';
-import { Chip } from "../components/ui.jsx";
+import { Header, Input, SectionLabel, EmptyState,chip } from '../components/ui';
 
 export default function AdminDashboard({
   gemeinden = [],
