@@ -3,6 +3,7 @@ import { supabase, T, KATEGORIEN, SKILLS, getSkillLabel, getKat, getMedaille, ge
 import { Header, StelleCard, VereineListe, BottomBar, DatenschutzBox, Input, BigButton, Chip, InfoChip, SectionLabel, RoleCard, EmptyState, ErrorMsg } from '../components/ui';
 
 function LoginScreen({
+  initialMode = null,
   onLogin,
   onBack,
   showToast,
@@ -29,6 +30,16 @@ function LoginScreen({
   const [loading, setLoading] = useState(false);
   const [emailSent, setEmailSent] = useState(false);
   const [resetMode, setResetMode] = useState(false);
+  const lang = "de";
+
+  useEffect(() => {
+    if (initialMode) {
+      setMode(initialMode);
+      setError("");
+    } else {
+      setMode("auswahl");
+    }
+  }, [initialMode]);
 
   const handleLogin = async (type) => {
     if (!email || !password) {
@@ -43,7 +54,7 @@ function LoginScreen({
       setError("Email oder Passwort falsch. Email zuerst bestätigen!");
       return;
     }
-    const table = type === "freiwilliger" ? "freiwillige" : "vereine";
+    const table = type === "freiwilliger" ? "freiwillige" : type === "verein" ? "vereine" : type === "gemeinde" ? "gemeinden" : "admins";
     const { data: profil } = await supabase
       .from(table)
       .select("*")
@@ -332,11 +343,17 @@ function LoginScreen({
               sub="Stellen ausschreiben & Freiwillige finden"
               onClick={() => setMode("verein")}
             />
+            <RoleCard
+              icon="🏛️"
+              title="Ich bin eine Gemeinde"
+              sub="Organisationen verwalten & eigene Stellen veröffentlichen"
+              onClick={() => setMode("gemeinde")}
+            />
           </div>
         )}
         {!emailSent &&
           !resetMode &&
-          (mode === "freiwilliger" || mode === "verein") && (
+          (mode === "freiwilliger" || mode === "verein" || mode === "gemeinde" || mode === "admin") && (
             <div>
               <button
                 onClick={() => {
@@ -363,7 +380,7 @@ function LoginScreen({
                   color: "#2C2416",
                 }}
               >
-                {mode === "freiwilliger" ? "🙋 Anmelden" : "🏢 Anmelden"}
+                {mode === "freiwilliger" ? "🙋 Anmelden" : mode === "verein" ? "🏢 Anmelden" : mode === "gemeinde" ? "🏛️ Gemeinde-Anmeldung" : "⚙️ Admin-Anmeldung"}
               </div>
               <Input
                 label="Email"
@@ -402,26 +419,28 @@ function LoginScreen({
                   Passwort vergessen?
                 </button>
               </div>
-              <div style={{ textAlign: "center", marginTop: 8 }}>
-                <button
-                  onClick={() =>
-                    setMode(
-                      mode === "freiwilliger" ? "register-f" : "register-v"
-                    )
-                  }
-                  style={{
-                    background: "none",
-                    border: "none",
-                    color: "#8B7355",
-                    fontSize: 13,
-                    cursor: "pointer",
-                    fontFamily: "inherit",
-                    textDecoration: "underline",
-                  }}
-                >
-                  Noch kein Konto? Registrieren
-                </button>
-              </div>
+              {(mode === "freiwilliger" || mode === "verein") && (
+                <div style={{ textAlign: "center", marginTop: 8 }}>
+                  <button
+                    onClick={() =>
+                      setMode(
+                        mode === "freiwilliger" ? "register-f" : "register-v"
+                      )
+                    }
+                    style={{
+                      background: "none",
+                      border: "none",
+                      color: "#8B7355",
+                      fontSize: 13,
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                      textDecoration: "underline",
+                    }}
+                  >
+                    Noch kein Konto? Registrieren
+                  </button>
+                </div>
+              )}
             </div>
           )}
         {!emailSent && !resetMode && mode === "register-f" && (
@@ -587,7 +606,7 @@ function LoginScreen({
                 <Input
                   label="Straße *"
                   value={regStrasse}
-                  onChange={setStrasse}
+                  onChange={setRegStrasse}
                   placeholder="Hauptstraße"
                 />
               </div>
@@ -630,7 +649,7 @@ function LoginScreen({
                 <Input
                   label="Telefon (optional)"
                   value={regTelefon}
-                  onChange={setTelefon}
+                  onChange={setRegTelefon}
                   placeholder="+49 6251 ..."
                 />
               </div>
@@ -638,7 +657,7 @@ function LoginScreen({
                 <Input
                   label="Website (optional)"
                   value={regWebsite}
-                  onChange={setWebsite}
+                  onChange={setRegWebsite}
                   placeholder="www.verein.de"
                 />
               </div>
