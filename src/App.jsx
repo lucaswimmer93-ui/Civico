@@ -37,6 +37,7 @@ import {
 import RechtlicheSeite from './screens/LegalScreens';
 import GemeindeDashboard from './screens/GemeindeDashboard';
 import AdminDashboard from './screens/AdminDashboard';
+import { Chip } from './components/ui';
 
 export default function App() {
   const [lang, setLang] = useState("de");
