@@ -1,7 +1,6 @@
 
 import React, { useMemo, useState } from 'react';
-import { Header, Input, BigButton, SectionLabel, EmptyState } from '../components/ui';
-import { Chip } from "../components/ui.jsx";
+import { Header, Input, SectionLabel, EmptyState, Chip } from '../components/ui';
 
 function defaultTermin() {
   return { datum: '', startzeit: '', endzeit: '', plaetze: 5 };
