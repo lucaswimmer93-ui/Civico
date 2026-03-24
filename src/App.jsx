@@ -892,6 +892,30 @@ export default function App() {
     ).values()
   );
 
+  const openGemeindeDashboard = () => {
+    const demoGemeinde = {
+      id: gemeindeId || 1,
+      name: 'Gemeinde Einhausen',
+      ort: 'Einhausen',
+      bundesland: 'Hessen',
+    };
+    setUser({ type: 'gemeinde', data: demoGemeinde });
+    setGemeindeId(demoGemeinde.id);
+    setScreen('gemeinde-dashboard');
+    setHistory([]);
+  };
+
+  const openAdminDashboard = () => {
+    const demoAdmin = {
+      id: 1,
+      name: 'Admin',
+      email: 'admin@civico.local',
+    };
+    setUser({ type: 'admin', data: demoAdmin });
+    setScreen('admin-dashboard');
+    setHistory([]);
+  };
+
 
   return (
     <div
@@ -899,8 +923,9 @@ export default function App() {
         minHeight: "100vh",
         background: "#F4F0E8",
         fontFamily: "'Georgia', serif",
-        maxWidth: 480,
-        margin: "0 auto",
+        width: "100%",
+        maxWidth: "100%",
+        margin: 0,
         position: "relative",
       }}
     >
@@ -1019,8 +1044,24 @@ export default function App() {
                 </button>
               </div>
             ) : (
-              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
                 <LangSwitcher />
+                <button
+                  onClick={openGemeindeDashboard}
+                  style={{
+                    background: "#C8A96E",
+                    border: "none",
+                    color: "#1A1208",
+                    fontSize: 13,
+                    padding: "8px 16px",
+                    borderRadius: 20,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    fontWeight: "bold",
+                  }}
+                >
+                  Gemeinde
+                </button>
                 <button
                   onClick={() => navigateTo("login")}
                   style={{
@@ -1045,7 +1086,7 @@ export default function App() {
               style={{
                 position: "fixed",
                 top: 62,
-                right: "calc(50% - 240px + 48px)",
+                right: 16,
                 background: "#FAF7F2",
                 borderRadius: 12,
                 boxShadow: "0 4px 20px rgba(0,0,0,0.2)",
@@ -1324,6 +1365,26 @@ export default function App() {
             onAgb={() => navigateTo("agb")}
             t={t}
           />
+          {!user && (
+            <button
+              onClick={openAdminDashboard}
+              style={{
+                position: "fixed",
+                right: 18,
+                bottom: 14,
+                background: "transparent",
+                border: "none",
+                color: "#8B7355",
+                fontSize: 11,
+                opacity: 0.65,
+                cursor: "pointer",
+                fontFamily: "inherit",
+                letterSpacing: 0.3,
+              }}
+            >
+              Admin
+            </button>
+          )}
         </div>
       )}
 
@@ -1475,7 +1536,7 @@ export default function App() {
               style={{
                 position: "fixed",
                 top: 62,
-                right: "calc(50% - 240px + 48px)",
+                right: 16,
                 background: "#FAF7F2",
                 borderRadius: 12,
                 boxShadow: "0 4px 20px rgba(0,0,0,0.2)",
