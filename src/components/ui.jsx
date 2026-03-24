@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Chip } from "../components/ui.jsx";
 import { T, KATEGORIEN, SKILLS, getSkillLabel, getKat, getMedaille, getNextMedaille, getMedailleName, IMPRESSUM_TEXT, DATENSCHUTZ_TEXT, AGB_TEXT, formatDate, isTerminNochNichtGestartet, isTerminAktuell, supabase } from '../core/shared';
 
 function Header({ title, subtitle, onLogout, onBack }) {
