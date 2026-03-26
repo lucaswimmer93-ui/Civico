@@ -178,25 +178,40 @@ export default function App() {
   const toggleFollowVerein = async (vereinId) => {
     if (!user?.data?.id) return;
     const isFollowing = follows.vereine.includes(vereinId);
+
     if (isFollowing) {
-      await supabase
+      const { error } = await supabase
         .from("follows")
         .delete()
         .eq("freiwilliger_id", user.data.id)
         .eq("typ", "verein")
         .eq("ziel_id", vereinId);
+
+      if (error) {
+        console.log("Follow delete failed:", error);
+        showToast("Verein konnte nicht entfolgt werden.", "#E85C5C");
+        return;
+      }
+
       setFollows((prev) => ({
         ...prev,
         vereine: prev.vereine.filter((id) => id !== vereinId),
       }));
     } else {
-      await supabase
+      const { error } = await supabase
         .from("follows")
         .insert({
           freiwilliger_id: user.data.id,
           typ: "verein",
           ziel_id: vereinId,
         });
+
+      if (error) {
+        console.log("Follow insert failed:", error);
+        showToast("Verein konnte nicht gespeichert werden.", "#E85C5C");
+        return;
+      }
+
       setFollows((prev) => ({ ...prev, vereine: [...prev.vereine, vereinId] }));
     }
   };
@@ -204,25 +219,40 @@ export default function App() {
   const toggleFollowKategorie = async (katId) => {
     if (!user?.data?.id) return;
     const isFollowing = follows.kategorien.includes(katId);
+
     if (isFollowing) {
-      await supabase
+      const { error } = await supabase
         .from("follows")
         .delete()
         .eq("freiwilliger_id", user.data.id)
         .eq("typ", "kategorie")
         .eq("ziel_wert", katId);
+
+      if (error) {
+        console.log("Category unfollow failed:", error);
+        showToast("Kategorie konnte nicht entfernt werden.", "#E85C5C");
+        return;
+      }
+
       setFollows((prev) => ({
         ...prev,
         kategorien: prev.kategorien.filter((k) => k !== katId),
       }));
     } else {
-      await supabase
+      const { error } = await supabase
         .from("follows")
         .insert({
           freiwilliger_id: user.data.id,
           typ: "kategorie",
           ziel_wert: katId,
         });
+
+      if (error) {
+        console.log("Category follow failed:", error);
+        showToast("Kategorie konnte nicht gespeichert werden.", "#E85C5C");
+        return;
+      }
+
       setFollows((prev) => ({
         ...prev,
         kategorien: [...prev.kategorien, katId],
@@ -241,16 +271,16 @@ export default function App() {
       .select("id, position")
       .eq("termin_id", terminId)
       .eq("freiwilliger_id", user.data.id)
-      .single();
+      .maybeSingle();
     if (existing) {
       showToast(`Wartelistenplatz ${existing.position}`, "#E8A87C");
       return;
     }
-    const { data: count } = await supabase
+    const { count } = await supabase
       .from("warteliste")
-      .select("id", { count: "exact" })
+      .select("id", { count: "exact", head: true })
       .eq("termin_id", terminId);
-    const position = (count?.length || 0) + 1;
+    const position = (count || 0) + 1;
     await supabase.from("warteliste").insert({
       stelle_id: stelleId,
       termin_id: terminId,
@@ -264,7 +294,6 @@ export default function App() {
   };
 
   const logout = async () => {
-    if (user?.type === "freiwilliger") await unregisterPush(user.data.id);
     await supabase.auth.signOut();
     setUser(null);
     setHistory([]);
@@ -355,7 +384,7 @@ export default function App() {
           .from("plz_koordinaten")
           .select("lat, lng")
           .eq("plz", plz)
-          .single();
+          .maybeSingle();
         if (plzData) {
           const { data: ids } = await supabase.rpc("stellen_in_umkreis", {
             lat: plzData.lat,
@@ -445,7 +474,7 @@ export default function App() {
           .from("freiwillige")
           .select("*")
           .eq("auth_id", session.user.id)
-          .single();
+          .maybeSingle();
         if (profil) {
           setUser({ type: "freiwilliger", data: profil });
           setGemeindeId(profil.gemeinde_id);
@@ -459,7 +488,7 @@ export default function App() {
           .from("vereine")
           .select("*")
           .eq("auth_id", session.user.id)
-          .single();
+          .maybeSingle();
         if (verein) {
           setUser({ type: "verein", data: verein });
           setGemeindeId(verein.gemeinde_id);
@@ -480,7 +509,7 @@ export default function App() {
           .from("gemeinden")
           .select("*")
           .eq("auth_id", session.user.id)
-          .single();
+          .maybeSingle();
         if (gemeinde) {
           setUser({ type: "gemeinde", data: gemeinde });
           setGemeindeId(gemeinde.id);
@@ -493,7 +522,7 @@ export default function App() {
           .from("admins")
           .select("*")
           .eq("auth_id", session.user.id)
-          .single();
+          .maybeSingle();
         if (admin) {
           setUser({ type: "admin", data: admin });
           loadStellen();
@@ -513,7 +542,7 @@ export default function App() {
             .from("stellen")
             .select("*, vereine(*), termine(*, bewerbungen(*))")
             .eq("id", prev.id)
-            .single()
+            .maybeSingle()
             .then(({ data }) => {
               if (data) setSelected(data);
             });
@@ -643,7 +672,7 @@ export default function App() {
           // Verein benachrichtigen
           const stelle = stellen.find((s) => s.id === stelleId);
           if (stelle?.vereine?.auth_id) {
-            await supabase
+            const { error: vereinNotifError } = await supabase
               .from("verein_notifications")
               .insert({
                 verein_id: stelle.verein_id,
@@ -651,8 +680,10 @@ export default function App() {
                 text: `${user.data.name} hat sich für "${stelle.titel}" angemeldet.`,
                 typ: "anmeldung",
                 gelesen: false,
-              })
-              .catch(() => {});
+              });
+            if (vereinNotifError) {
+              console.log("verein_notifications anmeldung failed:", vereinNotifError);
+            }
           }
         } else {
           setTerminWechselModus(false);
@@ -660,7 +691,7 @@ export default function App() {
           // Verein über Terminwechsel benachrichtigen
           const stelle = stellen.find((s) => s.id === stelleId);
           if (stelle) {
-            await supabase
+            const { error: vereinNotifError } = await supabase
               .from("verein_notifications")
               .insert({
                 verein_id: stelle.verein_id,
@@ -668,8 +699,10 @@ export default function App() {
                 text: `${user.data.name} hat den Termin für "${stelle.titel}" geändert.`,
                 typ: "termin_wechsel",
                 gelesen: false,
-              })
-              .catch(() => {});
+              });
+            if (vereinNotifError) {
+              console.log("verein_notifications termin_wechsel failed:", vereinNotifError);
+            }
           }
         }
       }
@@ -719,7 +752,7 @@ export default function App() {
         (s.termine || []).some((t) => t.id === terminId)
       );
       if (abmeldeStelle) {
-        await supabase
+        const { error: vereinNotifError } = await supabase
           .from("verein_notifications")
           .insert({
             verein_id: abmeldeStelle.verein_id,
@@ -727,8 +760,10 @@ export default function App() {
             text: `${user.data.name} hat sich von "${abmeldeStelle.titel}" abgemeldet.`,
             typ: "abmeldung",
             gelesen: false,
-          })
-          .catch(() => {});
+          });
+        if (vereinNotifError) {
+          console.log("verein_notifications abmeldung failed:", vereinNotifError);
+        }
       }
       // Warteliste prüfen
       const { data: nextOnList } = await supabase
@@ -744,8 +779,8 @@ export default function App() {
           p_stelle_id: nextOnList.stelle_id,
           p_termin_id: terminId,
           p_freiwilliger_id: nextOnList.freiwilliger_id,
-          p_name: nextOnList.freiwilliger_name,
-          p_email: nextOnList.freiwilliger_email,
+          p_name: nextOnList.name || nextOnList.freiwilliger_name,
+          p_email: nextOnList.email || nextOnList.freiwilliger_email,
         });
         if (erfolg) {
           // Freiwilligen benachrichtigen
@@ -759,17 +794,31 @@ export default function App() {
             gelesen: false,
           });
           // Punkte vergeben
-          await supabase
+          const { data: nextFw, error: nextFwError } = await supabase
             .from("freiwillige")
-            .update({ punkte: supabase.rpc("increment", { x: 10 }) })
+            .select("punkte, aktionen")
             .eq("id", nextOnList.freiwilliger_id)
-            .catch(() => {});
+            .maybeSingle();
+          if (nextFwError) {
+            console.log("load next volunteer points failed:", nextFwError);
+          } else if (nextFw) {
+            const { error: updateNextFwError } = await supabase
+              .from("freiwillige")
+              .update({
+                punkte: (nextFw.punkte || 0) + 10,
+                aktionen: (nextFw.aktionen || 0) + 1,
+              })
+              .eq("id", nextOnList.freiwilliger_id);
+            if (updateNextFwError) {
+              console.log("update next volunteer points failed:", updateNextFwError);
+            }
+          }
           // Verein benachrichtigen
           if (selected) {
             await notifyVerein(
               selected.verein_id,
               "🔄 Warteliste nachgerückt",
-              `${nextOnList.freiwilliger_name} ist automatisch von der Warteliste nachgerückt.`,
+              `${nextOnList.name || nextOnList.freiwilliger_name} ist automatisch von der Warteliste nachgerückt.`,
               "warteliste"
             );
           }
@@ -1688,14 +1737,14 @@ export default function App() {
               .eq("termin_id", terminId)
               .order("created_at", { ascending: true })
               .limit(1)
-              .single();
+              .maybeSingle();
             if (nextOnList) {
               const { data: erfolg } = await supabase.rpc("book_slot", {
                 p_stelle_id: nextOnList.stelle_id,
                 p_termin_id: terminId,
                 p_freiwilliger_id: nextOnList.freiwilliger_id,
-                p_name: nextOnList.freiwilliger_name,
-                p_email: nextOnList.freiwilliger_email,
+                p_name: nextOnList.name || nextOnList.freiwilliger_name,
+                p_email: nextOnList.email || nextOnList.freiwilliger_email,
               });
               if (erfolg) {
                 await supabase
@@ -1719,7 +1768,7 @@ export default function App() {
               .from("stellen")
               .select("*, vereine(*), termine(*, bewerbungen(*))")
               .eq("id", selected.id)
-              .single();
+              .maybeSingle();
             if (data) setSelected(data);
           }}
           onFreiwilligerProfil={async (bew) => {
@@ -1904,8 +1953,10 @@ export default function App() {
                         text: `Dein Termin für "${selected.titel}" wurde leider abgesagt.`,
                         typ: "termin_abgesagt",
                         gelesen: false,
-                      })
-                      .catch(() => {});
+                      });
+                    if (error) {
+                      console.log("termin_abgesagt notification failed:", error);
+                    }
                   }
                 await supabase
                   .from("bewerbungen")
@@ -1946,8 +1997,10 @@ export default function App() {
                           )} verschoben.`,
                           typ: "termin_geaendert",
                           gelesen: false,
-                        })
-                        .catch(() => {});
+                        });
+                      if (error) {
+                        console.log("termin_geaendert notification failed:", error);
+                      }
                     }
                 }
               }
