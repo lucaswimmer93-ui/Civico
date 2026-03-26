@@ -178,40 +178,25 @@ export default function App() {
   const toggleFollowVerein = async (vereinId) => {
     if (!user?.data?.id) return;
     const isFollowing = follows.vereine.includes(vereinId);
-
     if (isFollowing) {
-      const { error } = await supabase
+      await supabase
         .from("follows")
         .delete()
         .eq("freiwilliger_id", user.data.id)
         .eq("typ", "verein")
         .eq("ziel_id", vereinId);
-
-      if (error) {
-        console.log("Follow delete failed:", error);
-        showToast("Verein konnte nicht entfolgt werden.", "#E85C5C");
-        return;
-      }
-
       setFollows((prev) => ({
         ...prev,
         vereine: prev.vereine.filter((id) => id !== vereinId),
       }));
     } else {
-      const { error } = await supabase
+      await supabase
         .from("follows")
         .insert({
           freiwilliger_id: user.data.id,
           typ: "verein",
           ziel_id: vereinId,
         });
-
-      if (error) {
-        console.log("Follow insert failed:", error);
-        showToast("Verein konnte nicht gespeichert werden.", "#E85C5C");
-        return;
-      }
-
       setFollows((prev) => ({ ...prev, vereine: [...prev.vereine, vereinId] }));
     }
   };
@@ -219,40 +204,25 @@ export default function App() {
   const toggleFollowKategorie = async (katId) => {
     if (!user?.data?.id) return;
     const isFollowing = follows.kategorien.includes(katId);
-
     if (isFollowing) {
-      const { error } = await supabase
+      await supabase
         .from("follows")
         .delete()
         .eq("freiwilliger_id", user.data.id)
         .eq("typ", "kategorie")
         .eq("ziel_wert", katId);
-
-      if (error) {
-        console.log("Category unfollow failed:", error);
-        showToast("Kategorie konnte nicht entfernt werden.", "#E85C5C");
-        return;
-      }
-
       setFollows((prev) => ({
         ...prev,
         kategorien: prev.kategorien.filter((k) => k !== katId),
       }));
     } else {
-      const { error } = await supabase
+      await supabase
         .from("follows")
         .insert({
           freiwilliger_id: user.data.id,
           typ: "kategorie",
           ziel_wert: katId,
         });
-
-      if (error) {
-        console.log("Category follow failed:", error);
-        showToast("Kategorie konnte nicht gespeichert werden.", "#E85C5C");
-        return;
-      }
-
       setFollows((prev) => ({
         ...prev,
         kategorien: [...prev.kategorien, katId],
@@ -271,16 +241,16 @@ export default function App() {
       .select("id, position")
       .eq("termin_id", terminId)
       .eq("freiwilliger_id", user.data.id)
-      .maybeSingle();
+      .single();
     if (existing) {
       showToast(`Wartelistenplatz ${existing.position}`, "#E8A87C");
       return;
     }
-    const { count } = await supabase
+    const { data: count } = await supabase
       .from("warteliste")
-      .select("id", { count: "exact", head: true })
+      .select("id", { count: "exact" })
       .eq("termin_id", terminId);
-    const position = (count || 0) + 1;
+    const position = (count?.length || 0) + 1;
     await supabase.from("warteliste").insert({
       stelle_id: stelleId,
       termin_id: terminId,
@@ -294,6 +264,14 @@ export default function App() {
   };
 
   const logout = async () => {
+    try {
+      if (user?.type === "freiwilliger") {
+        await unregisterPush(user.data.id);
+      }
+    } catch (e) {
+      console.log("Logout cleanup failed:", e);
+    }
+
     await supabase.auth.signOut();
     setUser(null);
     setHistory([]);
@@ -314,19 +292,26 @@ export default function App() {
   };
 
   const registerPush = async (userId) => {
+    if (!userId) return;
     if (!("serviceWorker" in navigator) || !("PushManager" in window)) return;
+    if (!("Notification" in window)) return;
+
     try {
       const reg = await navigator.serviceWorker.ready;
       const permission = await Notification.requestPermission();
       if (permission !== "granted") return;
-      const sub = await reg.pushManager.subscribe({
-        userVisibleOnly: true,
-        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
-      });
-      const subJson = JSON.stringify(sub);
+
+      let sub = await reg.pushManager.getSubscription();
+      if (!sub) {
+        sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+        });
+      }
+
       await supabase
         .from("freiwillige")
-        .update({ push_token: subJson })
+        .update({ push_token: JSON.stringify(sub) })
         .eq("id", userId);
     } catch (e) {
       console.log("Push registration failed:", e);
@@ -338,14 +323,154 @@ export default function App() {
       if ("serviceWorker" in navigator) {
         const reg = await navigator.serviceWorker.ready;
         const sub = await reg.pushManager.getSubscription();
-        if (sub) await sub.unsubscribe();
+        if (sub) {
+          await sub.unsubscribe();
+        }
       }
-      if (userId)
+    } catch (e) {
+      console.log("Push unsubscribe failed:", e);
+    }
+
+    try {
+      if (userId) {
         await supabase
           .from("freiwillige")
           .update({ push_token: null })
           .eq("id", userId);
-    } catch (e) {}
+      }
+    } catch (e) {
+      console.log("Push token cleanup failed:", e);
+    }
+  };
+
+  const getVolunteerPushRecipients = async ({
+    gemeindeId: zielGemeindeId,
+    notificationType,
+    vereinId = null,
+    kategorie = null,
+    freiwilligerIds = null,
+  }) => {
+    try {
+      let settingsQuery = supabase
+        .from("notification_settings")
+        .select("freiwilliger_id")
+        .eq("push_enabled", true);
+
+      if (notificationType) {
+        settingsQuery = settingsQuery.eq(notificationType, true);
+      }
+
+      if (Array.isArray(freiwilligerIds) && freiwilligerIds.length > 0) {
+        settingsQuery = settingsQuery.in("freiwilliger_id", freiwilligerIds);
+      }
+
+      const { data: settingsRows, error: settingsError } = await settingsQuery;
+      if (settingsError || !settingsRows?.length) return [];
+
+      let erlaubteIds = [...new Set(settingsRows.map((row) => row.freiwilliger_id).filter(Boolean))];
+      if (!erlaubteIds.length) return [];
+
+      if (
+        notificationType === "neue_stellen" &&
+        (vereinId || kategorie)
+      ) {
+        const followFilters = [];
+        if (vereinId) {
+          followFilters.push(`and(typ.eq.verein,ziel_id.eq.${vereinId})`);
+        }
+        if (kategorie) {
+          followFilters.push(`and(typ.eq.kategorie,ziel_id.eq.${kategorie})`);
+        }
+
+        if (!followFilters.length) return [];
+
+        const { data: followRows, error: followsError } = await supabase
+          .from("follows")
+          .select("freiwilliger_id")
+          .or(followFilters.join(","))
+          .in("freiwilliger_id", erlaubteIds);
+
+        if (followsError || !followRows?.length) return [];
+
+        erlaubteIds = [...new Set(followRows.map((row) => row.freiwilliger_id).filter(Boolean))];
+        if (!erlaubteIds.length) return [];
+      }
+
+      let freiwilligeQuery = supabase
+        .from("freiwillige")
+        .select("id, push_token")
+        .in("id", erlaubteIds)
+        .not("push_token", "is", null);
+
+      if (zielGemeindeId) {
+        freiwilligeQuery = freiwilligeQuery.eq("gemeinde_id", zielGemeindeId);
+      }
+
+      const { data: freiwilligeRows, error: freiwilligeError } = await freiwilligeQuery;
+      if (freiwilligeError || !freiwilligeRows?.length) return [];
+
+      return freiwilligeRows.map((row) => row.id);
+    } catch (error) {
+      console.log("Recipient lookup failed:", error);
+      return [];
+    }
+  };
+
+  const sendVolunteerPush = async ({
+    title,
+    body,
+    url = "/",
+    notificationType,
+    gemeindeId: zielGemeindeId,
+    vereinId = null,
+    kategorie = null,
+    freiwilligerIds = null,
+  }) => {
+    try {
+      const empfaengerIds = await getVolunteerPushRecipients({
+        gemeindeId: zielGemeindeId,
+        notificationType,
+        vereinId,
+        kategorie,
+        freiwilligerIds,
+      });
+
+      if (!empfaengerIds.length) return;
+
+      await supabase.functions.invoke("send-push", {
+        body: {
+          title,
+          body,
+          url,
+          gemeinde_id: zielGemeindeId,
+          notification_type: notificationType,
+          freiwilliger_ids: empfaengerIds,
+          verein_id: vereinId,
+          kategorie,
+        },
+      });
+    } catch (error) {
+      console.log("Volunteer push send failed:", error);
+    }
+  };
+
+  const sendVereinPush = async ({ title, body, url = "/", vereinId, notificationType }) => {
+    if (!vereinId) return;
+
+    try {
+      await supabase.functions.invoke("send-push", {
+        body: {
+          title,
+          body,
+          url,
+          verein_id: vereinId,
+          notification_type: notificationType,
+          user_type: "verein",
+        },
+      });
+    } catch (error) {
+      console.log("Verein push send failed:", error);
+    }
   };
 
   // ── Navigation ──────────────────────────────────────────────────────────
@@ -384,7 +509,7 @@ export default function App() {
           .from("plz_koordinaten")
           .select("lat, lng")
           .eq("plz", plz)
-          .maybeSingle();
+          .single();
         if (plzData) {
           const { data: ids } = await supabase.rpc("stellen_in_umkreis", {
             lat: plzData.lat,
@@ -423,15 +548,11 @@ export default function App() {
   };
 
   const reloadSelected = async (stelleId) => {
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from("stellen")
       .select("*, vereine(*), termine(*, bewerbungen(*))")
       .eq("id", stelleId)
-      .maybeSingle();
-    if (error) {
-      console.log("reloadSelected failed:", error);
-      return;
-    }
+      .single();
     if (data) setSelected(data);
   };
 
@@ -459,14 +580,18 @@ export default function App() {
   };
 
   useEffect(() => {
-    // Service Worker registrieren (PWA + Push)
-    if ("serviceWorker" in navigator) {
-      navigator.serviceWorker
-        .register("/civico-sw.js")
-        .then((reg) => console.log("SW registered:", reg.scope))
-        .catch((err) => console.log("SW failed:", err));
-    }
+    const setupServiceWorker = async () => {
+      if (!("serviceWorker" in navigator)) return;
 
+      try {
+        const reg = await navigator.serviceWorker.register("/civico-sw.js");
+        console.log("SW registered:", reg.scope);
+      } catch (err) {
+        console.log("SW failed:", err);
+      }
+    };
+
+    setupServiceWorker();
     loadStellen();
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session) {
@@ -474,7 +599,7 @@ export default function App() {
           .from("freiwillige")
           .select("*")
           .eq("auth_id", session.user.id)
-          .maybeSingle();
+          .single();
         if (profil) {
           setUser({ type: "freiwilliger", data: profil });
           setGemeindeId(profil.gemeinde_id);
@@ -488,7 +613,7 @@ export default function App() {
           .from("vereine")
           .select("*")
           .eq("auth_id", session.user.id)
-          .maybeSingle();
+          .single();
         if (verein) {
           setUser({ type: "verein", data: verein });
           setGemeindeId(verein.gemeinde_id);
@@ -509,7 +634,7 @@ export default function App() {
           .from("gemeinden")
           .select("*")
           .eq("auth_id", session.user.id)
-          .maybeSingle();
+          .single();
         if (gemeinde) {
           setUser({ type: "gemeinde", data: gemeinde });
           setGemeindeId(gemeinde.id);
@@ -522,7 +647,7 @@ export default function App() {
           .from("admins")
           .select("*")
           .eq("auth_id", session.user.id)
-          .maybeSingle();
+          .single();
         if (admin) {
           setUser({ type: "admin", data: admin });
           loadStellen();
@@ -542,7 +667,7 @@ export default function App() {
             .from("stellen")
             .select("*, vereine(*), termine(*, bewerbungen(*))")
             .eq("id", prev.id)
-            .maybeSingle()
+            .single()
             .then(({ data }) => {
               if (data) setSelected(data);
             });
@@ -672,7 +797,7 @@ export default function App() {
           // Verein benachrichtigen
           const stelle = stellen.find((s) => s.id === stelleId);
           if (stelle?.vereine?.auth_id) {
-            const { error: vereinNotifError } = await supabase
+            await supabase
               .from("verein_notifications")
               .insert({
                 verein_id: stelle.verein_id,
@@ -680,10 +805,15 @@ export default function App() {
                 text: `${user.data.name} hat sich für "${stelle.titel}" angemeldet.`,
                 typ: "anmeldung",
                 gelesen: false,
-              });
-            if (vereinNotifError) {
-              console.log("verein_notifications anmeldung failed:", vereinNotifError);
-            }
+              })
+              .catch(() => {});
+            await sendVereinPush({
+              vereinId: stelle.verein_id,
+              notificationType: "anmeldung",
+              title: "🎉 Neue Anmeldung!",
+              body: `${user.data.name} hat sich für "${stelle.titel}" angemeldet.`,
+              url: "/",
+            });
           }
         } else {
           setTerminWechselModus(false);
@@ -691,7 +821,7 @@ export default function App() {
           // Verein über Terminwechsel benachrichtigen
           const stelle = stellen.find((s) => s.id === stelleId);
           if (stelle) {
-            const { error: vereinNotifError } = await supabase
+            await supabase
               .from("verein_notifications")
               .insert({
                 verein_id: stelle.verein_id,
@@ -699,21 +829,21 @@ export default function App() {
                 text: `${user.data.name} hat den Termin für "${stelle.titel}" geändert.`,
                 typ: "termin_wechsel",
                 gelesen: false,
-              });
-            if (vereinNotifError) {
-              console.log("verein_notifications termin_wechsel failed:", vereinNotifError);
-            }
+              })
+              .catch(() => {});
+            await sendVereinPush({
+              vereinId: stelle.verein_id,
+              notificationType: "termin_wechsel",
+              title: "📅 Termin geändert",
+              body: `${user.data.name} hat den Termin für "${stelle.titel}" geändert.`,
+              url: "/",
+            });
           }
         }
       }
-      try {
-        await loadStellen(gemeindeId, user?.data?.plz, user?.data?.umkreis);
-        await reloadSelected(stelleId);
-      } catch (refreshErr) {
-        console.log("Post-book refresh failed:", refreshErr);
-      }
+      await loadStellen(gemeindeId);
+      await reloadSelected(stelleId);
     } catch (err) {
-      console.log("Booking failed:", err);
       showToast("Fehler beim Buchen.", "#E85C5C");
     }
   };
@@ -752,7 +882,7 @@ export default function App() {
         (s.termine || []).some((t) => t.id === terminId)
       );
       if (abmeldeStelle) {
-        const { error: vereinNotifError } = await supabase
+        await supabase
           .from("verein_notifications")
           .insert({
             verein_id: abmeldeStelle.verein_id,
@@ -760,10 +890,15 @@ export default function App() {
             text: `${user.data.name} hat sich von "${abmeldeStelle.titel}" abgemeldet.`,
             typ: "abmeldung",
             gelesen: false,
-          });
-        if (vereinNotifError) {
-          console.log("verein_notifications abmeldung failed:", vereinNotifError);
-        }
+          })
+          .catch(() => {});
+        await sendVereinPush({
+          vereinId: abmeldeStelle.verein_id,
+          notificationType: "abmeldung",
+          title: "❌ Abmeldung",
+          body: `${user.data.name} hat sich von "${abmeldeStelle.titel}" abgemeldet.`,
+          url: "/",
+        });
       }
       // Warteliste prüfen
       const { data: nextOnList } = await supabase
@@ -772,15 +907,15 @@ export default function App() {
         .eq("termin_id", terminId)
         .order("created_at", { ascending: true })
         .limit(1)
-        .maybeSingle();
+        .single();
       if (nextOnList) {
         // Automatisch nachbuchen
         const { data: erfolg } = await supabase.rpc("book_slot", {
           p_stelle_id: nextOnList.stelle_id,
           p_termin_id: terminId,
           p_freiwilliger_id: nextOnList.freiwilliger_id,
-          p_name: nextOnList.name || nextOnList.freiwilliger_name,
-          p_email: nextOnList.email || nextOnList.freiwilliger_email,
+          p_name: nextOnList.freiwilliger_name,
+          p_email: nextOnList.freiwilliger_email,
         });
         if (erfolg) {
           // Freiwilligen benachrichtigen
@@ -793,34 +928,39 @@ export default function App() {
             typ: "platz_frei",
             gelesen: false,
           });
+          await sendVolunteerPush({
+            gemeindeId,
+            notificationType: "freie_plaetze",
+            freiwilligerIds: [nextOnList.freiwilliger_id],
+            title: "🎉 Du wurdest nachgerückt!",
+            body: `Ein Platz bei "${selected?.titel || "einer Stelle"}" ist frei geworden – du wurdest automatisch angemeldet!`,
+            url: "/",
+          });
           // Punkte vergeben
-          const { data: nextFw, error: nextFwError } = await supabase
+          await supabase
             .from("freiwillige")
-            .select("punkte, aktionen")
+            .update({ punkte: supabase.rpc("increment", { x: 10 }) })
             .eq("id", nextOnList.freiwilliger_id)
-            .maybeSingle();
-          if (nextFwError) {
-            console.log("load next volunteer points failed:", nextFwError);
-          } else if (nextFw) {
-            const { error: updateNextFwError } = await supabase
-              .from("freiwillige")
-              .update({
-                punkte: (nextFw.punkte || 0) + 10,
-                aktionen: (nextFw.aktionen || 0) + 1,
-              })
-              .eq("id", nextOnList.freiwilliger_id);
-            if (updateNextFwError) {
-              console.log("update next volunteer points failed:", updateNextFwError);
-            }
-          }
+            .catch(() => {});
           // Verein benachrichtigen
-          if (selected) {
-            await notifyVerein(
-              selected.verein_id,
-              "🔄 Warteliste nachgerückt",
-              `${nextOnList.name || nextOnList.freiwilliger_name} ist automatisch von der Warteliste nachgerückt.`,
-              "warteliste"
-            );
+          if (selected?.verein_id) {
+            await supabase
+              .from("verein_notifications")
+              .insert({
+                verein_id: selected.verein_id,
+                titel: "🔄 Warteliste nachgerückt",
+                text: `${nextOnList.freiwilliger_name} ist automatisch von der Warteliste nachgerückt.`,
+                typ: "warteliste",
+                gelesen: false,
+              })
+              .catch(() => {});
+            await sendVereinPush({
+              vereinId: selected.verein_id,
+              notificationType: "warteliste",
+              title: "🔄 Warteliste nachgerückt",
+              body: `${nextOnList.freiwilliger_name} ist automatisch von der Warteliste nachgerückt.`,
+              url: "/",
+            });
           }
         } else {
           // Falls book_slot fehlschlägt - nur Benachrichtigung
@@ -850,15 +990,10 @@ export default function App() {
           }
         }
       }
-      try {
-        await loadStellen(gemeindeId, user?.data?.plz, user?.data?.umkreis);
-        if (selected?.id) await reloadSelected(selected.id);
-      } catch (refreshErr) {
-        console.log("Post-unsubscribe refresh failed:", refreshErr);
-      }
+      await loadStellen(gemeindeId, user?.data?.plz, user?.data?.umkreis);
+      if (selected?.id) await reloadSelected(selected.id);
       goBack();
     } catch (err) {
-      console.log("Unsubscribe failed:", err);
       showToast("Fehler beim Abmelden.", "#E85C5C");
     }
   };
@@ -1737,14 +1872,14 @@ export default function App() {
               .eq("termin_id", terminId)
               .order("created_at", { ascending: true })
               .limit(1)
-              .maybeSingle();
+              .single();
             if (nextOnList) {
               const { data: erfolg } = await supabase.rpc("book_slot", {
                 p_stelle_id: nextOnList.stelle_id,
                 p_termin_id: terminId,
                 p_freiwilliger_id: nextOnList.freiwilliger_id,
-                p_name: nextOnList.name || nextOnList.freiwilliger_name,
-                p_email: nextOnList.email || nextOnList.freiwilliger_email,
+                p_name: nextOnList.freiwilliger_name,
+                p_email: nextOnList.freiwilliger_email,
               });
               if (erfolg) {
                 await supabase
@@ -1756,6 +1891,14 @@ export default function App() {
                     typ: "platz_frei",
                     gelesen: false,
                   });
+                await sendVolunteerPush({
+                  gemeindeId,
+                  notificationType: "freie_plaetze",
+                  freiwilligerIds: [nextOnList.freiwilliger_id],
+                  title: "🎉 Du wurdest nachgerückt!",
+                  body: `Du bist bei "${selected.titel}" automatisch nachgerückt.`,
+                  url: "/",
+                });
               }
               await supabase
                 .from("warteliste")
@@ -1768,7 +1911,7 @@ export default function App() {
               .from("stellen")
               .select("*, vereine(*), termine(*, bewerbungen(*))")
               .eq("id", selected.id)
-              .maybeSingle();
+              .single();
             if (data) setSelected(data);
           }}
           onFreiwilligerProfil={async (bew) => {
@@ -1859,16 +2002,15 @@ export default function App() {
                   termineData.map((t) => ({ ...t, stelle_id: stelle.id }))
                 );
             showToast("✓ Stelle veröffentlicht!");
-            supabase.functions
-              .invoke("send-push", {
-                body: {
-                  gemeinde_id: user.data.gemeinde_id,
-                  title: "Neue Ehrenamtsstelle! 🌱",
-                  body: `${user.data.name} sucht Freiwillige`,
-                  url: "/",
-                },
-              })
-              .catch(() => {});
+            await sendVolunteerPush({
+              gemeindeId: user.data.gemeinde_id,
+              notificationType: "neue_stellen",
+              vereinId: user.data.id,
+              kategorie: stelleData.kategorie,
+              title: "Neue Ehrenamtsstelle! 🌱",
+              body: `${user.data.name} sucht Freiwillige`,
+              url: "/",
+            });
             await loadStellen(gemeindeId);
             goBack();
           }}
@@ -1953,10 +2095,8 @@ export default function App() {
                         text: `Dein Termin für "${selected.titel}" wurde leider abgesagt.`,
                         typ: "termin_abgesagt",
                         gelesen: false,
-                      });
-                    if (error) {
-                      console.log("termin_abgesagt notification failed:", error);
-                    }
+                      })
+                      .catch(() => {});
                   }
                 await supabase
                   .from("bewerbungen")
@@ -1997,10 +2137,8 @@ export default function App() {
                           )} verschoben.`,
                           typ: "termin_geaendert",
                           gelesen: false,
-                        });
-                      if (error) {
-                        console.log("termin_geaendert notification failed:", error);
-                      }
+                        })
+                        .catch(() => {});
                     }
                 }
               }
