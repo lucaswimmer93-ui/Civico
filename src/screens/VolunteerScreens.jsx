@@ -2192,7 +2192,6 @@ function EinstellungenScreen({
     termin_erinnerung: true,
     neue_stellen: true,
     freie_plaetze: true,
-    vereins_news: true,
   });
   const [notifLoading, setNotifLoading] = useState(false);
 
@@ -2780,11 +2779,6 @@ function EinstellungenScreen({
                   key: "freie_plaetze",
                   label: "🎉 Freie Plätze",
                   sub: "Wenn Plätze auf der Warteliste frei werden",
-                },
-                {
-                  key: "vereins_news",
-                  label: "📣 Vereins-News",
-                  sub: "Updates von gefolgten Vereinen",
                 },
               ].map((item) => (
                 <div
