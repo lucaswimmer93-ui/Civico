@@ -264,7 +264,6 @@ export default function App() {
   };
 
   const logout = async () => {
-    if (user?.type === "freiwilliger") await unregisterPush(user.data.id);
     await supabase.auth.signOut();
     setUser(null);
     setHistory([]);
@@ -355,7 +354,7 @@ export default function App() {
           .from("plz_koordinaten")
           .select("lat, lng")
           .eq("plz", plz)
-          .single();
+          .maybeSingle();
         if (plzData) {
           const { data: ids } = await supabase.rpc("stellen_in_umkreis", {
             lat: plzData.lat,
@@ -394,11 +393,15 @@ export default function App() {
   };
 
   const reloadSelected = async (stelleId) => {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("stellen")
       .select("*, vereine(*), termine(*, bewerbungen(*))")
       .eq("id", stelleId)
-      .single();
+      .maybeSingle();
+    if (error) {
+      console.log("reloadSelected failed:", error);
+      return;
+    }
     if (data) setSelected(data);
   };
 
@@ -441,7 +444,7 @@ export default function App() {
           .from("freiwillige")
           .select("*")
           .eq("auth_id", session.user.id)
-          .single();
+          .maybeSingle();
         if (profil) {
           setUser({ type: "freiwilliger", data: profil });
           setGemeindeId(profil.gemeinde_id);
@@ -455,7 +458,7 @@ export default function App() {
           .from("vereine")
           .select("*")
           .eq("auth_id", session.user.id)
-          .single();
+          .maybeSingle();
         if (verein) {
           setUser({ type: "verein", data: verein });
           setGemeindeId(verein.gemeinde_id);
@@ -476,7 +479,7 @@ export default function App() {
           .from("gemeinden")
           .select("*")
           .eq("auth_id", session.user.id)
-          .single();
+          .maybeSingle();
         if (gemeinde) {
           setUser({ type: "gemeinde", data: gemeinde });
           setGemeindeId(gemeinde.id);
@@ -489,7 +492,7 @@ export default function App() {
           .from("admins")
           .select("*")
           .eq("auth_id", session.user.id)
-          .single();
+          .maybeSingle();
         if (admin) {
           setUser({ type: "admin", data: admin });
           loadStellen();
@@ -648,7 +651,6 @@ export default function App() {
                 typ: "anmeldung",
                 gelesen: false,
               });
-
             if (vereinNotifError) {
               console.log("verein_notifications anmeldung failed:", vereinNotifError);
             }
@@ -668,16 +670,20 @@ export default function App() {
                 typ: "termin_wechsel",
                 gelesen: false,
               });
-
             if (vereinNotifError) {
               console.log("verein_notifications termin_wechsel failed:", vereinNotifError);
             }
           }
         }
       }
-      await loadStellen(gemeindeId);
-      await reloadSelected(stelleId);
+      try {
+        await loadStellen(gemeindeId, user?.data?.plz, user?.data?.umkreis);
+        await reloadSelected(stelleId);
+      } catch (refreshErr) {
+        console.log("Post-book refresh failed:", refreshErr);
+      }
     } catch (err) {
+      console.log("Booking failed:", err);
       showToast("Fehler beim Buchen.", "#E85C5C");
     }
   };
@@ -716,7 +722,7 @@ export default function App() {
         (s.termine || []).some((t) => t.id === terminId)
       );
       if (abmeldeStelle) {
-        await supabase
+        const { error: vereinNotifError } = await supabase
           .from("verein_notifications")
           .insert({
             verein_id: abmeldeStelle.verein_id,
@@ -724,8 +730,10 @@ export default function App() {
             text: `${user.data.name} hat sich von "${abmeldeStelle.titel}" abgemeldet.`,
             typ: "abmeldung",
             gelesen: false,
-          })
-          .catch(() => {});
+          });
+        if (vereinNotifError) {
+          console.log("verein_notifications abmeldung failed:", vereinNotifError);
+        }
       }
       // Warteliste prüfen
       const { data: nextOnList } = await supabase
@@ -734,15 +742,15 @@ export default function App() {
         .eq("termin_id", terminId)
         .order("created_at", { ascending: true })
         .limit(1)
-        .single();
+        .maybeSingle();
       if (nextOnList) {
         // Automatisch nachbuchen
         const { data: erfolg } = await supabase.rpc("book_slot", {
           p_stelle_id: nextOnList.stelle_id,
           p_termin_id: terminId,
           p_freiwilliger_id: nextOnList.freiwilliger_id,
-          p_name: nextOnList.freiwilliger_name,
-          p_email: nextOnList.freiwilliger_email,
+          p_name: nextOnList.name || nextOnList.freiwilliger_name,
+          p_email: nextOnList.email || nextOnList.freiwilliger_email,
         });
         if (erfolg) {
           // Freiwilligen benachrichtigen
@@ -756,11 +764,27 @@ export default function App() {
             gelesen: false,
           });
           // Punkte vergeben
-          await supabase
+          const { data: nextFw, error: nextFwError } = await supabase
             .from("freiwillige")
-            .update({ punkte: supabase.rpc("increment", { x: 10 }) })
+            .select("punkte, aktionen")
             .eq("id", nextOnList.freiwilliger_id)
-            .catch(() => {});
+            .maybeSingle();
+
+          if (nextFwError) {
+            console.log("load next volunteer points failed:", nextFwError);
+          } else if (nextFw) {
+            const { error: updateNextFwError } = await supabase
+              .from("freiwillige")
+              .update({
+                punkte: (nextFw.punkte || 0) + 10,
+                aktionen: (nextFw.aktionen || 0) + 1,
+              })
+              .eq("id", nextOnList.freiwilliger_id);
+
+            if (updateNextFwError) {
+              console.log("update next volunteer points failed:", updateNextFwError);
+            }
+          }
           // Verein benachrichtigen
           if (selected) {
             await notifyVerein(
@@ -798,10 +822,15 @@ export default function App() {
           }
         }
       }
-      await loadStellen(gemeindeId, user?.data?.plz, user?.data?.umkreis);
-      if (selected?.id) await reloadSelected(selected.id);
+      try {
+        await loadStellen(gemeindeId, user?.data?.plz, user?.data?.umkreis);
+        if (selected?.id) await reloadSelected(selected.id);
+      } catch (refreshErr) {
+        console.log("Post-unsubscribe refresh failed:", refreshErr);
+      }
       goBack();
     } catch (err) {
+      console.log("Unsubscribe failed:", err);
       showToast("Fehler beim Abmelden.", "#E85C5C");
     }
   };
@@ -1686,8 +1715,8 @@ export default function App() {
                 p_stelle_id: nextOnList.stelle_id,
                 p_termin_id: terminId,
                 p_freiwilliger_id: nextOnList.freiwilliger_id,
-                p_name: nextOnList.freiwilliger_name,
-                p_email: nextOnList.freiwilliger_email,
+                p_name: nextOnList.name || nextOnList.freiwilliger_name,
+                p_email: nextOnList.email || nextOnList.freiwilliger_email,
               });
               if (erfolg) {
                 await supabase
@@ -1811,7 +1840,7 @@ export default function App() {
                   url: "/",
                 },
               })
-              .catch(() => {});
+              ;
             await loadStellen(gemeindeId);
             goBack();
           }}
@@ -1897,7 +1926,7 @@ export default function App() {
                         typ: "termin_abgesagt",
                         gelesen: false,
                       })
-                      .catch(() => {});
+                      ;
                   }
                 await supabase
                   .from("bewerbungen")
@@ -1939,7 +1968,7 @@ export default function App() {
                           typ: "termin_geaendert",
                           gelesen: false,
                         })
-                        .catch(() => {});
+                        ;
                     }
                 }
               }
