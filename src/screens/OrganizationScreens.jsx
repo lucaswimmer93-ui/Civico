@@ -585,7 +585,7 @@ function VereinStelleDetail({
                 </div>
               </div>
               <div style={{ fontSize: 12, color: "#3A7D44", marginBottom: 10 }}>
-                {t.freie_plaetze} Plätze frei
+                Noch {t.freie_plaetze} Helfer gesucht
               </div>
 
               {/* Termin-Aktionen für bevorstehende Termine */}

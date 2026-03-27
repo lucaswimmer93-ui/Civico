@@ -66,7 +66,7 @@ export default function GemeindeDashboard({
           ['dashboard','Übersicht'],
           ['stellen','Eigene Stellen'],
           ['erstellen','Stelle erstellen'],
-          ['organisationen','Organisationen'],
+          ['organisationen','Vereine verwalten'],
           ['postfach','Postfach'],
           ['csr','CSR-Report'],
         ].map(([key,label]) => (

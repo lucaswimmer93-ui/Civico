@@ -287,7 +287,7 @@ function DetailScreen({
                   >
                     {belegt
                       ? "Ausgebucht"
-                      : `${freiBis} Platz${freiBis !== 1 ? "e" : ""} frei`}
+                      : `Noch ${freiBis} Helfer gesucht`}
                   </div>
                 </div>
                 {meineBew ? (
@@ -368,7 +368,7 @@ function DetailScreen({
                       cursor: "pointer",
                     }}
                   >
-                    {user ? "Ich mache mit →" : "Anmelden zum Mitmachen →"}
+                    {user ? "Dabei sein & helfen →" : "Anmelden zum Mitmachen →"}
                   </button>
                 ) : !belegt && !isTerminNochNichtGestartet(t) ? (
                   <div
@@ -1805,7 +1805,7 @@ function FreiwilligerProfil({
                             ),
                           },
                         }));
-                        showToast(t.abgemeldetPunkte, "#E85C5C");
+                        showToast("Schade, dass du dieses Mal nicht dabei bist.", "#E85C5C");
                         await loadStellen(gemeindeId);
                       }
                     }}
@@ -2133,7 +2133,7 @@ function FreiwilligerProfil({
                   📅 {formatDate(t.datum)} · 🕐 {t.startzeit}
                   {t.endzeit ? ` – ${t.endzeit}` : ""} ·{" "}
                   <span style={{ color: "#3A7D44" }}>
-                    {t.freie_plaetze} Plätze frei
+                    Noch {t.freie_plaetze} Helfer gesucht
                   </span>
                 </button>
               ))}
@@ -2192,6 +2192,7 @@ function EinstellungenScreen({
     termin_erinnerung: true,
     neue_stellen: true,
     freie_plaetze: true,
+    vereins_news: true,
   });
   const [notifLoading, setNotifLoading] = useState(false);
 
@@ -2768,17 +2769,22 @@ function EinstellungenScreen({
                 {
                   key: "termin_erinnerung",
                   label: "⏰ Termin-Erinnerungen",
-                  sub: "24h vor deinem Einsatz",
+                  sub: "Morgen ist dein Einsatz 🙌",
                 },
                 {
                   key: "neue_stellen",
                   label: "🌱 Neue Stellen",
-                  sub: "In gefolgten Kategorien & Vereinen",
+                  sub: "In gefolgten Kategorien & Vereinen"
                 },
                 {
                   key: "freie_plaetze",
                   label: "🎉 Freie Plätze",
-                  sub: "Wenn Plätze auf der Warteliste frei werden",
+                  sub: "Nur wenn in gefolgten Vereinen oder Kategorien ein Platz frei wird"
+                },
+                {
+                  key: "vereins_news",
+                  label: "📣 Vereins-News",
+                  sub: "Updates von gefolgten Vereinen",
                 },
               ].map((item) => (
                 <div
