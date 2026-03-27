@@ -1,413 +1,3477 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { supabase } from './core/shared';
-import AdminDashboard from './screens/AdminDashboard';
+import React, { useState, useEffect } from 'react';
+import { supabase, T, KATEGORIEN, SKILLS, MEDAILLEN, getSkillLabel, getKat, getMedaille, getNextMedaille, getMedailleName, IMPRESSUM_TEXT, DATENSCHUTZ_TEXT, AGB_TEXT, formatDate, getGemeindeByPlz, isKlarname, isTerminNochNichtGestartet, isTerminAktuell } from '../core/shared';
+import { Header, StelleCard, VereineListe, BottomBar, DatenschutzBox, Input, BigButton, Chip, InfoChip, SectionLabel, RoleCard, EmptyState, ErrorMsg } from '../components/ui';
 
-const shell = {
-  bg: '#F3EEE4',
-  panel: '#FAF7F2',
-  border: '#E6D9C2',
-  text: '#2C2416',
-  muted: '#8B7355',
-  dark: '#1A1208',
-  dark2: '#2C2416',
-  ok: '#3A7D44',
-  warn: '#C47F17',
-  danger: '#B65353',
-  info: '#5B9BD5',
+const copyToClipboard = async (value) => {
+  try {
+    await navigator.clipboard.writeText(value);
+  } catch (e) {
+    console.log('copy failed', e);
+  }
 };
 
-function cardStyle(extra = {}) {
-  return {
-    background: shell.panel,
-    border: `1px solid ${shell.border}`,
-    borderRadius: 18,
-    padding: 18,
-    ...extra,
-  };
-}
+function DetailScreen({
+  stelle,
+  verein,
+  user,
+  onBack,
+  onHome,
+  onLogin,
+  onBuchen,
+  onAbmelden,
+  onTerminWechsel,
+  onBestaetigen,
+  onVereinProfil,
+  showToast,
+  follows,
+  onToggleFollowKat,
+  onWarteliste,
+}) {
+  const kat = getKat(stelle.kategorie);
+  const lang = "de";
+  const termine = (stelle.termine || []).filter((t) => isTerminAktuell(t));
 
-function buttonStyle(kind = 'primary') {
-  const styles = {
-    primary: {
-      background: `linear-gradient(135deg, ${shell.dark}, ${shell.dark2})`,
-      color: '#F4F0E8',
-      border: 'none',
-    },
-    secondary: {
-      background: 'transparent',
-      color: shell.muted,
-      border: `1px solid ${shell.border}`,
-    },
-    success: {
-      background: '#ECF7EE',
-      color: shell.ok,
-      border: '1px solid #B8D8BE',
-    },
-    danger: {
-      background: '#FFF0F0',
-      color: shell.danger,
-      border: '1px solid #E5BBBB',
-    },
-  };
-  return {
-    padding: '11px 14px',
-    borderRadius: 12,
-    cursor: 'pointer',
-    fontFamily: 'inherit',
-    fontWeight: 700,
-    fontSize: 13,
-    ...styles[kind],
-  };
-}
-
-function Field({ label, value, onChange, type = 'text', placeholder = '' }) {
   return (
-    <label style={{ display: 'block' }}>
-      <div style={{ fontSize: 12, color: shell.muted, marginBottom: 6 }}>{label}</div>
-      <input
-        type={type}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
+    <div>
+      <div
         style={{
-          width: '100%',
-          boxSizing: 'border-box',
-          background: '#fff',
-          border: `1px solid ${shell.border}`,
-          borderRadius: 12,
-          padding: '12px 14px',
-          fontFamily: 'inherit',
-          fontSize: 14,
-          color: shell.text,
+          background: "linear-gradient(160deg, #1A1208, #2C2416)",
+          padding: "20px 20px 28px",
+          color: "#F4F0E8",
         }}
-      />
-    </label>
-  );
-}
-
-function Message({ tone = 'info', children }) {
-  const toneMap = {
-    info: { bg: '#EEF5FB', border: '#C8DDF1', color: '#30516D' },
-    ok: { bg: '#ECF7EE', border: '#B8D8BE', color: '#2F6638' },
-    warn: { bg: '#FFF7E9', border: '#F0D7A2', color: '#8B6800' },
-    danger: { bg: '#FFF0F0', border: '#E5BBBB', color: '#8C3E3E' },
-  };
-  const c = toneMap[tone] || toneMap.info;
-  return (
-    <div style={{ background: c.bg, border: `1px solid ${c.border}`, color: c.color, borderRadius: 14, padding: '12px 14px', fontSize: 13 }}>
-      {children}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            marginBottom: 16,
+          }}
+        >
+          <button
+            onClick={onBack}
+            style={{
+              background: "none",
+              border: "none",
+              color: "#8B7355",
+              fontSize: 13,
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            ← Zurück
+          </button>
+          <button
+            onClick={onHome}
+            style={{
+              background: "none",
+              border: "none",
+              color: "#8B7355",
+              fontSize: 13,
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            🏠 Home
+          </button>
+        </div>
+        <div style={{ fontSize: 36, marginBottom: 8 }}>{kat?.icon}</div>
+        <div style={{ fontSize: 22, fontWeight: "bold", lineHeight: 1.3 }}>
+          {stelle.titel}
+        </div>
+        <div
+          onClick={() => onVereinProfil && onVereinProfil(verein)}
+          style={{
+            color: "#8B7355",
+            fontSize: 14,
+            marginTop: 4,
+            cursor: "pointer",
+            textDecoration: "underline",
+          }}
+        >
+          {verein?.name} →
+        </div>
+        <div style={{ fontSize: 12, color: "#6B5840", marginTop: 4 }}>
+          👁️ {stelle.aufrufe || 0} Aufrufe
+        </div>
+        {user?.type === "freiwilliger" && (
+          <button
+            onClick={() =>
+              onToggleFollowKat && onToggleFollowKat(stelle.kategorie)
+            }
+            style={{
+              marginTop: 8,
+              padding: "5px 14px",
+              borderRadius: 20,
+              border: "1px solid #8B7355",
+              background: "transparent",
+              color: "#C8A96E",
+              fontSize: 11,
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            {follows?.kategorien?.includes(stelle.kategorie)
+              ? "✓ Kategorie gefolgt"
+              : `+ ${kat?.label} folgen`}
+          </button>
+        )}
+      </div>
+      <div style={{ padding: "20px 20px 100px", background: "#F4F0E8" }}>
+        <div
+          style={{
+            background: "#FAF7F2",
+            borderRadius: 14,
+            padding: "16px",
+            marginBottom: 16,
+            border: "1px solid #E0D8C8",
+          }}
+        >
+          <div style={{ fontSize: 14, color: "#5C4A2A", lineHeight: 1.7 }}>
+            {stelle.beschreibung}
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 10, marginBottom: 16 }}>
+          <InfoChip icon="📍" label={stelle.ort} />
+          {stelle.typ === "dauerhaft" && stelle.aufwand && (
+            <InfoChip icon="⏱" label={stelle.aufwand} />
+          )}
+          <InfoChip
+            icon={stelle.typ === "dauerhaft" ? "🔄" : "📅"}
+            label={stelle.typ === "dauerhaft" ? "Dauerhaft" : "Event"}
+            color={kat?.color}
+          />
+        </div>
+        {stelle.standort && (
+          <div
+            style={{
+              background: "#FAF7F2",
+              borderRadius: 12,
+              padding: "12px 14px",
+              marginBottom: 16,
+              border: "1px solid #E0D8C8",
+              display: "flex",
+              gap: 10,
+            }}
+          >
+            <span>📌</span>
+            <div>
+              <div style={{ fontSize: 11, color: "#8B7355" }}>TREFFPUNKT</div>
+              <div
+                style={{ fontSize: 14, color: "#2C2416", fontWeight: "bold" }}
+              >
+                {stelle.standort}
+              </div>
+            </div>
+          </div>
+        )}
+        {stelle.ansprechpartner && (
+          <div
+            style={{
+              background: "#FAF7F2",
+              borderRadius: 12,
+              padding: "12px 14px",
+              marginBottom: 16,
+              border: "1px solid #E0D8C8",
+              display: "flex",
+              gap: 10,
+            }}
+          >
+            <span>👤</span>
+            <div>
+              <div style={{ fontSize: 11, color: "#8B7355", marginBottom: 4 }}>
+                ANSPRECHPARTNER
+              </div>
+              <div
+                style={{ fontSize: 14, color: "#2C2416", fontWeight: "bold" }}
+              >
+                {stelle.ansprechpartner}
+              </div>
+              {stelle.kontakt_email && (
+                <a
+                  href={`mailto:${stelle.kontakt_email}`}
+                  style={{
+                    fontSize: 13,
+                    color: "#3A7D44",
+                    textDecoration: "none",
+                    display: "block",
+                    marginTop: 3,
+                  }}
+                >
+                  ✉️ {stelle.kontakt_email}
+                </a>
+              )}
+            </div>
+          </div>
+        )}
+        {stelle.required_skills?.length > 0 && (
+          <div
+            style={{
+              background: "#FAF7F2",
+              borderRadius: 12,
+              padding: "12px 14px",
+              marginBottom: 16,
+              border: "1px solid #E0D8C8",
+            }}
+          >
+            <div style={{ fontSize: 11, color: "#8B7355", marginBottom: 8 }}>
+              ERFORDERLICHE KENNTNISSE
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {stelle.required_skills.map((sid) => {
+                const skill = SKILLS.find((s) => s.id === sid);
+                return skill ? (
+                  <span
+                    key={sid}
+                    style={{
+                      background: "#EDE8DE",
+                      padding: "5px 12px",
+                      borderRadius: 20,
+                      fontSize: 12,
+                      color: "#5C4A2A",
+                    }}
+                  >
+                    {skill.icon} {getSkillLabel(skill, lang)}
+                  </span>
+                ) : null;
+              })}
+            </div>
+          </div>
+        )}
+        <SectionLabel>Verfügbare Termine</SectionLabel>
+        {termine.length === 0 ? (
+          <div style={{ fontSize: 13, color: "#8B7355", marginBottom: 16 }}>
+            Keine Termine verfügbar.
+          </div>
+        ) : (
+          termine.map((t) => {
+            const meineBew = user
+              ? (t.bewerbungen || []).find(
+                  (b) => b.freiwilliger_id === user?.data?.id
+                )
+              : null;
+            const freiBis = t.freie_plaetze || 0;
+            const belegt = freiBis <= 0;
+            return (
+              <div
+                key={t.id}
+                style={{
+                  background: "#FAF7F2",
+                  borderRadius: 12,
+                  padding: "14px",
+                  marginBottom: 10,
+                  border: `1px solid ${meineBew ? "#3A7D4444" : "#E0D8C8"}`,
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "flex-start",
+                    marginBottom: 8,
+                  }}
+                >
+                  <div>
+                    <div
+                      style={{
+                        fontSize: 14,
+                        fontWeight: "bold",
+                        color: "#2C2416",
+                      }}
+                    >
+                      📅 {formatDate(t.datum)}
+                    </div>
+                    <div
+                      style={{ fontSize: 12, color: "#8B7355", marginTop: 2 }}
+                    >
+                      🕐 {t.startzeit}
+                      {t.endzeit ? ` – ${t.endzeit}` : ""}
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 12,
+                      color: belegt ? "#E85C5C" : "#3A7D44",
+                      fontWeight: "bold",
+                    }}
+                  >
+                    {belegt
+                      ? "Ausgebucht"
+                      : `Noch ${freiBis} Helfer gesucht`}
+                  </div>
+                </div>
+                {meineBew ? (
+                  <div
+                    style={{ display: "flex", flexDirection: "column", gap: 8 }}
+                  >
+                    <div
+                      style={{
+                        padding: "8px",
+                        background: "#3A7D4418",
+                        borderRadius: 8,
+                        fontSize: 12,
+                        color: "#3A7D44",
+                        fontWeight: "bold",
+                        textAlign: "center",
+                      }}
+                    >
+                      ✓ Du bist für diesen Termin angemeldet
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      {termine.filter(
+                        (x) => x.id !== t.id && (x.freie_plaetze || 0) > 0
+                      ).length > 0 && (
+                        <button
+                          onClick={() => onTerminWechsel(meineBew.id, t.id)}
+                          style={{
+                            flex: 1,
+                            padding: "8px",
+                            borderRadius: 8,
+                            border: "1px solid #2C2416",
+                            background: "transparent",
+                            color: "#2C2416",
+                            fontSize: 12,
+                            cursor: "pointer",
+                            fontFamily: "inherit",
+                          }}
+                        >
+                          📅 Termin ändern
+                        </button>
+                      )}
+                      <button
+                        onClick={() => onAbmelden(meineBew.id, t.id)}
+                        style={{
+                          flex: 1,
+                          padding: "8px",
+                          borderRadius: 8,
+                          border: "1px solid #E85C5C",
+                          background: "transparent",
+                          color: "#E85C5C",
+                          fontSize: 12,
+                          cursor: "pointer",
+                          fontFamily: "inherit",
+                        }}
+                      >
+                        Abmelden
+                      </button>
+                    </div>
+                  </div>
+                ) : !belegt && isTerminNochNichtGestartet(t) ? (
+                  <button
+                    onClick={() => {
+                      if (!user) {
+                        onLogin();
+                        return;
+                      }
+                      onBuchen(stelle.id, t.id, true);
+                    }}
+                    style={{
+                      width: "100%",
+                      padding: "10px",
+                      borderRadius: 10,
+                      border: "none",
+                      background: "#3A7D44",
+                      color: "#fff",
+                      fontSize: 13,
+                      fontFamily: "inherit",
+                      fontWeight: "bold",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {user ? "Dabei sein & helfen →" : "Registrieren & helfen →"}
+                  </button>
+                ) : !belegt && !isTerminNochNichtGestartet(t) ? (
+                  <div
+                    style={{
+                      width: "100%",
+                      padding: "10px",
+                      borderRadius: 10,
+                      background: "#F0EBE0",
+                      color: "#8B7355",
+                      fontSize: 13,
+                      fontFamily: "inherit",
+                      textAlign: "center",
+                    }}
+                  >
+                    ⏳ Termin läuft gerade – Anmeldung nicht mehr möglich
+                  </div>
+                ) : user ? (
+                  <button
+                    onClick={() =>
+                      onWarteliste && onWarteliste(stelle.id, t.id)
+                    }
+                    style={{
+                      width: "100%",
+                      padding: "10px",
+                      borderRadius: 10,
+                      border: "1px solid #E8A87C",
+                      background: "transparent",
+                      color: "#E8A87C",
+                      fontSize: 13,
+                      fontFamily: "inherit",
+                      fontWeight: "bold",
+                      cursor: "pointer",
+                    }}
+                  >
+                    📋 Auf die Warteliste
+                  </button>
+                ) : null}
+              </div>
+            );
+          })
+        )}
+      </div>
     </div>
   );
 }
 
-function safeSingle(table, builder) {
-  let query = supabase.from(table).select('*');
-  if (builder) query = builder(query);
-  return query.single();
-}
-
-function safeSelect(table, select = '*', builder) {
-  let query = supabase.from(table).select(select);
-  if (builder) query = builder(query);
-  return query;
-}
-
-function AdminLogin({ onLoggedIn }) {
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-
-  const handleLogin = async (e) => {
-    e.preventDefault();
-    setError('');
-    if (!email || !password) {
-      setError('Bitte E-Mail und Passwort eingeben.');
-      return;
-    }
-    setLoading(true);
-    const { data, error: authError } = await supabase.auth.signInWithPassword({ email, password });
-    if (authError || !data?.user) {
-      setLoading(false);
-      setError('Login fehlgeschlagen. Bitte prüfe E-Mail und Passwort.');
-      return;
-    }
-
-    const userId = data.user.id;
-    const userEmail = data.user.email || email;
-
-    const { data: adminByAuth } = await safeSingle('admins', (q) => q.eq('auth_id', userId));
-    const admin = adminByAuth || (await safeSingle('admins', (q) => q.eq('email', userEmail)).then((r) => r.data).catch(() => null));
-
-    if (!admin) {
-      await supabase.auth.signOut();
-      setLoading(false);
-      setError('Dieser Account ist nicht als Admin freigeschaltet.');
-      return;
-    }
-
-    onLoggedIn({ ...admin, email: admin.email || userEmail, auth_id: admin.auth_id || userId });
-    setLoading(false);
-  };
+function VereinProfilPublic({
+  verein,
+  stellen,
+  onBack,
+  onHome,
+  onStelleClick,
+  user,
+  onLogin,
+  logout,
+  follows,
+  onToggleFollow,
+  isEigen = false,
+  onBearbeiten,
+  followers = [],
+}) {
+  const vereinStellen = stellen.filter(
+    (s) => s.verein_id === verein.id && !s.archiviert
+  );
+  const istGefolgt = follows?.vereine?.includes(verein.id);
 
   return (
-    <div style={{ minHeight: '100vh', background: shell.bg, color: shell.text }}>
-      <div style={{ maxWidth: 440, margin: '0 auto', padding: '56px 16px 24px' }}>
-        <div style={{ textAlign: 'center', marginBottom: 22 }}>
-          <div style={{ fontSize: 12, color: shell.muted, letterSpacing: 2, textTransform: 'uppercase', marginBottom: 10 }}>Civico Backoffice</div>
-          <div style={{ fontSize: 32, fontWeight: 800, marginBottom: 8 }}>Admin-Anwendung</div>
-          <div style={{ fontSize: 14, color: shell.muted, lineHeight: 1.6 }}>
-            Separater Zugang für dich. Vereine, Gemeinden und Freiwillige bleiben in der normalen App.
+    <div>
+      {/* Header */}
+      <div
+        style={{
+          background: "linear-gradient(160deg,#1A1208,#2C2416)",
+          padding: "20px 20px 16px",
+          color: "#F4F0E8",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <button
+            onClick={onBack}
+            style={{
+              background: "none",
+              border: "none",
+              color: "#8B7355",
+              fontSize: 18,
+              cursor: "pointer",
+            }}
+          >
+            ←
+          </button>
+          <div style={{ fontSize: 18, fontWeight: "bold" }}>Vereinsprofil</div>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            onClick={onHome}
+            style={{
+              background: "none",
+              border: "none",
+              color: "#8B7355",
+              fontSize: 13,
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            🏠
+          </button>
+          {user ? (
+            <button
+              onClick={logout}
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "#8B7355",
+                fontSize: 12,
+                cursor: "pointer",
+                fontFamily: "inherit",
+              }}
+            >
+              Abmelden
+            </button>
+          ) : (
+            onLogin && (
+              <button
+                onClick={onLogin}
+                style={{
+                  background: "#3A7D44",
+                  border: "none",
+                  color: "#fff",
+                  fontSize: 12,
+                  padding: "6px 14px",
+                  borderRadius: 16,
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                }}
+              >
+                Anmelden
+              </button>
+            )
+          )}
+        </div>
+      </div>
+
+      <div style={{ padding: "20px 20px 100px" }}>
+        {/* Profil-Karte – wie Freiwilligen-Profil */}
+        <div
+          style={{
+            background: "linear-gradient(135deg,#2C2416,#4A3C28)",
+            borderRadius: 16,
+            padding: "24px 20px",
+            marginBottom: 16,
+            textAlign: "center",
+            color: "#F4F0E8",
+          }}
+        >
+          <div
+            style={{
+              position: "relative",
+              display: "inline-block",
+              marginBottom: 4,
+            }}
+          >
+            {verein.logo_url ? (
+              <img
+                src={verein.logo_url}
+                alt="Logo"
+                style={{
+                  width: 80,
+                  height: 80,
+                  borderRadius: "50%",
+                  objectFit: "cover",
+                  border: "3px solid #C8A96E",
+                }}
+              />
+            ) : (
+              <div
+                style={{
+                  width: 80,
+                  height: 80,
+                  borderRadius: "50%",
+                  background: "rgba(255,255,255,0.15)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 44,
+                  margin: "0 auto",
+                }}
+              >
+                {verein.logo || "🏢"}
+              </div>
+            )}
           </div>
+          <div style={{ fontSize: 20, fontWeight: "bold", marginTop: 8 }}>
+            {verein.name}
+          </div>
+          <div style={{ fontSize: 13, color: "#8B7355", marginTop: 4 }}>
+            📍 {verein.ort}
+          </div>
+          {/* Stats */}
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "center",
+              gap: 24,
+              marginTop: 16,
+            }}
+          >
+            <div style={{ textAlign: "center" }}>
+              <div
+                style={{ fontSize: 24, fontWeight: "bold", color: "#E8A87C" }}
+              >
+                {verein.mitglieder || 0}
+              </div>
+              <div style={{ fontSize: 11, color: "#8B7355" }}>Mitglieder</div>
+            </div>
+            <div style={{ textAlign: "center" }}>
+              <div
+                style={{ fontSize: 24, fontWeight: "bold", color: "#B07EC4" }}
+              >
+                {vereinStellen.length}
+              </div>
+              <div style={{ fontSize: 11, color: "#8B7355" }}>Aktionen</div>
+            </div>
+            {verein.gegruendet > 0 && (
+              <div style={{ textAlign: "center" }}>
+                <div
+                  style={{ fontSize: 24, fontWeight: "bold", color: "#6BAF7A" }}
+                >
+                  {verein.gegruendet}
+                </div>
+                <div style={{ fontSize: 11, color: "#8B7355" }}>Gegründet</div>
+              </div>
+            )}
+            {isEigen && followers.length > 0 && (
+              <div style={{ textAlign: "center" }}>
+                <div
+                  style={{ fontSize: 24, fontWeight: "bold", color: "#C8A96E" }}
+                >
+                  {followers.length}
+                </div>
+                <div style={{ fontSize: 11, color: "#8B7355" }}>Follower</div>
+              </div>
+            )}
+          </div>
+          {/* Button */}
+          {isEigen ? (
+            <button
+              onClick={onBearbeiten}
+              style={{
+                marginTop: 14,
+                padding: "8px 22px",
+                borderRadius: 20,
+                border: "1px solid #C8A96E",
+                background: "transparent",
+                color: "#C8A96E",
+                fontSize: 13,
+                cursor: "pointer",
+                fontFamily: "inherit",
+                fontWeight: "bold",
+              }}
+            >
+              ✏️ Profil bearbeiten
+            </button>
+          ) : (
+            user?.type === "freiwilliger" && (
+              <button
+                onClick={() => onToggleFollow && onToggleFollow(verein.id)}
+                style={{
+                  marginTop: 14,
+                  padding: "8px 22px",
+                  borderRadius: 20,
+                  border: "none",
+                  background: istGefolgt ? "#C8A96E" : "rgba(255,255,255,0.2)",
+                  color: "#F4F0E8",
+                  fontSize: 13,
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                  fontWeight: "bold",
+                }}
+              >
+                {istGefolgt ? "✓ Gefolgt" : "+ Folgen"}
+              </button>
+            )
+          )}
         </div>
 
-        <form onSubmit={handleLogin} style={cardStyle()}>
-          <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 16 }}>Anmelden</div>
-          <div style={{ display: 'grid', gap: 14 }}>
-            <Field label="Admin-E-Mail" value={email} onChange={setEmail} type="email" placeholder="admin@mycivico.de" />
-            <Field label="Passwort" value={password} onChange={setPassword} type="password" placeholder="••••••••" />
-            {error ? <Message tone="danger">{error}</Message> : null}
-            <button type="submit" disabled={loading} style={{ ...buttonStyle('primary'), width: '100%', opacity: loading ? 0.75 : 1 }}>
-              {loading ? 'Anmeldung läuft …' : 'Admin-Login'}
-            </button>
+        {/* Follower (nur eigenes Profil) */}
+        {isEigen && followers.length > 0 && (
+          <div
+            style={{
+              background: "#FAF7F2",
+              borderRadius: 14,
+              padding: "16px",
+              marginBottom: 14,
+              border: "1px solid #E0D8C8",
+            }}
+          >
+            <div
+              style={{
+                fontSize: 11,
+                color: "#8B7355",
+                letterSpacing: 2,
+                textTransform: "uppercase",
+                marginBottom: 10,
+              }}
+            >
+              👥 FOLGEN DIR
+            </div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {followers.slice(0, 6).map((f, i) => (
+                <div
+                  key={i}
+                  style={{
+                    background: "#EDE8DE",
+                    borderRadius: 20,
+                    padding: "5px 12px",
+                    fontSize: 12,
+                    color: "#5C4A2A",
+                  }}
+                >
+                  👤 {f.freiwillige?.name || "Freiwilliger"}
+                </div>
+              ))}
+              {followers.length > 6 && (
+                <div
+                  style={{ fontSize: 12, color: "#8B7355", padding: "5px 6px" }}
+                >
+                  +{followers.length - 6} weitere
+                </div>
+              )}
+            </div>
           </div>
-        </form>
+        )}
 
-        <div style={{ marginTop: 16 }}>
-          <Message tone="warn">
-            Öffentliche Registrierung gibt es hier bewusst nicht. Ein Admin-Account muss im Backend in der Tabelle <b>admins</b> freigeschaltet sein.
-          </Message>
+        {/* Über uns – immer anzeigen */}
+        <div
+          style={{
+            background: "#FAF7F2",
+            borderRadius: 14,
+            padding: "16px",
+            marginBottom: 14,
+            border: "1px solid #E0D8C8",
+          }}
+        >
+          <div
+            style={{
+              fontSize: 11,
+              color: "#8B7355",
+              letterSpacing: 2,
+              textTransform: "uppercase",
+              marginBottom: 8,
+            }}
+          >
+            ÜBER UNS
+          </div>
+          {verein.beschreibung ? (
+            <div style={{ fontSize: 14, color: "#2C2416", lineHeight: 1.7 }}>
+              {verein.beschreibung}
+            </div>
+          ) : (
+            <div
+              style={{ fontSize: 13, color: "#C4B89A", fontStyle: "italic" }}
+            >
+              {isEigen
+                ? "Noch keine Beschreibung. Klick auf ✏️ Profil bearbeiten um eine hinzuzufügen."
+                : "Dieser Verein hat noch keine Beschreibung hinterlegt."}
+            </div>
+          )}
+        </div>
+
+        {/* Kontakt & Infos */}
+        {(verein.strasse ||
+          verein.kontakt_email ||
+          verein.telefon ||
+          verein.website) && (
+          <div
+            style={{
+              background: "#FAF7F2",
+              borderRadius: 14,
+              padding: "16px",
+              marginBottom: 14,
+              border: "1px solid #E0D8C8",
+            }}
+          >
+            <div
+              style={{
+                fontSize: 11,
+                color: "#8B7355",
+                letterSpacing: 2,
+                textTransform: "uppercase",
+                marginBottom: 10,
+              }}
+            >
+              KONTAKT & INFOS
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {verein.strasse && (
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    alignItems: "center",
+                    fontSize: 14,
+                    color: "#2C2416",
+                  }}
+                >
+                  <span>📍</span>
+                  <span>
+                    {verein.strasse}, {verein.plz} {verein.ort}
+                  </span>
+                </div>
+              )}
+              {verein.kontakt_email && (
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    fontSize: 14,
+                    color: "#2C2416",
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+                    <span>📧</span>
+                    <span>{verein.kontakt_email}</span>
+                  </div>
+                  <button
+                    onClick={() => copyToClipboard(verein.kontakt_email)}
+                    style={{
+                      border: "1px solid #D8CBB6",
+                      background: "transparent",
+                      borderRadius: 16,
+                      padding: "4px 10px",
+                      color: "#8B7355",
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                      fontSize: 12,
+                    }}
+                  >
+                    Kopieren
+                  </button>
+                </div>
+              )}
+              {verein.telefon && (
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    alignItems: "center",
+                    fontSize: 14,
+                    color: "#2C2416",
+                  }}
+                >
+                  <span>📞</span>
+                  <a
+                    href={`tel:${verein.telefon}`}
+                    style={{ color: "#3A7D44", textDecoration: "none" }}
+                  >
+                    {verein.telefon}
+                  </a>
+                </div>
+              )}
+              {verein.website && (
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    alignItems: "center",
+                    fontSize: 14,
+                    color: "#2C2416",
+                  }}
+                >
+                  <span>🌐</span>
+                  <a
+                    href={
+                      verein.website.startsWith("http")
+                        ? verein.website
+                        : "https://" + verein.website
+                    }
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{ color: "#3A7D44", textDecoration: "none" }}
+                  >
+                    {verein.website}
+                  </a>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Kontakt */}
+        {(verein.regStrasse || verein.kontakt_email) && (
+          <div
+            style={{
+              background: "#FAF7F2",
+              borderRadius: 14,
+              padding: "16px",
+              marginBottom: 14,
+              border: "1px solid #E0D8C8",
+            }}
+          >
+            <div
+              style={{
+                fontSize: 11,
+                color: "#8B7355",
+                letterSpacing: 2,
+                textTransform: "uppercase",
+                marginBottom: 10,
+              }}
+            >
+              KONTAKT & ADRESSE
+            </div>
+            {verein.regStrasse && (
+              <div
+                style={{
+                  display: "flex",
+                  gap: 10,
+                  alignItems: "center",
+                  marginBottom: 8,
+                }}
+              >
+                <span style={{ fontSize: 18 }}>📍</span>
+                <div style={{ fontSize: 14, color: "#2C2416" }}>
+                  {verein.strasse}, {verein.plz} {verein.ort}
+                </div>
+              </div>
+            )}
+            {verein.kontakt_email && (
+              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <span style={{ fontSize: 18 }}>✉️</span>
+                <a
+                  href={`mailto:${verein.kontakt_email}`}
+                  style={{
+                    fontSize: 14,
+                    color: "#3A7D44",
+                    textDecoration: "none",
+                  }}
+                >
+                  {verein.kontakt_email}
+                </a>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Kategorien des Vereins */}
+        {(() => {
+          const kats = [
+            ...new Set(vereinStellen.map((s) => s.kategorie).filter(Boolean)),
+          ];
+          if (kats.length === 0) return null;
+          return (
+            <div
+              style={{
+                background: "#FAF7F2",
+                borderRadius: 14,
+                padding: "16px",
+                marginBottom: 14,
+                border: "1px solid #E0D8C8",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 11,
+                  color: "#8B7355",
+                  letterSpacing: 2,
+                  textTransform: "uppercase",
+                  marginBottom: 10,
+                }}
+              >
+                TÄTIGKEITSBEREICHE
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {kats.map((kid) => {
+                  const kat = KATEGORIEN.find((k) => k.id === kid);
+                  return kat ? (
+                    <span
+                      key={kid}
+                      style={{
+                        padding: "6px 14px",
+                        borderRadius: 20,
+                        background: kat.color + "22",
+                        color: kat.color,
+                        fontSize: 12,
+                        fontWeight: "bold",
+                      }}
+                    >
+                      {kat.icon} {kat.label}
+                    </span>
+                  ) : null;
+                })}
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* Kontakt */}
+        {(verein.kontakt_email ||
+          verein.regStrasse ||
+          verein.regTelefon ||
+          verein.regWebsite) && (
+          <div
+            style={{
+              background: "#FAF7F2",
+              borderRadius: 14,
+              padding: "16px",
+              marginBottom: 14,
+              border: "1px solid #E0D8C8",
+            }}
+          >
+            <div
+              style={{
+                fontSize: 11,
+                color: "#8B7355",
+                letterSpacing: 2,
+                textTransform: "uppercase",
+                marginBottom: 10,
+              }}
+            >
+              📬 KONTAKT & ADRESSE
+            </div>
+            {verein.regStrasse && (
+              <div
+                style={{
+                  fontSize: 13,
+                  color: "#2C2416",
+                  marginBottom: 6,
+                  display: "flex",
+                  gap: 8,
+                }}
+              >
+                <span>📍</span> {verein.strasse}, {verein.plz} {verein.ort}
+              </div>
+            )}
+            {verein.kontakt_email && (
+              <div
+                style={{
+                  fontSize: 13,
+                  color: "#2C2416",
+                  marginBottom: 6,
+                  display: "flex",
+                  gap: 8,
+                }}
+              >
+                <span>✉️</span>
+                <a
+                  href={`mailto:${verein.kontakt_email}`}
+                  style={{ color: "#3A7D44", textDecoration: "none" }}
+                >
+                  {verein.kontakt_email}
+                </a>
+              </div>
+            )}
+            {verein.regTelefon && (
+              <div
+                style={{
+                  fontSize: 13,
+                  color: "#2C2416",
+                  marginBottom: 6,
+                  display: "flex",
+                  gap: 8,
+                }}
+              >
+                <span>📞</span>
+                <a
+                  href={`tel:${verein.telefon}`}
+                  style={{ color: "#3A7D44", textDecoration: "none" }}
+                >
+                  {verein.telefon}
+                </a>
+              </div>
+            )}
+            {verein.regWebsite && (
+              <div
+                style={{
+                  fontSize: 13,
+                  color: "#2C2416",
+                  display: "flex",
+                  gap: 8,
+                }}
+              >
+                <span>🌐</span>
+                <a
+                  href={
+                    verein.website.startsWith("http")
+                      ? verein.regWebsite
+                      : "https://" + verein.website
+                  }
+                  target="_blank"
+                  rel="noopener"
+                  style={{ color: "#3A7D44", textDecoration: "none" }}
+                >
+                  {verein.website}
+                </a>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Aktuelle Aktionen */}
+        <div
+          style={{
+            background: "#FAF7F2",
+            borderRadius: 14,
+            padding: "16px",
+            marginBottom: 14,
+            border: "1px solid #E0D8C8",
+          }}
+        >
+          <div
+            style={{
+              fontSize: 11,
+              color: "#8B7355",
+              letterSpacing: 2,
+              textTransform: "uppercase",
+              marginBottom: 10,
+            }}
+          >
+            AKTUELLE AKTIONEN ({vereinStellen.length})
+          </div>
+          {vereinStellen.length === 0 ? (
+            <div
+              style={{ fontSize: 13, color: "#C4B89A", fontStyle: "italic" }}
+            >
+              Derzeit keine offenen Ehrenamtsstellen.
+            </div>
+          ) : (
+            vereinStellen.map((s) => (
+              <StelleCard
+                key={s.id}
+                stelle={s}
+                verein={verein}
+                onClick={() => onStelleClick && onStelleClick(s)}
+              />
+            ))
+          )}
         </div>
       </div>
     </div>
   );
 }
 
-export default function AdminApp() {
-  const [sessionChecked, setSessionChecked] = useState(false);
-  const [admin, setAdmin] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [toast, setToast] = useState(null);
-
-  const [gemeinden, setGemeinden] = useState([]);
-  const [vereine, setVereine] = useState([]);
-  const [freiwillige, setFreiwillige] = useState([]);
-  const [stellen, setStellen] = useState([]);
-  const [einladungen, setEinladungen] = useState([]);
-
-  const [inviteOpen, setInviteOpen] = useState(false);
-  const [inviteName, setInviteName] = useState('');
-  const [inviteEmail, setInviteEmail] = useState('');
-  const [invitePlz, setInvitePlz] = useState('');
-  const [inviteOrt, setInviteOrt] = useState('');
-  const [inviteMessage, setInviteMessage] = useState('');
-  const [inviteLoading, setInviteLoading] = useState(false);
+function FreiwilligerProfil({
+  user,
+  setUser,
+  stellen,
+  onBack,
+  onHome,
+  onDelete,
+  logout,
+  showToast,
+  loadStellen,
+  gemeindeId,
+  onEinstellungen,
+  t = T["de"],
+  lang = "de",
+  follows = { vereine: [], kategorien: [] },
+  onToggleFollow,
+  onVereinClick,
+}) {
+  const [terminWechselStelle, setTerminWechselStelle] = useState(null);
+  const [meineWarteliste, setMeineWarteliste] = useState([]);
+  const jetzt = new Date();
 
   useEffect(() => {
-    let active = true;
-    supabase.auth.getSession().then(async ({ data }) => {
-      const session = data?.session;
-      if (!active) return;
-      if (!session?.user) {
-        setSessionChecked(true);
-        return;
-      }
-      const userId = session.user.id;
-      const userEmail = session.user.email;
-      const { data: adminByAuth } = await safeSingle('admins', (q) => q.eq('auth_id', userId));
-      const adminRow = adminByAuth || (await safeSingle('admins', (q) => q.eq('email', userEmail)).then((r) => r.data).catch(() => null));
-      if (adminRow) setAdmin({ ...adminRow, email: adminRow.email || userEmail, auth_id: adminRow.auth_id || userId });
-      else await supabase.auth.signOut();
-      setSessionChecked(true);
-    });
-    return () => {
-      active = false;
-    };
+    supabase
+      .from("warteliste")
+      .select(
+        "*, stellen(titel, kategorie, ort), termine(datum, startzeit, endzeit)"
+      )
+      .eq("freiwilliger_id", user.data.id)
+      .order("created_at", { ascending: true })
+      .then(({ data }) => {
+        if (data) setMeineWarteliste(data);
+      });
   }, []);
 
-  useEffect(() => {
-    if (!toast) return;
-    const timer = setTimeout(() => setToast(null), 3200);
-    return () => clearTimeout(timer);
-  }, [toast]);
+  const meineStellen = stellen.filter((s) =>
+    (s.termine || []).some((t) =>
+      (t.bewerbungen || []).some((b) => b.freiwilliger_id === user.data.id)
+    )
+  );
 
-  const loadData = async () => {
-    setLoading(true);
-    const [gemeindenRes, vereineRes, freiwilligeRes, stellenRes, einladungenRes] = await Promise.all([
-      safeSelect('gemeinden', '*', (q) => q.order('created_at', { ascending: false })),
-      safeSelect('vereine', '*', (q) => q.order('created_at', { ascending: false })),
-      safeSelect('freiwillige', '*', (q) => q.order('created_at', { ascending: false })),
-      safeSelect('stellen', '*, vereine(id, name, gemeinde_id), termine(id, datum, startzeit, endzeit, freie_plaetze, gesamt_plaetze, bewerbungen(id, freiwilliger_id, bestaetigt, nicht_erschienen))', (q) => q.order('created_at', { ascending: false })),
-      safeSelect('verein_einladungen', '*', (q) => q.order('created_at', { ascending: false })),
-    ]);
-
-    setGemeinden(gemeindenRes.data || []);
-    setVereine(vereineRes.data || []);
-    setFreiwillige(freiwilligeRes.data || []);
-    setStellen(stellenRes.data || []);
-    setEinladungen(einladungenRes.data || []);
-    setLoading(false);
-  };
-
-  useEffect(() => {
-    if (admin) loadData();
-  }, [admin]);
-
-  const logout = async () => {
-    await supabase.auth.signOut();
-    setAdmin(null);
-  };
-
-  const zustandeMap = useMemo(() => {
-    const map = new Map();
-    stellen.forEach((stelle) => {
-      const vereinId = stelle.verein_id || stelle.vereine?.id;
-      if (!vereinId) return;
-      const value = (stelle.termine || []).filter((termin) => (termin.bewerbungen || []).some((b) => b.bestaetigt)).length;
-      map.set(vereinId, (map.get(vereinId) || 0) + value);
-    });
-    return map;
-  }, [stellen]);
-
-  const onVerifyVerein = async (vereinId, nextValue) => {
-    const { error } = await supabase.from('vereine').update({ verifiziert: nextValue }).eq('id', vereinId);
-    if (error) {
-      setToast({ text: 'Freischaltung konnte nicht gespeichert werden.', tone: 'danger' });
+  const handleFotoUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      showToast("Bitte ein Bild auswählen.", "#E85C5C");
       return;
     }
-    setVereine((prev) => prev.map((v) => (v.id === vereinId ? { ...v, verifiziert: nextValue } : v)));
-    setToast({ text: nextValue ? 'Verein freigeschaltet.' : 'Freischaltung entfernt.', tone: 'ok' });
-  };
-
-  const onTogglePlan = async (vereinId, nextValue) => {
-    const { error } = await supabase.from('vereine').update({ plan_aktiv: nextValue }).eq('id', vereinId);
-    if (error) {
-      setToast({ text: 'Plan-Status konnte nicht gespeichert werden.', tone: 'danger' });
+    if (file.size > 2 * 1024 * 1024) {
+      showToast("Max. 2MB erlaubt.", "#E85C5C");
       return;
     }
-    setVereine((prev) => prev.map((v) => (v.id === vereinId ? { ...v, plan_aktiv: nextValue } : v)));
-    setToast({ text: nextValue ? 'Plan als aktiv markiert.' : 'Plan als inaktiv markiert.', tone: 'ok' });
-  };
-
-  const createGemeindeInvite = async () => {
-    if (!inviteName || !inviteEmail) {
-      setToast({ text: 'Name und E-Mail sind Pflicht.', tone: 'danger' });
+    const ext = file.name.split(".").pop();
+    const path = `avatars/${user.data.id}.${ext}`;
+    const { error: upErr } = await supabase.storage
+      .from("avatars")
+      .upload(path, file, { upsert: true });
+    if (upErr) {
+      showToast("Upload fehlgeschlagen.", "#E85C5C");
       return;
     }
-    setInviteLoading(true);
-
-    const payload = {
-      name: inviteName,
-      email: inviteEmail,
-      plz: invitePlz || null,
-      ort: inviteOrt || null,
-      nachricht: inviteMessage || null,
-      status: 'eingeladen',
-      invited_by: admin?.id || null,
-    };
-
-    const { data, error } = await supabase.from('gemeinden').insert(payload).select().single();
-    if (error) {
-      setToast({ text: 'Einladung konnte nicht gespeichert werden. Das Backend braucht dafür noch die passende Tabelle/Spalten.', tone: 'warn' });
-      setInviteLoading(false);
-      return;
-    }
-
-    setGemeinden((prev) => [data, ...prev]);
-    setInviteName('');
-    setInviteEmail('');
-    setInvitePlz('');
-    setInviteOrt('');
-    setInviteMessage('');
-    setInviteOpen(false);
-    setInviteLoading(false);
-    setToast({ text: 'Gemeinde angelegt. Den Auth-Account legen wir im Backend im nächsten Schritt sauber nach.', tone: 'ok' });
+    const { data: urlData } = supabase.storage
+      .from("avatars")
+      .getPublicUrl(path);
+    const avatar_url = urlData.publicUrl + "?t=" + Date.now();
+    await supabase
+      .from("freiwillige")
+      .update({ avatar_url })
+      .eq("id", user.data.id);
+    setUser((prev) => ({ ...prev, data: { ...prev.data, avatar_url } }));
+    showToast("✓ Foto gespeichert!");
   };
-
-  if (!sessionChecked) {
-    return <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: shell.bg, color: shell.text }}>Admin-Anwendung wird geladen …</div>;
-  }
+  const aktiveStellen = meineStellen.filter((s) =>
+    (s.termine || []).some((t) => {
+      const hatBew = (t.bewerbungen || []).some(
+        (b) => b.freiwilliger_id === user.data.id
+      );
+      return hatBew && isTerminAktuell(t);
+    })
+  );
 
   return (
-    <>
-      {!admin ? (
-        <AdminLogin onLoggedIn={setAdmin} />
-      ) : (
-        <div style={{ minHeight: '100vh', background: shell.bg, color: shell.text }}>
-          <div style={{ maxWidth: 1180, margin: '0 auto', paddingBottom: 24 }}>
-            <div style={{
-              background: `linear-gradient(160deg, ${shell.dark}, ${shell.dark2})`,
-              color: '#F4F0E8',
-              padding: '24px 20px 18px',
-              borderBottomLeftRadius: 22,
-              borderBottomRightRadius: 22,
-              marginBottom: 16,
-            }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 14, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-                <div>
-                  <div style={{ fontSize: 12, color: '#B9A891', letterSpacing: 2, textTransform: 'uppercase', marginBottom: 8 }}>Civico Admin</div>
-                  <div style={{ fontSize: 28, fontWeight: 800, marginBottom: 6 }}>Backoffice</div>
-                  <div style={{ fontSize: 14, color: '#D7C7B3', maxWidth: 700, lineHeight: 1.6 }}>
-                    Eigene Anwendung nur für dich. Hier steuerst du Freischaltungen, Einladungen, Gemeinden und Pay-Erinnerungen zentral – getrennt von der Nutzer-App.
-                  </div>
-                </div>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                  <div style={{ background: 'rgba(255,255,255,0.08)', borderRadius: 14, padding: '10px 12px', fontSize: 12 }}>
-                    {admin.name || admin.email}
-                  </div>
-                  <button onClick={() => loadData()} style={buttonStyle('secondary')}>Neu laden</button>
-                  <button onClick={() => setInviteOpen((p) => !p)} style={buttonStyle('secondary')}>+ Gemeinde anlegen</button>
-                  <button onClick={logout} style={buttonStyle('secondary')}>Abmelden</button>
-                </div>
-              </div>
-            </div>
-
-            <div style={{ padding: '0 16px' }}>
-              {inviteOpen ? (
-                <div style={{ ...cardStyle({ marginBottom: 16 }) }}>
-                  <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 12 }}>Gemeinde anlegen</div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(220px,1fr))', gap: 12, marginBottom: 12 }}>
-                    <Field label="Gemeindename" value={inviteName} onChange={setInviteName} placeholder="z. B. Einhausen" />
-                    <Field label="Admin-E-Mail" value={inviteEmail} onChange={setInviteEmail} type="email" placeholder="gemeinde@..." />
-                    <Field label="PLZ" value={invitePlz} onChange={setInvitePlz} placeholder="64683" />
-                    <Field label="Ort" value={inviteOrt} onChange={setInviteOrt} placeholder="Einhausen" />
-                  </div>
-                  <label style={{ display: 'block', marginBottom: 12 }}>
-                    <div style={{ fontSize: 12, color: shell.muted, marginBottom: 6 }}>Nachricht</div>
-                    <textarea value={inviteMessage} onChange={(e) => setInviteMessage(e.target.value)} rows={4} style={{ width: '100%', boxSizing: 'border-box', borderRadius: 12, padding: 12, border: `1px solid ${shell.border}`, fontFamily: 'inherit', fontSize: 14 }} placeholder="Kurze Info für die Gemeinde" />
-                  </label>
-                  <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                    <button onClick={createGemeindeInvite} disabled={inviteLoading} style={buttonStyle('primary')}>
-                      {inviteLoading ? 'Speichern …' : 'Gemeinde speichern'}
-                    </button>
-                    <button onClick={() => setInviteOpen(false)} style={buttonStyle('secondary')}>Schließen</button>
-                  </div>
-                </div>
-              ) : null}
-
-              <AdminDashboard
-                admin={admin}
-                gemeinden={gemeinden}
-                organisationen={vereine}
-                freiwillige={freiwillige}
-                stellen={stellen}
-                anfragen={einladungen}
-                loading={loading}
-                zustandeMap={zustandeMap}
-                onVerifyVerein={onVerifyVerein}
-                onTogglePlan={onTogglePlan}
-                onRefresh={loadData}
+    <div>
+      <div
+        style={{
+          background: "linear-gradient(160deg, #1A1208, #2C2416)",
+          padding: "20px 20px 16px",
+          color: "#F4F0E8",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <button
+            onClick={onBack}
+            style={{
+              background: "none",
+              border: "none",
+              color: "#8B7355",
+              fontSize: 18,
+              cursor: "pointer",
+            }}
+          >
+            ←
+          </button>
+          <div style={{ fontSize: 18, fontWeight: "bold" }}>{t.meinProfil}</div>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            onClick={onEinstellungen}
+            style={{
+              background: "rgba(255,255,255,0.1)",
+              border: "none",
+              color: "#F4F0E8",
+              fontSize: 12,
+              padding: "6px 12px",
+              borderRadius: 20,
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            {t.einstellungen}
+          </button>
+          <button
+            onClick={logout}
+            style={{
+              background: "transparent",
+              border: "none",
+              color: "#8B7355",
+              fontSize: 12,
+              padding: "6px 12px",
+              borderRadius: 20,
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            Abmelden
+          </button>
+        </div>
+      </div>
+      <div style={{ padding: "20px 20px 100px" }}>
+        <div
+          style={{
+            background: "linear-gradient(135deg, #2C2416, #4A3C28)",
+            borderRadius: 16,
+            padding: "24px 20px",
+            marginBottom: 16,
+            textAlign: "center",
+            color: "#F4F0E8",
+          }}
+        >
+          <div
+            style={{
+              position: "relative",
+              display: "inline-block",
+              marginBottom: 4,
+            }}
+          >
+            {user.data.avatar_url ? (
+              <img
+                src={user.data.avatar_url}
+                alt="Profilbild"
+                style={{
+                  width: 80,
+                  height: 80,
+                  borderRadius: "50%",
+                  objectFit: "cover",
+                  border: "3px solid #C8A96E",
+                }}
               />
+            ) : (
+              <div
+                style={{
+                  width: 80,
+                  height: 80,
+                  borderRadius: "50%",
+                  background: "rgba(255,255,255,0.15)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 40,
+                  margin: "0 auto",
+                }}
+              >
+                👤
+              </div>
+            )}
+            <label
+              htmlFor="foto-upload"
+              style={{
+                position: "absolute",
+                bottom: 0,
+                right: 0,
+                background: "#C8A96E",
+                borderRadius: "50%",
+                width: 26,
+                height: 26,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                cursor: "pointer",
+                fontSize: 13,
+              }}
+            >
+              📷
+            </label>
+            <input
+              id="foto-upload"
+              type="file"
+              accept="image/*"
+              onChange={handleFotoUpload}
+              style={{ display: "none" }}
+            />
+          </div>
+          <div style={{ fontSize: 20, fontWeight: "bold", marginTop: 4 }}>
+            {user.data.name}
+          </div>
+          <div style={{ fontSize: 13, color: "#8B7355", marginTop: 2 }}>
+            {user.data.email}
+          </div>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "center",
+              gap: 24,
+              marginTop: 16,
+            }}
+          >
+            <div style={{ textAlign: "center" }}>
+              <div
+                style={{ fontSize: 24, fontWeight: "bold", color: "#E8A87C" }}
+              >
+                {user.data.punkte || 0}
+              </div>
+              <div style={{ fontSize: 11, color: "#8B7355" }}>{t.punkte}</div>
+            </div>
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontSize: 32 }}>
+                {getMedaille(user.data.punkte || 0).icon}
+              </div>
+              <div style={{ fontSize: 11, color: "#8B7355" }}>{t.medaille}</div>
+            </div>
+            <div style={{ textAlign: "center" }}>
+              <div
+                style={{ fontSize: 24, fontWeight: "bold", color: "#3A7D44" }}
+              >
+                {user.data.aktionen || 0}
+              </div>
+              <div style={{ fontSize: 11, color: "#8B7355" }}>{t.aktionen}</div>
             </div>
           </div>
+        </div>
 
-          {toast ? (
-            <div style={{ position: 'fixed', left: '50%', transform: 'translateX(-50%)', bottom: 20, zIndex: 999, minWidth: 280, maxWidth: '90vw' }}>
-              <Message tone={toast.tone || 'info'}>{toast.text}</Message>
+        {/* Medaillen */}
+        <div
+          style={{
+            background: "#FAF7F2",
+            borderRadius: 14,
+            padding: "16px",
+            marginBottom: 14,
+            border: "1px solid #E0D8C8",
+          }}
+        >
+          <div
+            style={{
+              fontSize: 11,
+              color: "#8B7355",
+              letterSpacing: 2,
+              textTransform: "uppercase",
+              marginBottom: 12,
+            }}
+          >
+            {t.meineMedaille}
+          </div>
+          {(() => {
+            const punkte = user.data.punkte || 0;
+            const aktuelle = getMedaille(punkte);
+            const naechste = getNextMedaille(punkte);
+            const fortschritt = naechste
+              ? Math.round(
+                  ((punkte - aktuelle.punkte) /
+                    (naechste.punkte - aktuelle.punkte)) *
+                    100
+                )
+              : 100;
+            return (
+              <div>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                    marginBottom: 12,
+                  }}
+                >
+                  <div style={{ fontSize: 40 }}>{aktuelle.icon}</div>
+                  <div>
+                    <div
+                      style={{
+                        fontSize: 16,
+                        fontWeight: "bold",
+                        color: aktuelle.farbe,
+                      }}
+                    >
+                      {getMedailleName(aktuelle, lang)}
+                    </div>
+                    <div style={{ fontSize: 12, color: "#8B7355" }}>
+                      {punkte} {t.punkte}
+                    </div>
+                  </div>
+                </div>
+                {naechste && (
+                  <div>
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        marginBottom: 4,
+                      }}
+                    >
+                      <div style={{ fontSize: 11, color: "#8B7355" }}>
+                        {t.naechste} {naechste.icon}{" "}
+                        {getMedailleName(naechste, lang)}
+                      </div>
+                      <div style={{ fontSize: 11, color: "#8B7355" }}>
+                        {naechste.punkte - punkte} {t.punkteFehlen}
+                      </div>
+                    </div>
+                    <div
+                      style={{
+                        height: 8,
+                        background: "#EDE8DE",
+                        borderRadius: 4,
+                      }}
+                    >
+                      <div
+                        style={{
+                          height: "100%",
+                          width: `${fortschritt}%`,
+                          background: `linear-gradient(90deg, ${aktuelle.farbe}, ${naechste.farbe})`,
+                          borderRadius: 4,
+                        }}
+                      />
+                    </div>
+                  </div>
+                )}
+                {!naechste && (
+                  <div
+                    style={{
+                      fontSize: 13,
+                      color: "#3A7D44",
+                      fontWeight: "bold",
+                      textAlign: "center",
+                      marginTop: 4,
+                    }}
+                  >
+                    {t.hoechsteStufe}
+                  </div>
+                )}
+                <div
+                  style={{
+                    display: "flex",
+                    gap: 8,
+                    flexWrap: "wrap",
+                    marginTop: 12,
+                  }}
+                >
+                  {MEDAILLEN.slice(1).map((m) => (
+                    <div
+                      key={m.nameKey}
+                      style={{
+                        textAlign: "center",
+                        opacity: punkte >= m.punkte ? 1 : 0.3,
+                      }}
+                    >
+                      <div style={{ fontSize: 20 }}>{m.icon}</div>
+                      <div style={{ fontSize: 9, color: "#8B7355" }}>
+                        {m.punkte}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+        </div>
+
+        {/* Skills & Sprachen */}
+        {user.data.skills?.length > 0 && (
+          <div
+            style={{
+              background: "#FAF7F2",
+              borderRadius: 14,
+              padding: "16px",
+              marginBottom: 14,
+              border: "1px solid #E0D8C8",
+            }}
+          >
+            <div
+              style={{
+                fontSize: 11,
+                color: "#8B7355",
+                letterSpacing: 2,
+                textTransform: "uppercase",
+                marginBottom: 8,
+              }}
+            >
+              {t.faehigkeitenLabel}
             </div>
-          ) : null}
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {user.data.skills.map((sid) => {
+                const s = SKILLS.find((x) => x.id === sid);
+                return s ? (
+                  <span
+                    key={sid}
+                    style={{
+                      background: "#EDE8DE",
+                      padding: "5px 12px",
+                      borderRadius: 20,
+                      fontSize: 12,
+                      color: "#5C4A2A",
+                    }}
+                  >
+                    {s.icon} {getSkillLabel(s, lang)}
+                  </span>
+                ) : null;
+              })}
+            </div>
+          </div>
+        )}
+        {user.data.sprachen && (
+          <div
+            style={{
+              background: "#FAF7F2",
+              borderRadius: 14,
+              padding: "16px",
+              marginBottom: 14,
+              border: "1px solid #E0D8C8",
+            }}
+          >
+            <div
+              style={{
+                fontSize: 11,
+                color: "#8B7355",
+                letterSpacing: 2,
+                textTransform: "uppercase",
+                marginBottom: 6,
+              }}
+            >
+              🗣️ Sprachen
+            </div>
+            <div style={{ fontSize: 14, color: "#2C2416" }}>
+              {user.data.sprachen}
+            </div>
+          </div>
+        )}
+
+        {/* Folge ich */}
+        {(follows?.vereine?.length > 0 || follows?.kategorien?.length > 0) && (
+          <div
+            style={{
+              background: "#FAF7F2",
+              borderRadius: 14,
+              padding: "16px",
+              marginBottom: 14,
+              border: "1px solid #E0D8C8",
+            }}
+          >
+            <div
+              style={{
+                fontSize: 11,
+                color: "#8B7355",
+                letterSpacing: 2,
+                textTransform: "uppercase",
+                marginBottom: 10,
+              }}
+            >
+              FOLGE ICH
+            </div>
+            {follows?.vereine?.length > 0 && (
+              <div style={{ marginBottom: 10 }}>
+                <div
+                  style={{ fontSize: 11, color: "#8B7355", marginBottom: 6 }}
+                >
+                  Vereine
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {follows.vereine.map((vid) => {
+                    const verein = stellen.find(
+                      (s) => s.verein_id === vid
+                    )?.vereine;
+                    if (!verein) return null;
+                    return (
+                      <button
+                        key={vid}
+                        onClick={() => onVereinClick && onVereinClick(verein)}
+                        style={{
+                          padding: "6px 12px",
+                          borderRadius: 20,
+                          border: "1px solid #C8A96E",
+                          background: "#C8A96E22",
+                          color: "#8B6800",
+                          fontSize: 12,
+                          cursor: "pointer",
+                          fontFamily: "inherit",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                        }}
+                      >
+                        {verein.logo || "🏢"} {verein.name}
+                        <span
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onToggleFollow && onToggleFollow(vid);
+                          }}
+                          style={{
+                            color: "#E85C5C",
+                            fontWeight: "bold",
+                            fontSize: 14,
+                          }}
+                        >
+                          &#x00D7;
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+            {follows?.kategorien?.length > 0 && (
+              <div>
+                <div
+                  style={{ fontSize: 11, color: "#8B7355", marginBottom: 6 }}
+                >
+                  Kategorien
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {follows.kategorien.map((kid) => {
+                    const kat = KATEGORIEN.find((k) => k.id === kid);
+                    if (!kat) return null;
+                    return (
+                      <span
+                        key={kid}
+                        style={{
+                          padding: "6px 12px",
+                          borderRadius: 20,
+                          background: kat.color + "22",
+                          color: kat.color,
+                          fontSize: 12,
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                        }}
+                      >
+                        {kat.icon} {kat.label}
+                      </span>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Aktive Aktionen verwalten */}
+        <div
+          style={{
+            background: "#FAF7F2",
+            borderRadius: 14,
+            padding: "16px",
+            marginBottom: 14,
+            border: "1px solid #E0D8C8",
+          }}
+        >
+          <div
+            style={{
+              fontSize: 11,
+              color: "#8B7355",
+              letterSpacing: 2,
+              textTransform: "uppercase",
+              marginBottom: 10,
+            }}
+          >
+            {t.meineAktionenVerwalten}
+          </div>
+          {aktiveStellen.length === 0 ? (
+            <div style={{ fontSize: 13, color: "#8B7355" }}>
+              {t.keineAktiveAnmeldungen}
+            </div>
+          ) : (
+            aktiveStellen.map((s) => {
+              const meinTermin = (s.termine || [])
+                .flatMap((t) =>
+                  (t.bewerbungen || [])
+                    .filter((b) => b.freiwilliger_id === user.data.id)
+                    .map((b) => ({ ...b, termin: t }))
+                )
+                .find(Boolean);
+              const kat = getKat(s.kategorie);
+              return (
+                <div
+                  key={s.id}
+                  style={{ padding: "10px 0", borderTop: "1px solid #F0EBE0" }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 10,
+                      alignItems: "center",
+                      marginBottom: 6,
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: 32,
+                        height: 32,
+                        borderRadius: 8,
+                        background: kat?.color + "22",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: 16,
+                      }}
+                    >
+                      {kat?.icon}
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div
+                        style={{
+                          fontSize: 13,
+                          fontWeight: "bold",
+                          color: "#2C2416",
+                        }}
+                      >
+                        {s.titel}
+                      </div>
+                      {meinTermin && (
+                        <div style={{ fontSize: 11, color: "#3A7D44" }}>
+                          📅 {formatDate(meinTermin.termin.datum)} · 🕐{" "}
+                          {meinTermin.termin.startzeit}
+                          {meinTermin.termin.endzeit
+                            ? ` – ${meinTermin.termin.endzeit}`
+                            : ""}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  {(s.termine || []).filter(
+                    (t) =>
+                      t.id !== meinTermin?.termin?.id &&
+                      (t.freie_plaetze || 0) > 0 &&
+                      isTerminNochNichtGestartet(t)
+                  ).length > 0 && (
+                    <button
+                      onClick={() => setTerminWechselStelle(s)}
+                      style={{
+                        width: "100%",
+                        marginBottom: 6,
+                        padding: "7px",
+                        borderRadius: 8,
+                        border: "1px solid #2C2416",
+                        background: "transparent",
+                        color: "#2C2416",
+                        fontSize: 12,
+                        cursor: "pointer",
+                        fontFamily: "inherit",
+                      }}
+                    >
+                      {t.terminAendern}
+                    </button>
+                  )}
+                  <button
+                    onClick={async () => {
+                      if (meinTermin) {
+                        await supabase
+                          .from("bewerbungen")
+                          .delete()
+                          .eq("id", meinTermin.id);
+                        await supabase.rpc("increment_plaetze", {
+                          termin_id: meinTermin.termin.id,
+                        });
+                        await supabase
+                          .from("freiwillige")
+                          .update({
+                            punkte: Math.max(0, (user.data.punkte || 0) - 10),
+                            aktionen: Math.max(
+                              0,
+                              (user.data.aktionen || 0) - 1
+                            ),
+                          })
+                          .eq("id", user.data.id);
+                        setUser((prev) => ({
+                          ...prev,
+                          data: {
+                            ...prev.data,
+                            punkte: Math.max(0, (prev.data.punkte || 0) - 10),
+                            aktionen: Math.max(
+                              0,
+                              (prev.data.aktionen || 0) - 1
+                            ),
+                          },
+                        }));
+                        showToast("Schade, dass du dieses Mal nicht dabei bist.", "#E85C5C");
+                        await loadStellen(gemeindeId);
+                      }
+                    }}
+                    style={{
+                      width: "100%",
+                      padding: "7px",
+                      borderRadius: 8,
+                      border: "1px solid #E85C5C",
+                      background: "transparent",
+                      color: "#E85C5C",
+                      fontSize: 12,
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    {t.abmelden}
+                  </button>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {/* Warteliste */}
+        {meineWarteliste.length > 0 && (
+          <div
+            style={{
+              background: "#FAF7F2",
+              borderRadius: 14,
+              padding: "16px",
+              marginBottom: 14,
+              border: "1px solid #E0D8C8",
+            }}
+          >
+            <div
+              style={{
+                fontSize: 11,
+                color: "#8B7355",
+                letterSpacing: 2,
+                textTransform: "uppercase",
+                marginBottom: 10,
+              }}
+            >
+              📋 MEINE WARTELISTE ({meineWarteliste.length})
+            </div>
+            {meineWarteliste.map((w) => {
+              const kat = getKat(w.stellen?.kategorie);
+              return (
+                <div
+                  key={w.id}
+                  style={{ padding: "10px 0", borderTop: "1px solid #F0EBE0" }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      gap: 10,
+                      alignItems: "center",
+                      marginBottom: 6,
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: 32,
+                        height: 32,
+                        borderRadius: 8,
+                        background: (kat?.color || "#8B7355") + "22",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontSize: 16,
+                      }}
+                    >
+                      {kat?.icon || "📋"}
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div
+                        style={{
+                          fontSize: 13,
+                          fontWeight: "bold",
+                          color: "#2C2416",
+                        }}
+                      >
+                        {w.stellen?.titel}
+                      </div>
+                      <div style={{ fontSize: 11, color: "#3A7D44" }}>
+                        📅 {formatDate(w.termine?.datum)} · 🕐{" "}
+                        {w.termine?.startzeit}
+                        {w.termine?.endzeit ? ` – ${w.termine.endzeit}` : ""}
+                      </div>
+                    </div>
+                    <div
+                      style={{
+                        background: "#E8A87C22",
+                        borderRadius: 20,
+                        padding: "4px 10px",
+                        fontSize: 12,
+                        color: "#E8A87C",
+                        fontWeight: "bold",
+                      }}
+                    >
+                      #{w.position}
+                    </div>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      await supabase.from("warteliste").delete().eq("id", w.id);
+                      setMeineWarteliste((prev) =>
+                        prev.filter((x) => x.id !== w.id)
+                      );
+                      showToast("Von Warteliste entfernt.", "#8B7355");
+                    }}
+                    style={{
+                      width: "100%",
+                      padding: "6px",
+                      borderRadius: 8,
+                      border: "1px solid #E0D8C8",
+                      background: "transparent",
+                      color: "#8B7355",
+                      fontSize: 11,
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    Von Warteliste entfernen
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Alle Aktionen (inkl. vergangene) */}
+        <div
+          style={{
+            background: "#FAF7F2",
+            borderRadius: 14,
+            padding: "16px",
+            marginBottom: 14,
+            border: "1px solid #E0D8C8",
+          }}
+        >
+          <div
+            style={{
+              fontSize: 11,
+              color: "#8B7355",
+              letterSpacing: 2,
+              textTransform: "uppercase",
+              marginBottom: 10,
+            }}
+          >
+            {t.meineAktionen} ({meineStellen.length})
+          </div>
+          {meineStellen.length === 0 ? (
+            <div style={{ fontSize: 13, color: "#8B7355" }}>
+              Noch keine Aktionen.
+            </div>
+          ) : (
+            meineStellen.map((s) => {
+              const kat = getKat(s.kategorie);
+              return (
+                <div
+                  key={s.id}
+                  style={{
+                    display: "flex",
+                    gap: 10,
+                    padding: "8px 0",
+                    borderTop: "1px solid #F0EBE0",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 32,
+                      height: 32,
+                      borderRadius: 8,
+                      background: kat?.color + "22",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontSize: 16,
+                    }}
+                  >
+                    {kat?.icon}
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: "bold" }}>
+                      {s.titel}
+                    </div>
+                    <div style={{ fontSize: 11, color: "#8B7355" }}>
+                      {s.ort}
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      marginLeft: "auto",
+                      fontSize: 11,
+                      color: "#3A7D44",
+                    }}
+                  >
+                    +10 Pkt
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+
+        {/* Punktesystem */}
+        <div
+          style={{
+            background: "#FAF7F2",
+            borderRadius: 14,
+            padding: "16px",
+            marginBottom: 14,
+            border: "1px solid #E0D8C8",
+          }}
+        >
+          <div
+            style={{
+              fontSize: 11,
+              color: "#8B7355",
+              letterSpacing: 2,
+              textTransform: "uppercase",
+              marginBottom: 10,
+            }}
+          >
+            {t.punktesystem}
+          </div>
+          <div style={{ fontSize: 13, color: "#2C2416", lineHeight: 1.8 }}>
+            🎯 {t.anmeldungLabel}: <b>+10 {t.punkte}</b>
+            <br />✅ {t.erschieenenBestaetigt}: <b>+5 {t.punkte}</b>
+            <br />❌ {t.abmelden}: <b>-10 {t.punkte}</b>
+            <br />✗ {t.nichtErschienen}
+          </div>
+        </div>
+      </div>
+
+      {/* Termin Wechsel Modal */}
+      {terminWechselStelle && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.5)",
+            display: "flex",
+            alignItems: "flex-end",
+            justifyContent: "center",
+            zIndex: 100,
+          }}
+        >
+          <div
+            style={{
+              background: "#F4F0E8",
+              borderRadius: "20px 20px 0 0",
+              padding: "24px 20px 40px",
+              width: "100%",
+              maxWidth: 480,
+            }}
+          >
+            <div
+              style={{
+                fontSize: 16,
+                fontWeight: "bold",
+                marginBottom: 16,
+                color: "#2C2416",
+              }}
+            >
+              {t.neuenTerminWaehlen}
+            </div>
+            {(terminWechselStelle.termine || [])
+              .filter((t) => {
+                const meinTermin = (t.bewerbungen || []).find(
+                  (b) => b.freiwilliger_id === user.data.id
+                );
+                return (
+                  !meinTermin &&
+                  (t.freie_plaetze || 0) > 0 &&
+                  isTerminNochNichtGestartet(t)
+                );
+              })
+              .map((t) => (
+                <button
+                  key={t.id}
+                  onClick={async () => {
+                    const meinAlterTermin = (terminWechselStelle.termine || [])
+                      .flatMap((x) =>
+                        (x.bewerbungen || [])
+                          .filter((b) => b.freiwilliger_id === user.data.id)
+                          .map((b) => ({ ...b, termin: x }))
+                      )
+                      .find(Boolean);
+                    if (meinAlterTermin) {
+                      await supabase
+                        .from("bewerbungen")
+                        .delete()
+                        .eq("id", meinAlterTermin.id);
+                      await supabase.rpc("increment_plaetze", {
+                        termin_id: meinAlterTermin.termin.id,
+                      });
+                    }
+                    await supabase.rpc("book_slot", {
+                      p_stelle_id: terminWechselStelle.id,
+                      p_termin_id: t.id,
+                      p_freiwilliger_id: user.data.id,
+                      p_name: user.data.name,
+                      p_email: user.data.email,
+                    });
+                    showToast("✓ Termin geändert!");
+                    await loadStellen(gemeindeId);
+                    setTerminWechselStelle(null);
+                  }}
+                  style={{
+                    width: "100%",
+                    padding: "14px",
+                    borderRadius: 12,
+                    border: "1px solid #E0D8C8",
+                    background: "#FAF7F2",
+                    marginBottom: 10,
+                    textAlign: "left",
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    fontSize: 14,
+                    color: "#2C2416",
+                  }}
+                >
+                  📅 {formatDate(t.datum)} · 🕐 {t.startzeit}
+                  {t.endzeit ? ` – ${t.endzeit}` : ""} ·{" "}
+                  <span style={{ color: "#3A7D44" }}>
+                    Noch {t.freie_plaetze} Helfer gesucht
+                  </span>
+                </button>
+              ))}
+            <button
+              onClick={() => setTerminWechselStelle(null)}
+              style={{
+                width: "100%",
+                padding: "12px",
+                borderRadius: 12,
+                border: "none",
+                background: "#EDE8DE",
+                color: "#8B7355",
+                fontSize: 14,
+                cursor: "pointer",
+                fontFamily: "inherit",
+              }}
+            >
+              {t.abbrechen}
+            </button>
+          </div>
         </div>
       )}
-    </>
+    </div>
   );
 }
+
+function EinstellungenScreen({
+  user,
+  setUser,
+  onBack,
+  onHome,
+  logout,
+  showToast,
+  onDelete,
+  onDatenschutz,
+  onAgb,
+  onImpressum,
+  t = T["de"],
+  lang = "de",
+}) {
+  const [activeTab, setActiveTab] = useState("profil");
+  const [name, setName] = useState(user.data.name || "");
+  const [plz, setPlz] = useState(user.data.plz || "");
+  const [umkreis, setUmkreis] = useState(user.data.umkreis || 25);
+  const [selectedSkills, setSelectedSkills] = useState(user.data.skills || []);
+  const [sprachen, setSprachen] = useState(user.data.sprachen || "");
+  const [neuesPasswort, setNeuesPasswort] = useState("");
+  const [passwortWiederholen, setPasswortWiederholen] = useState("");
+  const [showDelete, setShowDelete] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const [notifSettings, setNotifSettings] = useState({
+    push_enabled: true,
+    email_enabled: false,
+    termin_erinnerung: true,
+    neue_stellen: true,
+    freie_plaetze: true,
+    vereins_news: true,
+  });
+  const [notifLoading, setNotifLoading] = useState(false);
+
+  useEffect(() => {
+    supabase
+      .from("notification_settings")
+      .select("*")
+      .eq("freiwilliger_id", user.data.id)
+      .single()
+      .then(({ data }) => {
+        if (data) setNotifSettings(data);
+      });
+  }, []);
+
+  const saveNotifSettings = async (newSettings) => {
+    setNotifLoading(true);
+    await supabase.from("notification_settings").upsert(
+      {
+        freiwilliger_id: user.data.id,
+        ...newSettings,
+      },
+      { onConflict: "freiwilliger_id" }
+    );
+    setNotifSettings(newSettings);
+    setNotifLoading(false);
+    showToast("✓ Einstellungen gespeichert!");
+  };
+
+  const handleAvatarUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      showToast("Bitte ein Bild auswählen.", "#E85C5C");
+      return;
+    }
+    if (file.size > 2 * 1024 * 1024) {
+      showToast("Max. 2MB erlaubt.", "#E85C5C");
+      return;
+    }
+    setAvatarUploading(true);
+    const ext = file.name.split(".").pop();
+    const path = `avatars/${user.data.id}.${ext}`;
+    const { error: upErr } = await supabase.storage
+      .from("avatars")
+      .upload(path, file, { upsert: true });
+    if (upErr) {
+      showToast("Upload fehlgeschlagen.", "#E85C5C");
+      setAvatarUploading(false);
+      return;
+    }
+    const { data: urlData } = supabase.storage
+      .from("avatars")
+      .getPublicUrl(path);
+    const avatar_url = urlData.publicUrl + "?t=" + Date.now();
+    await supabase
+      .from("freiwillige")
+      .update({ avatar_url })
+      .eq("id", user.data.id);
+    setUser((prev) => ({ ...prev, data: { ...prev.data, avatar_url } }));
+    setAvatarUploading(false);
+    showToast("✓ Foto gespeichert!");
+  };
+
+  const handleProfilSpeichern = async () => {
+    if (!isKlarname(name)) {
+      setError(t.klarname);
+      return;
+    }
+    setLoading(true);
+    const { error: err } = await supabase
+      .from("freiwillige")
+      .update({ name, plz, umkreis, skills: selectedSkills, sprachen })
+      .eq("id", user.data.id);
+    setLoading(false);
+    if (err) {
+      setError(t.fehlerSpeichern);
+      return;
+    }
+    setUser((prev) => ({
+      ...prev,
+      data: {
+        ...prev.data,
+        name,
+        plz,
+        umkreis,
+        skills: selectedSkills,
+        sprachen,
+      },
+    }));
+    setError("");
+    showToast(t.profilGespeichert);
+  };
+
+  const handlePasswortAendern = async () => {
+    if (!neuesPasswort || !passwortWiederholen) {
+      setError(t.alleFelder);
+      return;
+    }
+    if (neuesPasswort.length < 6) {
+      setError(t.passwortLaenge);
+      return;
+    }
+    if (neuesPasswort !== passwortWiederholen) {
+      setError(t.passwortStimmenNicht);
+      return;
+    }
+    setLoading(true);
+    const { error: err } = await supabase.auth.updateUser({
+      password: neuesPasswort,
+    });
+    setLoading(false);
+    if (err) {
+      setError(t.fehlerPasswort);
+      return;
+    }
+    setNeuesPasswort("");
+    setPasswortWiederholen("");
+    setError("");
+    showToast(t.passwortGeaendert);
+  };
+
+  return (
+    <div>
+      {/* Header */}
+      <div
+        style={{
+          background: "linear-gradient(160deg,#1A1208,#2C2416)",
+          padding: "20px 20px 16px",
+          color: "#F4F0E8",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <button
+            onClick={onBack}
+            style={{
+              background: "none",
+              border: "none",
+              color: "#8B7355",
+              fontSize: 18,
+              cursor: "pointer",
+            }}
+          >
+            ←
+          </button>
+          <div style={{ fontSize: 18, fontWeight: "bold" }}>
+            {t.einstellungenTitle}
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            onClick={onHome}
+            style={{
+              background: "none",
+              border: "none",
+              color: "#8B7355",
+              fontSize: 13,
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            🏠
+          </button>
+          <button
+            onClick={logout}
+            style={{
+              background: "rgba(255,255,255,0.1)",
+              border: "none",
+              color: "#8B7355",
+              fontSize: 12,
+              padding: "6px 12px",
+              borderRadius: 20,
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            {t.abmelden}
+          </button>
+        </div>
+      </div>
+
+      <div style={{ padding: "16px 16px 100px" }}>
+        {/* Profilbild oben */}
+        {activeTab === "profil" && (
+          <div style={{ textAlign: "center", marginBottom: 20 }}>
+            <div style={{ position: "relative", display: "inline-block" }}>
+              {user.data.avatar_url ? (
+                <img
+                  src={user.data.avatar_url}
+                  alt="Avatar"
+                  style={{
+                    width: 80,
+                    height: 80,
+                    borderRadius: "50%",
+                    objectFit: "cover",
+                    border: "3px solid #C8A96E",
+                  }}
+                />
+              ) : (
+                <div
+                  style={{
+                    width: 80,
+                    height: 80,
+                    borderRadius: "50%",
+                    background: "linear-gradient(135deg,#2C2416,#4A3C28)",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontSize: 36,
+                    margin: "0 auto",
+                  }}
+                >
+                  👤
+                </div>
+              )}
+              <label
+                htmlFor="avatar-einst"
+                style={{
+                  position: "absolute",
+                  bottom: 0,
+                  right: 0,
+                  background: "#C8A96E",
+                  borderRadius: "50%",
+                  width: 28,
+                  height: 28,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: "pointer",
+                  fontSize: 14,
+                }}
+              >
+                {avatarUploading ? "⏳" : "📷"}
+              </label>
+              <input
+                id="avatar-einst"
+                type="file"
+                accept="image/*"
+                onChange={handleAvatarUpload}
+                style={{ display: "none" }}
+              />
+            </div>
+            <div
+              style={{
+                fontSize: 13,
+                fontWeight: "bold",
+                color: "#2C2416",
+                marginTop: 8,
+              }}
+            >
+              {user.data.name}
+            </div>
+            <div style={{ fontSize: 12, color: "#8B7355" }}>
+              {user.data.email}
+            </div>
+          </div>
+        )}
+
+        {/* Tabs */}
+        <div
+          style={{
+            display: "flex",
+            gap: 4,
+            marginBottom: 20,
+            background: "#EDE8DE",
+            borderRadius: 12,
+            padding: 4,
+          }}
+        >
+          {[
+            { id: "profil", label: t.profilTab },
+            { id: "passwort", label: t.passwortTab },
+            { id: "konto", label: t.kontoTab },
+            { id: "benachrichtigungen", label: "🔔" },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => {
+                setActiveTab(tab.id);
+                setError("");
+              }}
+              style={{
+                flex: 1,
+                padding: "9px 6px",
+                borderRadius: 9,
+                border: "none",
+                cursor: "pointer",
+                background: activeTab === tab.id ? "#FAF7F2" : "transparent",
+                color: activeTab === tab.id ? "#2C2416" : "#8B7355",
+                fontSize: 12,
+                fontFamily: "inherit",
+                fontWeight: activeTab === tab.id ? "bold" : "normal",
+                boxShadow:
+                  activeTab === tab.id ? "0 1px 4px rgba(0,0,0,0.1)" : "none",
+              }}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Profil Tab */}
+        {activeTab === "profil" && (
+          <div>
+            <Input
+              label={t.vollstaendigerName}
+              value={name}
+              onChange={setName}
+              placeholder="Max Mustermann"
+            />
+            <Input
+              label="PLZ"
+              value={plz}
+              onChange={setPlz}
+              placeholder="z.B. 64683"
+            />
+            <div style={{ marginBottom: 14 }}>
+              <div
+                style={{
+                  fontSize: 12,
+                  color: "#8B7355",
+                  marginBottom: 6,
+                  letterSpacing: 0.5,
+                }}
+              >
+                {t.umkreis}
+              </div>
+              <select
+                value={umkreis}
+                onChange={(e) => setUmkreis(parseInt(e.target.value))}
+                style={{
+                  width: "100%",
+                  padding: "11px 14px",
+                  borderRadius: 10,
+                  border: "1px solid #E0D8C8",
+                  background: "#FAF7F2",
+                  fontFamily: "inherit",
+                  fontSize: 14,
+                  color: "#2C2416",
+                  boxSizing: "border-box",
+                }}
+              >
+                <option value={10}>10 km</option>
+                <option value={25}>25 km</option>
+                <option value={50}>50 km</option>
+                <option value={9999}>Alle</option>
+              </select>
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <div
+                style={{
+                  fontSize: 12,
+                  color: "#8B7355",
+                  marginBottom: 8,
+                  letterSpacing: 0.5,
+                }}
+              >
+                {t.faehigkeitenLabel}
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {SKILLS.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    onClick={() =>
+                      setSelectedSkills((prev) =>
+                        prev.includes(s.id)
+                          ? prev.filter((x) => x !== s.id)
+                          : [...prev, s.id]
+                      )
+                    }
+                    style={{
+                      padding: "7px 12px",
+                      borderRadius: 20,
+                      border: "none",
+                      cursor: "pointer",
+                      background: selectedSkills.includes(s.id)
+                        ? "#2C2416"
+                        : "#EDE8DE",
+                      color: selectedSkills.includes(s.id)
+                        ? "#FAF7F2"
+                        : "#8B7355",
+                      fontSize: 12,
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    {s.icon} {getSkillLabel(s, lang)}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <Input
+              label={t.sprachen}
+              value={sprachen}
+              onChange={setSprachen}
+              placeholder="z.B. Englisch, Türkisch"
+            />
+            {error && <ErrorMsg>{error}</ErrorMsg>}
+            <BigButton onClick={handleProfilSpeichern} disabled={loading} green>
+              {loading ? t.speichern : t.profilSpeichern}
+            </BigButton>
+          </div>
+        )}
+
+        {/* Passwort Tab */}
+        {activeTab === "passwort" && (
+          <div>
+            <div
+              style={{
+                background: "#FAF7F2",
+                borderRadius: 14,
+                padding: "14px 16px",
+                marginBottom: 20,
+                border: "1px solid #E0D8C8",
+              }}
+            >
+              <div style={{ fontSize: 13, color: "#8B7355" }}>
+                {t.passwortMindestp}
+              </div>
+            </div>
+            <Input
+              label={t.neuesPasswort}
+              value={neuesPasswort}
+              onChange={setNeuesPasswort}
+              type="password"
+              placeholder="••••••"
+            />
+            <Input
+              label={t.passwortWiederholen}
+              value={passwortWiederholen}
+              onChange={setPasswortWiederholen}
+              type="password"
+              placeholder="••••••"
+            />
+            {error && <ErrorMsg>{error}</ErrorMsg>}
+            <BigButton onClick={handlePasswortAendern} disabled={loading}>
+              {loading ? t.aendern : t.passwortAendern}
+            </BigButton>
+          </div>
+        )}
+
+        {/* Benachrichtigungen Tab */}
+        {activeTab === "benachrichtigungen" && (
+          <div>
+            <div
+              style={{
+                fontSize: 14,
+                fontWeight: "bold",
+                color: "#2C2416",
+                marginBottom: 16,
+              }}
+            >
+              🔔 Benachrichtigungen
+            </div>
+
+            {/* Push / Email */}
+            <div
+              style={{
+                background: "#FAF7F2",
+                borderRadius: 14,
+                padding: "16px",
+                marginBottom: 14,
+                border: "1px solid #E0D8C8",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 11,
+                  color: "#8B7355",
+                  letterSpacing: 2,
+                  textTransform: "uppercase",
+                  marginBottom: 12,
+                }}
+              >
+                KANÄLE
+              </div>
+              {[
+                {
+                  key: "push_enabled",
+                  label: "📱 Push-Benachrichtigungen",
+                  sub: "Direkt aufs Gerät",
+                },
+                {
+                  key: "email_enabled",
+                  label: "📧 E-Mail",
+                  sub: "Zusammenfassung per E-Mail",
+                },
+              ].map((item) => (
+                <div
+                  key={item.key}
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    paddingBottom: 12,
+                    marginBottom: 12,
+                    borderBottom: "1px solid #F0EBE0",
+                  }}
+                >
+                  <div>
+                    <div
+                      style={{
+                        fontSize: 13,
+                        color: "#2C2416",
+                        fontWeight: "bold",
+                      }}
+                    >
+                      {item.label}
+                    </div>
+                    <div style={{ fontSize: 11, color: "#8B7355" }}>
+                      {item.sub}
+                    </div>
+                  </div>
+                  <div
+                    onClick={() =>
+                      saveNotifSettings({
+                        ...notifSettings,
+                        [item.key]: !notifSettings[item.key],
+                      })
+                    }
+                    style={{
+                      width: 44,
+                      height: 24,
+                      borderRadius: 12,
+                      background: notifSettings[item.key]
+                        ? "#3A7D44"
+                        : "#E0D8C8",
+                      cursor: "pointer",
+                      position: "relative",
+                      transition: "background 0.2s",
+                    }}
+                  >
+                    <div
+                      style={{
+                        position: "absolute",
+                        top: 2,
+                        left: notifSettings[item.key] ? 22 : 2,
+                        width: 20,
+                        height: 20,
+                        borderRadius: "50%",
+                        background: "#fff",
+                        transition: "left 0.2s",
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Typen */}
+            <div
+              style={{
+                background: "#FAF7F2",
+                borderRadius: 14,
+                padding: "16px",
+                marginBottom: 14,
+                border: "1px solid #E0D8C8",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 11,
+                  color: "#8B7355",
+                  letterSpacing: 2,
+                  textTransform: "uppercase",
+                  marginBottom: 12,
+                }}
+              >
+                WAS MÖCHTEST DU ERHALTEN?
+              </div>
+              {[
+                {
+                  key: "termin_erinnerung",
+                  label: "⏰ Termin-Erinnerungen",
+                  sub: "Morgen ist dein Einsatz 🙌",
+                },
+                {
+                  key: "neue_stellen",
+                  label: "🌱 Neue Stellen",
+                  sub: "Benachrichtigungen zu neuen Stellen in gefolgten Vereinen und Kategorien",
+                },
+                {
+                  key: "freie_plaetze",
+                  label: "🎉 Freie Plätze",
+                  sub: "Nur für gefolgte Vereine oder Kategorien",
+                },
+                {
+                  key: "vereins_news",
+                  label: "📣 Vereins-News",
+                  sub: "Updates von gefolgten Vereinen",
+                },
+              ].map((item) => (
+                <div
+                  key={item.key}
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    paddingBottom: 12,
+                    marginBottom: 12,
+                    borderBottom: "1px solid #F0EBE0",
+                  }}
+                >
+                  <div>
+                    <div
+                      style={{
+                        fontSize: 13,
+                        color: "#2C2416",
+                        fontWeight: "bold",
+                      }}
+                    >
+                      {item.label}
+                    </div>
+                    <div style={{ fontSize: 11, color: "#8B7355" }}>
+                      {item.sub}
+                    </div>
+                  </div>
+                  <div
+                    onClick={() =>
+                      saveNotifSettings({
+                        ...notifSettings,
+                        [item.key]: !notifSettings[item.key],
+                      })
+                    }
+                    style={{
+                      width: 44,
+                      height: 24,
+                      borderRadius: 12,
+                      background: notifSettings[item.key]
+                        ? "#3A7D44"
+                        : "#E0D8C8",
+                      cursor: "pointer",
+                      position: "relative",
+                      transition: "background 0.2s",
+                    }}
+                  >
+                    <div
+                      style={{
+                        position: "absolute",
+                        top: 2,
+                        left: notifSettings[item.key] ? 22 : 2,
+                        width: 20,
+                        height: 20,
+                        borderRadius: "50%",
+                        background: "#fff",
+                        transition: "left 0.2s",
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+            {notifLoading && (
+              <div
+                style={{ textAlign: "center", fontSize: 12, color: "#8B7355" }}
+              >
+                Speichern...
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Konto Tab */}
+        {activeTab === "konto" && (
+          <div>
+            <div
+              style={{
+                background: "#FAF7F2",
+                borderRadius: 14,
+                padding: "16px",
+                marginBottom: 14,
+                border: "1px solid #E0D8C8",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 11,
+                  color: "#8B7355",
+                  letterSpacing: 2,
+                  textTransform: "uppercase",
+                  marginBottom: 8,
+                }}
+              >
+                {t.kontoInfo}
+              </div>
+              <div style={{ fontSize: 14, color: "#2C2416" }}>
+                📧 {user.data.email}
+              </div>
+              <div style={{ fontSize: 12, color: "#8B7355", marginTop: 4 }}>
+                {t.registriertAls}
+              </div>
+            </div>
+            <div
+              style={{
+                background: "#FAF7F2",
+                borderRadius: 14,
+                padding: "16px",
+                marginBottom: 14,
+                border: "1px solid #E0D8C8",
+              }}
+            >
+              <div
+                style={{
+                  fontSize: 11,
+                  color: "#8B7355",
+                  letterSpacing: 2,
+                  textTransform: "uppercase",
+                  marginBottom: 8,
+                }}
+              >
+                {t.rechtliches}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <button
+                  onClick={onDatenschutz}
+                  style={{
+                    textAlign: "left",
+                    background: "none",
+                    border: "none",
+                    color: "#2C2416",
+                    fontSize: 14,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    padding: 0,
+                  }}
+                >
+                  {t.datenschutz} →
+                </button>
+                <button
+                  onClick={onAgb}
+                  style={{
+                    textAlign: "left",
+                    background: "none",
+                    border: "none",
+                    color: "#2C2416",
+                    fontSize: 14,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    padding: 0,
+                  }}
+                >
+                  {t.agb} →
+                </button>
+                <button
+                  onClick={onImpressum}
+                  style={{
+                    textAlign: "left",
+                    background: "none",
+                    border: "none",
+                    color: "#2C2416",
+                    fontSize: 14,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    padding: 0,
+                  }}
+                >
+                  {t.impressum} →
+                </button>
+              </div>
+            </div>
+            <button
+              onClick={() => setShowDelete(true)}
+              style={{
+                width: "100%",
+                padding: "12px",
+                borderRadius: 12,
+                border: "1px solid #E85C5C",
+                background: "transparent",
+                color: "#E85C5C",
+                fontSize: 13,
+                cursor: "pointer",
+                fontFamily: "inherit",
+              }}
+            >
+              {t.kontoLoeschen}
+            </button>
+            {showDelete && (
+              <div
+                style={{
+                  background: "#FFF0F0",
+                  borderRadius: 12,
+                  padding: "16px",
+                  marginTop: 10,
+                  border: "1px solid #E85C5C",
+                }}
+              >
+                <div
+                  style={{ fontSize: 13, color: "#C0392B", marginBottom: 12 }}
+                >
+                  {t.allesWirdGeloescht}
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    onClick={onDelete}
+                    style={{
+                      flex: 1,
+                      padding: "10px",
+                      borderRadius: 8,
+                      border: "none",
+                      background: "#E85C5C",
+                      color: "#fff",
+                      fontSize: 13,
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                      fontWeight: "bold",
+                    }}
+                  >
+                    {t.jaLoeschen}
+                  </button>
+                  <button
+                    onClick={() => setShowDelete(false)}
+                    style={{
+                      flex: 1,
+                      padding: "10px",
+                      borderRadius: 8,
+                      border: "1px solid #E0D8C8",
+                      background: "transparent",
+                      color: "#8B7355",
+                      fontSize: 13,
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    {t.abbrechen}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function FreiwilligerProfilVerein({
+  selectedFreiwilliger,
+  setSelectedFreiwilliger,
+  onBack,
+  onHome,
+  logout,
+  handleBestaetigen,
+}) {
+  const termin = selectedFreiwilliger.termin;
+  const istVergangen = termin ? !isTerminAktuell(termin) : false;
+  const nochNichtGestartet = termin
+    ? isTerminNochNichtGestartet(termin)
+    : false;
+  const profil = selectedFreiwilliger.profil;
+
+  return (
+    <div>
+      <div
+        style={{
+          background: "linear-gradient(160deg,#1A1208,#2C2416)",
+          padding: "20px 20px 16px",
+          color: "#F4F0E8",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <button
+            onClick={onBack}
+            style={{
+              background: "none",
+              border: "none",
+              color: "#8B7355",
+              fontSize: 18,
+              cursor: "pointer",
+            }}
+          >
+            ←
+          </button>
+          <div style={{ fontSize: 18, fontWeight: "bold" }}>
+            Freiwilligen-Profil
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button
+            onClick={onHome}
+            style={{
+              background: "none",
+              border: "none",
+              color: "#8B7355",
+              fontSize: 13,
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            🏠
+          </button>
+          <button
+            onClick={logout}
+            style={{
+              background: "rgba(255,255,255,0.1)",
+              border: "none",
+              color: "#8B7355",
+              fontSize: 12,
+              padding: "6px 12px",
+              borderRadius: 20,
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            Abmelden
+          </button>
+        </div>
+      </div>
+
+      <div style={{ padding: "20px 20px 100px" }}>
+        {/* Profil-Karte */}
+        <div
+          style={{
+            background: "linear-gradient(135deg,#2C2416,#4A3C28)",
+            borderRadius: 16,
+            padding: "24px 20px",
+            marginBottom: 16,
+            textAlign: "center",
+            color: "#F4F0E8",
+          }}
+        >
+          {profil?.avatar_url ? (
+            <img
+              src={profil.avatar_url}
+              alt="Avatar"
+              style={{
+                width: 80,
+                height: 80,
+                borderRadius: "50%",
+                objectFit: "cover",
+                border: "3px solid #C8A96E",
+                margin: "0 auto",
+                display: "block",
+              }}
+            />
+          ) : (
+            <div
+              style={{
+                width: 80,
+                height: 80,
+                borderRadius: "50%",
+                background: "rgba(255,255,255,0.15)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                fontSize: 40,
+                margin: "0 auto",
+              }}
+            >
+              👤
+            </div>
+          )}
+          <div style={{ fontSize: 20, fontWeight: "bold", marginTop: 8 }}>
+            {selectedFreiwilliger.freiwilliger_name}
+          </div>
+          <div style={{ fontSize: 13, color: "#8B7355", marginTop: 2 }}>
+            {selectedFreiwilliger.freiwilliger_email}
+          </div>
+          {profil && (
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "center",
+                gap: 24,
+                marginTop: 12,
+              }}
+            >
+              <div style={{ textAlign: "center" }}>
+                <div
+                  style={{ fontSize: 20, fontWeight: "bold", color: "#E8A87C" }}
+                >
+                  {profil.punkte || 0}
+                </div>
+                <div style={{ fontSize: 11, color: "#8B7355" }}>Punkte</div>
+              </div>
+              <div style={{ textAlign: "center" }}>
+                <div style={{ fontSize: 28 }}>
+                  {getMedaille(profil.punkte || 0).icon}
+                </div>
+                <div style={{ fontSize: 11, color: "#8B7355" }}>Medaille</div>
+              </div>
+              <div style={{ textAlign: "center" }}>
+                <div
+                  style={{ fontSize: 20, fontWeight: "bold", color: "#3A7D44" }}
+                >
+                  {profil.aktionen || 0}
+                </div>
+                <div style={{ fontSize: 11, color: "#8B7355" }}>Aktionen</div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Gebuchter Termin */}
+        {termin && (
+          <div
+            style={{
+              background: "#FAF7F2",
+              borderRadius: 14,
+              padding: "16px",
+              marginBottom: 14,
+              border: "1px solid #E0D8C8",
+            }}
+          >
+            <div
+              style={{
+                fontSize: 11,
+                color: "#8B7355",
+                letterSpacing: 2,
+                textTransform: "uppercase",
+                marginBottom: 6,
+              }}
+            >
+              {istVergangen ? "Vergangener Termin" : "Bevorstehender Termin"}
+            </div>
+            <div style={{ fontSize: 14, color: "#2C2416", fontWeight: "bold" }}>
+              📅 {formatDate(termin.datum)} · 🕐 {termin.startzeit}
+              {termin.endzeit ? ` – ${termin.endzeit}` : ""}
+            </div>
+            <div
+              style={{
+                fontSize: 12,
+                color: istVergangen ? "#8B7355" : "#5B9BD5",
+                marginTop: 4,
+                fontWeight: "bold",
+              }}
+            >
+              {istVergangen ? "⏰ Vergangen" : "📅 Bevorstehend"}
+            </div>
+          </div>
+        )}
+
+        {/* Fähigkeiten */}
+        {profil?.skills?.length > 0 && (
+          <div
+            style={{
+              background: "#FAF7F2",
+              borderRadius: 14,
+              padding: "16px",
+              marginBottom: 14,
+              border: "1px solid #E0D8C8",
+            }}
+          >
+            <div
+              style={{
+                fontSize: 11,
+                color: "#8B7355",
+                letterSpacing: 2,
+                textTransform: "uppercase",
+                marginBottom: 8,
+              }}
+            >
+              Fähigkeiten
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {profil.skills.map((sid) => {
+                const skill = SKILLS.find((s) => s.id === sid);
+                return skill ? (
+                  <span
+                    key={sid}
+                    style={{
+                      background: "#EDE8DE",
+                      padding: "5px 12px",
+                      borderRadius: 20,
+                      fontSize: 12,
+                      color: "#5C4A2A",
+                    }}
+                  >
+                    {skill.icon} {skill.label}
+                  </span>
+                ) : null;
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Sprachen */}
+        {profil?.sprachen && (
+          <div
+            style={{
+              background: "#FAF7F2",
+              borderRadius: 14,
+              padding: "16px",
+              marginBottom: 14,
+              border: "1px solid #E0D8C8",
+            }}
+          >
+            <div
+              style={{
+                fontSize: 11,
+                color: "#8B7355",
+                letterSpacing: 2,
+                textTransform: "uppercase",
+                marginBottom: 6,
+              }}
+            >
+              🗣️ Sprachen
+            </div>
+            <div style={{ fontSize: 14, color: "#2C2416" }}>
+              {profil.sprachen}
+            </div>
+          </div>
+        )}
+
+        {/* PLZ / Wohnort */}
+        {profil?.plz && (
+          <div
+            style={{
+              background: "#FAF7F2",
+              borderRadius: 14,
+              padding: "16px",
+              marginBottom: 14,
+              border: "1px solid #E0D8C8",
+            }}
+          >
+            <div
+              style={{
+                fontSize: 11,
+                color: "#8B7355",
+                letterSpacing: 2,
+                textTransform: "uppercase",
+                marginBottom: 6,
+              }}
+            >
+              📍 Wohnort
+            </div>
+            <div style={{ fontSize: 14, color: "#2C2416" }}>
+              PLZ {profil.plz} · Umkreis {profil.umkreis} km
+            </div>
+          </div>
+        )}
+
+        {!profil?.skills?.length && !profil?.sprachen && (
+          <div
+            style={{
+              background: "#FAF7F2",
+              borderRadius: 14,
+              padding: "16px",
+              marginBottom: 14,
+              border: "1px solid #E0D8C8",
+            }}
+          >
+            <div style={{ fontSize: 13, color: "#8B7355" }}>
+              Keine weiteren Angaben hinterlegt.
+            </div>
+          </div>
+        )}
+
+        {/* Anwesenheit bestätigen - NUR bei vergangenem Termin */}
+        {istVergangen &&
+          !selectedFreiwilliger.bestaetigt &&
+          !selectedFreiwilliger.nicht_erschienen && (
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                onClick={async () => {
+                  await handleBestaetigen(selectedFreiwilliger.id, true);
+                  setSelectedFreiwilliger((prev) => ({
+                    ...prev,
+                    bestaetigt: true,
+                  }));
+                }}
+                style={{
+                  flex: 1,
+                  padding: "12px",
+                  borderRadius: 12,
+                  border: "none",
+                  background: "#3A7D44",
+                  color: "#fff",
+                  fontSize: 14,
+                  fontFamily: "inherit",
+                  fontWeight: "bold",
+                  cursor: "pointer",
+                }}
+              >
+                ✓ Erschienen (+5)
+              </button>
+              <button
+                onClick={async () => {
+                  await handleBestaetigen(selectedFreiwilliger.id, false);
+                  setSelectedFreiwilliger((prev) => ({
+                    ...prev,
+                    nicht_erschienen: true,
+                  }));
+                }}
+                style={{
+                  flex: 1,
+                  padding: "12px",
+                  borderRadius: 12,
+                  border: "none",
+                  background: "#E85C5C",
+                  color: "#fff",
+                  fontSize: 14,
+                  fontFamily: "inherit",
+                  fontWeight: "bold",
+                  cursor: "pointer",
+                }}
+              >
+                ✗ Nicht erschienen
+              </button>
+            </div>
+          )}
+        {istVergangen && selectedFreiwilliger.bestaetigt && (
+          <div
+            style={{
+              textAlign: "center",
+              padding: "12px",
+              background: "#3A7D4418",
+              borderRadius: 12,
+              color: "#3A7D44",
+              fontWeight: "bold",
+            }}
+          >
+            ✓ Erschienen bestätigt
+          </div>
+        )}
+        {istVergangen && selectedFreiwilliger.nicht_erschienen && (
+          <div
+            style={{
+              textAlign: "center",
+              padding: "12px",
+              background: "#E85C5C18",
+              borderRadius: 12,
+              color: "#E85C5C",
+              fontWeight: "bold",
+            }}
+          >
+            ✗ Nicht erschienen
+          </div>
+        )}
+        {!istVergangen && (
+          <div
+            style={{
+              textAlign: "center",
+              padding: "12px",
+              background: "#EDE8DE",
+              borderRadius: 12,
+              color: "#8B7355",
+              fontSize: 13,
+            }}
+          >
+            📅 Termin noch nicht stattgefunden – Bestätigung danach möglich
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export {
+  DetailScreen,
+  VereinProfilPublic,
+  FreiwilligerProfil,
+  EinstellungenScreen,
+  FreiwilligerProfilVerein
+};
