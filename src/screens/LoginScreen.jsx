@@ -154,17 +154,11 @@ function LoginScreen({
       return;
     }
     const gemeinde_id = await getGemeindeByPlz(plz);
-    if (!gemeinde_id) {
-      await supabase.auth.signOut();
-      setLoading(false);
-      setError("Für diese PLZ wurde noch keine Gemeinde gefunden.");
-      return;
-    }
     await supabase
       .from("vereine")
       .insert({
         auth_id: authData.user.id,
-        gemeinde_id,
+        gemeinde_id: gemeinde_id || null,
         name: orgName,
         email,
         ort,
@@ -340,13 +334,13 @@ function LoginScreen({
             <RoleCard
               icon="🏢"
               title="Ich bin ein Verein"
-              sub="Stellen ausschreiben & Freiwillige finden"
+              sub="Unabhängig registrieren, Stellen ausschreiben & Freiwillige finden"
               onClick={() => setMode("verein")}
             />
             <RoleCard
               icon="🏛️"
               title="Ich bin eine Gemeinde"
-              sub="Organisationen verwalten & eigene Stellen veröffentlichen"
+              sub="Vereine einladen, verwalten & eigene Stellen veröffentlichen"
               onClick={() => setMode("gemeinde")}
             />
           </div>

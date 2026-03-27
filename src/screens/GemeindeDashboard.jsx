@@ -14,8 +14,18 @@ export default function GemeindeDashboard({
   onBack,
   logout,
   onCreateStelle,
+  onInviteOrganisation,
 }) {
   const [tab, setTab] = useState('dashboard');
+
+  const [inviteForm, setInviteForm] = useState({
+    orgName: '',
+    kontaktName: '',
+    email: '',
+    telefon: '',
+    nachricht: '',
+  });
+
   const [form, setForm] = useState({
     titel: '',
     beschreibung: '',
@@ -58,6 +68,26 @@ export default function GemeindeDashboard({
     setTab('stellen');
   };
 
+
+  const handleInvite = async () => {
+    const payload = {
+      ...inviteForm,
+      gemeinde_id: user?.id,
+      gemeinde_name: user?.name || user?.ort || 'Gemeinde',
+      status: 'offen',
+    };
+    const ok = await onInviteOrganisation?.(payload);
+    if (ok === false) return;
+    setInviteForm({
+      orgName: '',
+      kontaktName: '',
+      email: '',
+      telefon: '',
+      nachricht: '',
+    });
+    setTab('postfach');
+  };
+
   return (
     <div>
       <Header title="Gemeinde-Dashboard" subtitle={user?.name || user?.ort || 'Gemeinde'} onBack={onBack} onLogout={logout} />
@@ -67,6 +97,7 @@ export default function GemeindeDashboard({
           ['stellen','Eigene Stellen'],
           ['erstellen','Stelle erstellen'],
           ['organisationen','Organisationen'],
+          ['einladen','Verein einladen'],
           ['postfach','Postfach'],
           ['csr','CSR-Report'],
         ].map(([key,label]) => (
@@ -81,7 +112,7 @@ export default function GemeindeDashboard({
               ['Organisationen', organisationen.length],
               ['Eigene Stellen', gemeindeStellen.length],
               ['Anmeldungen', totalBewerbungen],
-              ['Anfragen', inbox.length],
+              ['Einladungen & Anfragen', inbox.length],
             ].map(([label, value]) => (
               <div key={label} style={{ background:'#FAF7F2', borderRadius:18, padding:18, border:'1px solid #E6D9C2' }}>
                 <div style={{ color:'#8B7355', fontSize:12, marginBottom:8 }}>{label}</div>
@@ -148,13 +179,36 @@ export default function GemeindeDashboard({
         </div>
       )}
 
+
+      {tab === 'einladen' && (
+        <div style={{ padding:'0 16px 24px' }}>
+          <div style={{ background:'#FAF7F2', borderRadius:18, padding:18, border:'1px solid #E6D9C2' }}>
+            <SectionLabel>Verein zur Teilnahme einladen</SectionLabel>
+            <div style={{ color:'#5C4A32', fontSize:14, lineHeight:1.6, marginBottom:14 }}>
+              Gemeinden können Vereine aktiv einladen. Vereine können sich aber weiterhin auch unabhängig selbst registrieren.
+            </div>
+            <Input label="Name des Vereins" value={inviteForm.orgName} onChange={(e)=>setInviteForm((f)=>({...f, orgName:e.target ? e.target.value : e}))} />
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10 }}>
+              <Input label="Ansprechpartner" value={inviteForm.kontaktName} onChange={(e)=>setInviteForm((f)=>({...f, kontaktName:e.target ? e.target.value : e}))} />
+              <Input label="Telefon" value={inviteForm.telefon} onChange={(e)=>setInviteForm((f)=>({...f, telefon:e.target ? e.target.value : e}))} />
+            </div>
+            <Input label="E-Mail" value={inviteForm.email} onChange={(e)=>setInviteForm((f)=>({...f, email:e.target ? e.target.value : e}))} />
+            <div style={{ marginBottom:14 }}>
+              <div style={{ fontSize:12, fontWeight:700, color:'#8B7355', marginBottom:8 }}>Nachricht</div>
+              <textarea value={inviteForm.nachricht} onChange={(e)=>setInviteForm((f)=>({...f, nachricht:e.target.value}))} rows={4} style={{ width:'100%', borderRadius:14, border:'1px solid #D8CBB6', padding:12, fontFamily:'inherit' }} placeholder="Kurze Einladung für den Verein..." />
+            </div>
+            <BigButton onClick={handleInvite} green>Einladung senden</BigButton>
+          </div>
+        </div>
+      )}
+
       {tab === 'postfach' && (
         <div style={{ padding:'0 16px 24px' }}>
           {inbox.length === 0 ? (
-            <EmptyState icon="📬" text="Keine offenen Nachrichten" sub="Partneranfragen und Hinweise landen hier." />
+            <EmptyState icon="📬" text="Keine offenen Einladungen oder Nachrichten" sub="Gesendete Vereinseinladungen, Partneranfragen und Hinweise landen hier." />
           ) : inbox.map((msg, idx)=>(
             <div key={msg.id || idx} style={{ background:'#FAF7F2', borderRadius:18, padding:16, marginBottom:10, border:'1px solid #E6D9C2' }}>
-              <div style={{ fontWeight:700 }}>{msg.title || msg.betreff || 'Anfrage'}</div>
+              <div style={{ fontWeight:700 }}>{msg.title || msg.betreff || msg.orgName || 'Anfrage'}</div>
               <div style={{ fontSize:12, color:'#8B7355', margin:'4px 0 8px' }}>{msg.email || msg.absender || 'unbekannt'}</div>
               <div style={{ fontSize:13, color:'#5C4A32' }}>{msg.message || msg.text || ''}</div>
             </div>

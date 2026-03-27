@@ -27,6 +27,10 @@ function VereinDashboard({
     (s) => s.verein_id === user.data.id && s.archiviert
   );
   const [zeigeArchiv, setZeigeArchiv] = useState(false);
+  const zustandeGekommeneEinsaetze = meineStellen.reduce((sum, stelle) => {
+    return sum + (stelle.termine || []).filter((termin) => (termin.bewerbungen || []).some((b) => b.bestaetigt)).length;
+  }, 0);
+  const showPayReminder = zustandeGekommeneEinsaetze >= 3 && !user.data.plan_aktiv;
   return (
     <div>
       <div
@@ -274,6 +278,25 @@ function VereinDashboard({
             <div style={{ fontSize: 12, color: "#8B6800", marginTop: 4 }}>
               Dein Verein wird geprüft. Wir melden uns per Email sobald du
               freigeschaltet wirst.
+            </div>
+          </div>
+        )}
+        {showPayReminder && (
+          <div
+            style={{
+              background: "#FFF5E8",
+              borderRadius: 12,
+              padding: "14px 16px",
+              marginBottom: 16,
+              border: "1px solid #E8A87C",
+            }}
+          >
+            <div style={{ fontSize: 13, color: "#8B5B1F", fontWeight: "bold" }}>
+              💳 Civico Pro Erinnerung
+            </div>
+            <div style={{ fontSize: 12, color: "#8B5B1F", marginTop: 4, lineHeight: 1.6 }}>
+              Dein Verein hat bereits {zustandeGekommeneEinsaetze} zustande gekommene Einsätze über Civico erreicht.
+              Jetzt erscheint die Pay-Erinnerung im Frontend. Das Backend hängen wir im nächsten Schritt sauber dran.
             </div>
           </div>
         )}

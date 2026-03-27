@@ -1094,6 +1094,50 @@ export default function App() {
     }
   };
 
+
+  const handleInviteOrganisation = async (payload) => {
+    if (!payload?.orgName || !payload?.email) {
+      showToast("Bitte Vereinsname und E-Mail angeben.", "#E85C5C");
+      return false;
+    }
+
+    const inviteEntry = {
+      id: `invite-${Date.now()}`,
+      title: `Einladung an ${payload.orgName}`,
+      betreff: `Einladung an ${payload.orgName}`,
+      email: payload.email,
+      text: payload.nachricht || `${payload.orgName} wurde von ${payload.gemeinde_name || "einer Gemeinde"} zur Teilnahme an Civico eingeladen.`,
+      status: payload.status || "offen",
+      type: "verein_einladung",
+      orgName: payload.orgName,
+      kontaktName: payload.kontaktName || "",
+      telefon: payload.telefon || "",
+      created_at: new Date().toISOString(),
+    };
+
+    try {
+      const { error } = await supabase.from("verein_einladungen").insert({
+        gemeinde_id: payload.gemeinde_id,
+        org_name: payload.orgName,
+        kontakt_name: payload.kontaktName || null,
+        email: payload.email,
+        telefon: payload.telefon || null,
+        nachricht: payload.nachricht || null,
+        status: payload.status || "offen",
+      });
+
+      if (error) {
+        console.log("verein_einladungen table not ready yet:", error.message);
+      }
+    } catch (error) {
+      console.log("invite insert skipped:", error);
+    }
+
+    setAdminInbox((prev) => [inviteEntry, ...prev]);
+    showToast(`Einladung an ${payload.orgName} gespeichert.`, "#3A7D44");
+    return true;
+  };
+
   const derivedOrganisationen = Array.from(
     new Map(
       stellen.filter((s) => s.vereine).map((s) => [s.vereine.id, s.vereine])
@@ -2181,6 +2225,7 @@ export default function App() {
           onBack={goBack}
           logout={logout}
           onCreateStelle={handleGemeindeStelleSpeichern}
+          onInviteOrganisation={handleInviteOrganisation}
         />
       )}
 

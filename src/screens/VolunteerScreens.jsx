@@ -2,6 +2,14 @@ import React, { useState, useEffect } from 'react';
 import { supabase, T, KATEGORIEN, SKILLS, MEDAILLEN, getSkillLabel, getKat, getMedaille, getNextMedaille, getMedailleName, IMPRESSUM_TEXT, DATENSCHUTZ_TEXT, AGB_TEXT, formatDate, getGemeindeByPlz, isKlarname, isTerminNochNichtGestartet, isTerminAktuell } from '../core/shared';
 import { Header, StelleCard, VereineListe, BottomBar, DatenschutzBox, Input, BigButton, Chip, InfoChip, SectionLabel, RoleCard, EmptyState, ErrorMsg } from '../components/ui';
 
+const copyToClipboard = async (value) => {
+  try {
+    await navigator.clipboard.writeText(value);
+  } catch (e) {
+    console.log('copy failed', e);
+  }
+};
+
 function DetailScreen({
   stelle,
   verein,
@@ -789,17 +797,31 @@ function VereinProfilPublic({
                     display: "flex",
                     gap: 8,
                     alignItems: "center",
+                    justifyContent: "space-between",
                     fontSize: 14,
                     color: "#2C2416",
+                    flexWrap: "wrap",
                   }}
                 >
-                  <span>📧</span>
-                  <a
-                    href={`mailto:${verein.kontakt_email}`}
-                    style={{ color: "#3A7D44", textDecoration: "none" }}
+                  <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+                    <span>📧</span>
+                    <span>{verein.kontakt_email}</span>
+                  </div>
+                  <button
+                    onClick={() => copyToClipboard(verein.kontakt_email)}
+                    style={{
+                      border: "1px solid #D8CBB6",
+                      background: "transparent",
+                      borderRadius: 16,
+                      padding: "4px 10px",
+                      color: "#8B7355",
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                      fontSize: 12,
+                    }}
                   >
-                    {verein.kontakt_email}
-                  </a>
+                    Kopieren
+                  </button>
                 </div>
               )}
               {verein.telefon && (
