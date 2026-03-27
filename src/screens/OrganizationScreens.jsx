@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { supabase, T, KATEGORIEN, SKILLS, getSkillLabel, getKat, getMedaille, getNextMedaille, getMedailleName, IMPRESSUM_TEXT, DATENSCHUTZ_TEXT, AGB_TEXT, formatDate, getGemeindeByPlz, isKlarname, isTerminNochNichtGestartet, isTerminAktuell } from '../core/shared';
 import { Header, StelleCard, VereineListe, BottomBar, DatenschutzBox, Input, BigButton, Chip, InfoChip, SectionLabel, RoleCard, EmptyState, ErrorMsg } from '../components/ui';
 
-
 function VereinDashboard({
   user,
   stellen,
@@ -21,8 +20,6 @@ function VereinDashboard({
   onMarkNotifRead,
 }) {
   const [showNotif, setShowNotif] = useState(false);
-  const [activeTab, setActiveTab] = useState("dashboard");
-
   const meineStellen = stellen.filter(
     (s) => s.verein_id === user.data.id && !s.archiviert
   );
@@ -30,534 +27,403 @@ function VereinDashboard({
     (s) => s.verein_id === user.data.id && s.archiviert
   );
   const [zeigeArchiv, setZeigeArchiv] = useState(false);
-
-  const totalAnmeldungen = meineStellen.reduce(
-    (sum, s) => sum + (s.termine || []).reduce((tSum, t) => tSum + (t.bewerbungen?.length || 0), 0),
-    0
-  );
-  const totalAufrufe = meineStellen.reduce((sum, s) => sum + (s.aufrufe || 0), 0);
-
-  const dashboardCards = [
-    { icon: "🌱", label: "Aktive Stellen", value: meineStellen.length },
-    { icon: "👥", label: "Anmeldungen", value: totalAnmeldungen },
-    { icon: "👁️", label: "Aufrufe", value: totalAufrufe },
-    { icon: "❤️", label: "Follower", value: followers?.length || 0 },
-  ];
-
-  const navItems = [
-    { key: "dashboard", label: "Dashboard", icon: "📊" },
-    { key: "stellen", label: "Stellen", icon: "🌱" },
-    { key: "analyse", label: "Analyse", icon: "📈" },
-    { key: "profil", label: "Profil", icon: "🏢" },
-  ];
-
-  const openTab = (key) => {
-    setActiveTab(key);
-    if (key === "analyse") {
-      onAnalyse?.();
-    }
-    if (key === "profil") {
-      onProfil?.();
-    }
-  };
-
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        background: "#F4F0E8",
-        display: "grid",
-        gridTemplateColumns: "220px minmax(0,1fr)",
-      }}
-    >
-      <aside
+    <div>
+      <div
         style={{
-          background: "#1A1208",
+          background: "linear-gradient(160deg,#1A1208,#2C2416)",
+          padding: "20px 20px 16px",
           color: "#F4F0E8",
-          padding: "22px 14px 16px",
           display: "flex",
-          flexDirection: "column",
-          minHeight: "100vh",
-          position: "sticky",
-          top: 0,
+          alignItems: "center",
+          justifyContent: "space-between",
         }}
       >
-        <div style={{ padding: "0 8px 16px", borderBottom: "1px solid rgba(200,169,110,.18)" }}>
-          <div style={{ fontFamily: "'Georgia', serif", fontSize: 22, letterSpacing: 2 }}>Civico</div>
-          <div style={{ fontSize: 12, color: "#8B7355", marginTop: 6 }}>{user.data.name}</div>
+        <div>
+          <div style={{ fontSize: 18, fontWeight: "bold" }}>
+            {user.data.name}
+          </div>
+          <div style={{ fontSize: 12, color: "#8B7355" }}>Dashboard</div>
         </div>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 4, paddingTop: 12, flex: 1 }}>
-          {navItems.map((item) => (
-            <button
-              key={item.key}
-              onClick={() => openTab(item.key)}
-              style={{
-                border: "none",
-                background: activeTab === item.key ? "rgba(200,169,110,.15)" : "transparent",
-                color: activeTab === item.key ? "#C8A96E" : "#8B7355",
-                borderRadius: 10,
-                padding: "10px 12px",
-                cursor: "pointer",
-                textAlign: "left",
-                fontFamily: "inherit",
-                fontSize: 13,
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-              }}
-            >
-              <span>{item.icon}</span>
-              <span>{item.label}</span>
-            </button>
-          ))}
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <button
-            onClick={() => {
-              if (!user.data.verifiziert) {
-                showToast("Dein Verein muss erst freigeschaltet werden.", "#E8A87C");
-                return;
-              }
-              onNeu?.();
-            }}
+            onClick={onHome}
             style={{
+              background: "none",
               border: "none",
-              background: "#C8A96E",
-              color: "#1A1208",
-              borderRadius: 24,
-              padding: "10px 14px",
+              color: "#8B7355",
+              fontSize: 13,
               cursor: "pointer",
               fontFamily: "inherit",
-              fontSize: 13,
-              fontWeight: "bold",
-              textAlign: "left",
-              marginTop: 8,
             }}
           >
-            + Neue Stelle
+            🏠
           </button>
-        </div>
-
-        <div style={{ borderTop: "1px solid rgba(200,169,110,.15)", paddingTop: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-            <div
+          <div style={{ position: "relative" }}>
+            <button
+              onClick={() => {
+                setShowNotif((p) => !p);
+                if (notifications.some((n) => !n.gelesen))
+                  onMarkNotifRead && onMarkNotifRead();
+              }}
               style={{
-                width: 34,
-                height: 34,
-                borderRadius: "50%",
-                border: "2px solid #C8A96E",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                background: "linear-gradient(135deg,#2C2416,#4A3C28)",
-                fontSize: 18,
+                background: "none",
+                border: "none",
+                color: "#F4F0E8",
+                fontSize: 20,
+                cursor: "pointer",
+                padding: "4px 6px",
               }}
             >
-              🏢
-            </div>
-            <div>
-              <div style={{ fontSize: 12, color: "#F4F0E8" }}>{user.data.name}</div>
-              <div style={{ fontSize: 10, color: "#8B7355" }}>{user.data.ort || "Verein"}</div>
-            </div>
+              🔔
+              {notifications.filter((n) => !n.gelesen).length > 0 && (
+                <span
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    right: 0,
+                    background: "#E85C5C",
+                    color: "#fff",
+                    fontSize: 9,
+                    borderRadius: "50%",
+                    width: 16,
+                    height: 16,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    fontWeight: "bold",
+                  }}
+                >
+                  {notifications.filter((n) => !n.gelesen).length > 9
+                    ? "9+"
+                    : notifications.filter((n) => !n.gelesen).length}
+                </span>
+              )}
+            </button>
           </div>
           <button
             onClick={logout}
             style={{
-              width: "100%",
-              border: "1px solid rgba(255,255,255,.12)",
-              background: "transparent",
+              background: "rgba(255,255,255,0.1)",
+              border: "none",
               color: "#8B7355",
-              borderRadius: 9,
-              padding: "8px 10px",
+              fontSize: 12,
+              padding: "6px 12px",
+              borderRadius: 20,
               cursor: "pointer",
               fontFamily: "inherit",
-              fontSize: 11,
             }}
           >
-            ← Abmelden
+            Abmelden
           </button>
         </div>
-      </aside>
-
-      <main style={{ minWidth: 0 }}>
+      </div>
+      {/* Notification Dropdown */}
+      {showNotif && (
         <div
           style={{
-            background: "linear-gradient(160deg,#1A1208,#2C2416)",
-            color: "#F4F0E8",
-            padding: "22px 24px 18px",
+            position: "fixed",
+            top: 62,
+            right: "calc(50% - 240px + 16px)",
+            background: "#FAF7F2",
+            borderRadius: 12,
+            boxShadow: "0 4px 20px rgba(0,0,0,0.2)",
+            zIndex: 250,
+            width: 300,
+            maxHeight: 400,
+            overflowY: "auto",
+          }}
+          onClick={() => setShowNotif(false)}
+        >
+          <div
+            style={{
+              padding: "12px 14px",
+              borderBottom: "1px solid #E0D8C8",
+              fontSize: 12,
+              fontWeight: "bold",
+              color: "#2C2416",
+            }}
+          >
+            🔔 Benachrichtigungen
+          </div>
+          {notifications.length === 0 ? (
+            <div
+              style={{
+                padding: "20px",
+                textAlign: "center",
+                fontSize: 12,
+                color: "#8B7355",
+              }}
+            >
+              Keine Benachrichtigungen
+            </div>
+          ) : (
+            notifications.map((n) => (
+              <div
+                key={n.id}
+                style={{
+                  padding: "10px 14px",
+                  borderBottom: "1px solid #F0EBE0",
+                  background: n.gelesen ? "#FAF7F2" : "#EDE8DE",
+                }}
+              >
+                <div
+                  style={{ fontSize: 13, fontWeight: "bold", color: "#2C2416" }}
+                >
+                  {n.titel}
+                </div>
+                <div style={{ fontSize: 12, color: "#8B7355", marginTop: 2 }}>
+                  {n.text}
+                </div>
+                <div style={{ fontSize: 10, color: "#C4B89A", marginTop: 4 }}>
+                  {new Date(n.created_at).toLocaleDateString("de-DE", {
+                    day: "2-digit",
+                    month: "2-digit",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+      <div style={{ padding: "16px 16px 100px" }}>
+        <div
+          style={{
             display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: 16,
+            gap: 8,
+            marginBottom: 16,
             flexWrap: "wrap",
           }}
         >
-          <div>
-            <div style={{ fontFamily: "'Georgia', serif", fontSize: 28, marginBottom: 4 }}>
-              {activeTab === "dashboard"
-                ? "Dashboard"
-                : activeTab === "stellen"
-                ? "Stellen"
-                : activeTab === "analyse"
-                ? "Analyse"
-                : "Vereinsprofil"}
-            </div>
-            <div style={{ fontSize: 13, color: "#8B7355" }}>
-              {activeTab === "dashboard"
-                ? `Willkommen, ${user.data.name}!`
-                : activeTab === "stellen"
-                ? "Verwalte deine Ehrenamtsstellen"
-                : activeTab === "analyse"
-                ? "Statistiken deines Vereins"
-                : "So sehen dich Freiwillige"}
-            </div>
-          </div>
-
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <button
-              onClick={onHome}
-              style={{
-                background: "none",
-                border: "none",
-                color: "#8B7355",
-                fontSize: 13,
-                cursor: "pointer",
-                fontFamily: "inherit",
-              }}
-            >
-              🏠 Home
-            </button>
-            <div style={{ position: "relative" }}>
-              <button
-                onClick={() => {
-                  setShowNotif((p) => !p);
-                  if (notifications.some((n) => !n.gelesen)) {
-                    onMarkNotifRead && onMarkNotifRead();
-                  }
-                }}
-                style={{
-                  background: "rgba(255,255,255,.08)",
-                  border: "none",
-                  color: "#F4F0E8",
-                  fontSize: 18,
-                  cursor: "pointer",
-                  padding: "8px 10px",
-                  borderRadius: 20,
-                }}
-              >
-                🔔
-                {notifications.filter((n) => !n.gelesen).length > 0 && (
-                  <span
-                    style={{
-                      position: "absolute",
-                      top: 0,
-                      right: -2,
-                      background: "#E85C5C",
-                      color: "#fff",
-                      fontSize: 9,
-                      borderRadius: "50%",
-                      width: 16,
-                      height: 16,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontWeight: "bold",
-                    }}
-                  >
-                    {notifications.filter((n) => !n.gelesen).length > 9
-                      ? "9+"
-                      : notifications.filter((n) => !n.gelesen).length}
-                  </span>
-                )}
-              </button>
-            </div>
-          </div>
+          <button
+            onClick={() => {
+              if (!user.data.verifiziert) {
+                showToast(
+                  "Dein Verein muss erst freigeschaltet werden.",
+                  "#E8A87C"
+                );
+                return;
+              }
+              onNeu();
+            }}
+            style={{
+              flex: 2,
+              padding: "12px",
+              borderRadius: 12,
+              border: "none",
+              background: user.data.verifiziert
+                ? "linear-gradient(135deg, #2C2416, #4A3C28)"
+                : "#C4B89A",
+              color: "#F4F0E8",
+              fontSize: 14,
+              fontFamily: "inherit",
+              fontWeight: "bold",
+              cursor: "pointer",
+            }}
+          >
+            + Neue Stelle
+          </button>
+          <button
+            onClick={onProfil}
+            style={{
+              flex: 1,
+              padding: "12px",
+              borderRadius: 12,
+              border: "1px solid #8B7355",
+              background: "transparent",
+              color: "#8B7355",
+              fontSize: 13,
+              fontFamily: "inherit",
+              cursor: "pointer",
+            }}
+          >
+            👤 Profil
+          </button>
+          <button
+            onClick={onAnalyse}
+            style={{
+              flex: 1,
+              padding: "12px",
+              borderRadius: 12,
+              border: "1px solid #5B9BD5",
+              background: "transparent",
+              color: "#5B9BD5",
+              fontSize: 13,
+              fontFamily: "inherit",
+              cursor: "pointer",
+            }}
+          >
+            📊 Analyse
+          </button>
         </div>
-
-        {showNotif && (
+        {!user.data.verifiziert && (
           <div
             style={{
-              position: "fixed",
-              top: 84,
-              right: 24,
-              background: "#FAF7F2",
+              background: "#FFF8E8",
               borderRadius: 12,
-              boxShadow: "0 4px 20px rgba(0,0,0,0.2)",
-              zIndex: 250,
-              width: 320,
-              maxHeight: 420,
-              overflowY: "auto",
+              padding: "14px 16px",
+              marginBottom: 16,
+              border: "1px solid #E8C84A",
+            }}
+          >
+            <div style={{ fontSize: 13, color: "#8B6800", fontWeight: "bold" }}>
+              ⏳ Verifizierung ausstehend
+            </div>
+            <div style={{ fontSize: 12, color: "#8B6800", marginTop: 4 }}>
+              Dein Verein wird geprüft. Wir melden uns per Email sobald du
+              freigeschaltet wirst.
+            </div>
+          </div>
+        )}
+        {/* Follower Übersicht */}
+        {followers?.length > 0 && (
+          <div
+            style={{
+              background: "#FAF7F2",
+              borderRadius: 14,
+              padding: "14px 16px",
+              marginBottom: 16,
+              border: "1px solid #E0D8C8",
             }}
           >
             <div
               style={{
-                padding: "12px 14px",
-                borderBottom: "1px solid #E0D8C8",
-                fontSize: 12,
-                fontWeight: "bold",
-                color: "#2C2416",
+                fontSize: 11,
+                color: "#8B7355",
+                letterSpacing: 2,
+                textTransform: "uppercase",
+                marginBottom: 8,
               }}
             >
-              🔔 Benachrichtigungen
+              👥 FOLGEN DIR
             </div>
-            {notifications.length === 0 ? (
-              <div style={{ padding: 20, textAlign: "center", fontSize: 12, color: "#8B7355" }}>
-                Keine Benachrichtigungen
-              </div>
-            ) : (
-              notifications.map((n) => (
+            <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+              <div>
                 <div
-                  key={n.id}
+                  style={{ fontSize: 28, fontWeight: "bold", color: "#C8A96E" }}
+                >
+                  {followers.length}
+                </div>
+                <div style={{ fontSize: 12, color: "#8B7355" }}>
+                  Freiwillige
+                </div>
+              </div>
+            </div>
+            <div
+              style={{
+                display: "flex",
+                gap: 6,
+                flexWrap: "wrap",
+                marginTop: 8,
+              }}
+            >
+              {followers.slice(0, 5).map((f, i) => (
+                <div
+                  key={i}
                   style={{
-                    padding: "10px 14px",
-                    borderBottom: "1px solid #F0EBE0",
-                    background: n.gelesen ? "#FAF7F2" : "#EDE8DE",
+                    background: "#EDE8DE",
+                    borderRadius: 20,
+                    padding: "4px 10px",
+                    fontSize: 11,
+                    color: "#5C4A2A",
                   }}
                 >
-                  <div style={{ fontSize: 13, fontWeight: "bold", color: "#2C2416" }}>{n.titel}</div>
-                  <div style={{ fontSize: 12, color: "#8B7355", marginTop: 2 }}>{n.text}</div>
-                  <div style={{ fontSize: 10, color: "#C4B89A", marginTop: 4 }}>
-                    {new Date(n.created_at).toLocaleDateString("de-DE", {
-                      day: "2-digit",
-                      month: "2-digit",
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                  </div>
+                  👤 {f.freiwillige?.name || "Freiwilliger"}
                 </div>
-              ))
-            )}
+              ))}
+              {followers.length > 5 && (
+                <div
+                  style={{ fontSize: 11, color: "#8B7355", padding: "4px 6px" }}
+                >
+                  +{followers.length - 5} weitere
+                </div>
+              )}
+            </div>
           </div>
         )}
-
-        <div style={{ padding: 24 }}>
-          <div
-            style={{
-              display: "flex",
-              gap: 8,
-              flexWrap: "wrap",
-              marginBottom: 18,
-            }}
-          >
-            {navItems.map((item) => (
-              <button
-                key={item.key}
-                onClick={() => openTab(item.key)}
+        <SectionLabel>Deine Stellen ({meineStellen.length})</SectionLabel>
+        {meineStellen.length === 0 ? (
+          <EmptyState
+            icon="📋"
+            text="Noch keine Stellen"
+            sub="Erstelle deine erste Ehrenamtsstelle!"
+          />
+        ) : (
+          meineStellen.map((s) => {
+            const gesamtAnmeldungen = (s.termine || []).reduce(
+              (sum, t) => sum + (t.bewerbungen?.length || 0),
+              0
+            );
+            return (
+              <div
+                key={s.id}
                 style={{
-                  border: "none",
-                  borderRadius: 18,
-                  padding: "8px 14px",
-                  cursor: "pointer",
-                  background: activeTab === item.key ? "#C8A96E" : "#EFE8DB",
-                  color: activeTab === item.key ? "#1A1208" : "#5C4A32",
-                  fontFamily: "inherit",
-                  fontSize: 13,
-                  fontWeight: 600,
+                  background: "#FAF7F2",
+                  borderRadius: 14,
+                  padding: "14px",
+                  marginBottom: 10,
+                  border: "1px solid #E0D8C8",
                 }}
               >
-                {item.icon} {item.label}
-              </button>
-            ))}
-          </div>
-
-          {activeTab === "dashboard" && (
-            <>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 10, marginBottom: 18 }}>
-                {dashboardCards.map((card) => (
-                  <div key={card.label} style={{ background: "#FAF7F2", border: "1px solid #E0D8C8", borderRadius: 12, padding: 16, textAlign: "center" }}>
-                    <div style={{ fontSize: 22, marginBottom: 6 }}>{card.icon}</div>
-                    <div style={{ fontFamily: "'Georgia', serif", fontSize: 28, color: card.label === "Follower" ? "#C8A96E" : "#2C2416" }}>{card.value}</div>
-                    <div style={{ fontSize: 11, color: "#8B7355" }}>{card.label}</div>
-                  </div>
-                ))}
-              </div>
-
-              {!user.data.verifiziert && (
                 <div
-                  style={{
-                    background: "#FFF8E8",
-                    borderRadius: 12,
-                    padding: "14px 16px",
-                    marginBottom: 16,
-                    border: "1px solid #E8C84A",
-                  }}
+                  onClick={() => onDetail(s)}
+                  style={{ cursor: "pointer", marginBottom: 10 }}
                 >
-                  <div style={{ fontSize: 13, color: "#8B6800", fontWeight: "bold" }}>⏳ Verifizierung ausstehend</div>
-                  <div style={{ fontSize: 12, color: "#8B6800", marginTop: 4 }}>
-                    Dein Verein wird geprüft. Wir melden uns per Email sobald du freigeschaltet wirst.
+                  <div style={{ fontWeight: "bold", fontSize: 14 }}>
+                    {s.titel}
+                  </div>
+                  <div style={{ fontSize: 12, color: "#8B7355", marginTop: 4 }}>
+                    📍 {s.ort} · 👥 {gesamtAnmeldungen} Anmeldungen · 👁️{" "}
+                    {s.aufrufe || 0} Aufrufe
                   </div>
                 </div>
-              )}
-
-              <div style={{ background: "#FAF7F2", border: "1px solid #E0D8C8", borderRadius: 12, padding: 16, marginBottom: 16 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10, gap: 10, flexWrap: "wrap" }}>
-                  <div style={{ fontSize: 10, color: "#8B7355", letterSpacing: 2, textTransform: "uppercase" }}>Deine Stellen</div>
-                  <button className="" onClick={() => {
-                    if (!user.data.verifiziert) {
-                      showToast("Dein Verein muss erst freigeschaltet werden.", "#E8A87C");
-                      return;
-                    }
-                    onNeu?.();
-                  }} style={{ background: "#C8A96E", color: "#1A1208", border: "none", padding: "8px 14px", borderRadius: 20, fontSize: 12, fontFamily: "inherit", cursor: "pointer", fontWeight: 600 }}>
-                    + Neue Stelle
-                  </button>
-                </div>
-                {meineStellen.length === 0 ? (
-                  <EmptyState icon="📋" text="Noch keine Stellen" sub="Erstelle deine erste Ehrenamtsstelle!" />
-                ) : (
-                  meineStellen.slice(0, 4).map((s) => {
-                    const gesamtAnmeldungen = (s.termine || []).reduce((sum, t) => sum + (t.bewerbungen?.length || 0), 0);
-                    const naechsterTermin = (s.termine || []).find((t) => isTerminNochNichtGestartet(t));
-                    return (
-                      <div key={s.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: "1px solid #F0EBE0" }}>
-                        <div>
-                          <div style={{ fontSize: 14, fontWeight: 600 }}>{getKat(s.kategorie)?.icon} {s.titel}</div>
-                          <div style={{ fontSize: 11, color: "#8B7355" }}>
-                            {gesamtAnmeldungen} Anmeldungen{naechsterTermin ? ` · nächster: ${formatDate(naechsterTermin.datum)}` : ""}
-                          </div>
-                        </div>
-                        <span
-                          style={{
-                            display: "inline-flex",
-                            alignItems: "center",
-                            padding: "3px 8px",
-                            borderRadius: 6,
-                            fontSize: 11,
-                            fontWeight: 500,
-                            background: naechsterTermin && naechsterTermin.freie_plaetze === 0 ? "rgba(232,92,92,.12)" : "rgba(58,125,68,.12)",
-                            color: naechsterTermin && naechsterTermin.freie_plaetze === 0 ? "#E85C5C" : "#3A7D44",
-                          }}
-                        >
-                          {naechsterTermin ? (naechsterTermin.freie_plaetze === 0 ? "Ausgebucht" : `Noch ${naechsterTermin.freie_plaetze} gesucht`) : "–"}
-                        </span>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-
-              <div style={{ background: "#FAF7F2", border: "1px solid #E0D8C8", borderRadius: 12, padding: 16 }}>
-                <div style={{ fontSize: 10, color: "#8B7355", letterSpacing: 2, textTransform: "uppercase", marginBottom: 10 }}>Follower</div>
-                {followers?.length > 0 ? (
-                  <>
-                    <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 10 }}>
-                      <div>
-                        <div style={{ fontFamily: "'Georgia', serif", fontSize: 32, color: "#C8A96E" }}>{followers.length}</div>
-                        <div style={{ fontSize: 12, color: "#8B7355" }}>Freiwillige</div>
-                      </div>
-                    </div>
-                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                      {followers.slice(0, 6).map((f, i) => (
-                        <div key={i} style={{ background: "#EDE8DE", borderRadius: 20, padding: "4px 10px", fontSize: 11, color: "#5C4A2A" }}>
-                          👤 {f.freiwillige?.name || "Freiwilliger"}
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                ) : (
-                  <div style={{ fontSize: 13, color: "#8B7355" }}>Noch keine Follower.</div>
-                )}
-              </div>
-            </>
-          )}
-
-          {activeTab === "stellen" && (
-            <>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18, gap: 12, flexWrap: "wrap" }}>
-                <div>
-                  <div style={{ fontFamily: "'Georgia', serif", fontSize: 24, color: "#2C2416" }}>Stellen</div>
-                  <div style={{ fontSize: 13, color: "#8B7355" }}>Verwalte deine Ehrenamtsstellen</div>
-                </div>
-                <button
-                  onClick={() => {
-                    if (!user.data.verifiziert) {
-                      showToast("Dein Verein muss erst freigeschaltet werden.", "#E8A87C");
-                      return;
-                    }
-                    onNeu?.();
-                  }}
-                  style={{ background: "#C8A96E", color: "#1A1208", border: "none", padding: "9px 16px", borderRadius: 20, fontFamily: "inherit", fontWeight: 600, cursor: "pointer" }}
-                >
-                  + Neue Stelle
-                </button>
-              </div>
-
-              {meineStellen.length === 0 ? (
-                <EmptyState icon="📋" text="Noch keine Stellen" sub="Erstelle deine erste Ehrenamtsstelle!" />
-              ) : (
-                meineStellen.map((s) => {
-                  const gesamtAnmeldungen = (s.termine || []).reduce((sum, t) => sum + (t.bewerbungen?.length || 0), 0);
-                  return (
-                    <div key={s.id} style={{ background: "#FAF7F2", borderRadius: 12, padding: 16, marginBottom: 12, border: "1px solid #E0D8C8" }}>
-                      <div onClick={() => onDetail(s)} style={{ cursor: "pointer", marginBottom: 10 }}>
-                        <div style={{ fontSize: 15, fontWeight: 600 }}>{getKat(s.kategorie)?.icon} {s.titel}</div>
-                        <div style={{ fontSize: 11, color: "#8B7355", marginTop: 4 }}>
-                          📍 {s.ort} · 👥 {gesamtAnmeldungen} Anmeldungen · 👁️ {s.aufrufe || 0} Aufrufe
-                        </div>
-                        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>
-                          {(s.termine || []).map((t) => (
-                            <span key={t.id} style={{
-                              display: "inline-flex",
-                              alignItems: "center",
-                              padding: "3px 8px",
-                              borderRadius: 6,
-                              fontSize: 11,
-                              fontWeight: 500,
-                              background: t.freie_plaetze === 0 ? "rgba(232,92,92,.12)" : "rgba(91,155,213,.15)",
-                              color: t.freie_plaetze === 0 ? "#E85C5C" : "#185FA5",
-                            }}>
-                              📅 {formatDate(t.datum)} {t.startzeit} · {t.freie_plaetze === 0 ? "Ausgebucht" : `Noch ${t.freie_plaetze} gesucht`}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                      <div style={{ display: "flex", gap: 8 }}>
-                        <button onClick={() => onDetail(s)} style={{ flex: 1, padding: 8, borderRadius: 8, border: "1px solid #E0D8C8", background: "transparent", color: "#2C2416", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
-                          👥 Anmeldungen
-                        </button>
-                        <button onClick={(e) => { e.stopPropagation(); onBearbeiten(s); }} style={{ flex: 1, padding: 8, borderRadius: 8, border: "1px solid #C8A96E", background: "transparent", color: "#8B6800", fontSize: 12, cursor: "pointer", fontFamily: "inherit" }}>
-                          ✏️ Bearbeiten
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-
-              {archivierteStellen.length > 0 && (
-                <div style={{ marginTop: 18 }}>
+                <div style={{ display: "flex", gap: 8 }}>
                   <button
-                    onClick={() => setZeigeArchiv((p) => !p)}
+                    onClick={() => onDetail(s)}
                     style={{
-                      width: "100%",
-                      padding: "10px 12px",
-                      borderRadius: 10,
+                      flex: 1,
+                      padding: "7px",
+                      borderRadius: 8,
                       border: "1px solid #E0D8C8",
-                      background: "#FAF7F2",
-                      color: "#8B7355",
+                      background: "transparent",
+                      color: "#2C2416",
+                      fontSize: 12,
                       cursor: "pointer",
                       fontFamily: "inherit",
-                      marginBottom: 10,
                     }}
                   >
-                    {zeigeArchiv ? "Archiv ausblenden" : `Archiv anzeigen (${archivierteStellen.length})`}
+                    👥 Anmeldungen
                   </button>
-                  {zeigeArchiv &&
-                    archivierteStellen.map((s) => (
-                      <div key={s.id} style={{ background: "#FAF7F2", borderRadius: 12, padding: 14, marginBottom: 10, border: "1px solid #E0D8C8", opacity: 0.85 }}>
-                        <div style={{ fontSize: 14, fontWeight: 600 }}>{getKat(s.kategorie)?.icon} {s.titel}</div>
-                        <div style={{ fontSize: 11, color: "#8B7355", marginTop: 4 }}>Archiviert</div>
-                      </div>
-                    ))}
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onBearbeiten(s);
+                    }}
+                    style={{
+                      flex: 1,
+                      padding: "7px",
+                      borderRadius: 8,
+                      border: "1px solid #5B9BD5",
+                      background: "transparent",
+                      color: "#5B9BD5",
+                      fontSize: 12,
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                    }}
+                  >
+                    ✏️ Bearbeiten
+                  </button>
                 </div>
-              )}
-            </>
-          )}
-        </div>
-      </main>
+              </div>
+            );
+          })
+        )}
+      </div>
     </div>
   );
 }
-
 
 function VereinStelleDetail({
   stelle,
@@ -1133,7 +999,6 @@ function VereinStelleDetail({
   );
 }
 
-
 function StelleErstellenScreen({ verein, onBack, onSave }) {
   const [titel, setTitel] = useState("");
   const [beschreibung, setBeschreibung] = useState("");
@@ -1203,81 +1068,56 @@ function StelleErstellenScreen({ verein, onBack, onSave }) {
     onSave(stelleData, termineData);
   };
 
-  const cardStyle = {
-    background: "#FAF7F2",
-    borderRadius: 12,
-    border: "1px solid #E0D8C8",
-    padding: 16,
-    marginBottom: 14,
-  };
-
   return (
-    <div style={{ minHeight: "100vh", background: "#F4F0E8" }}>
-      <div
-        style={{
-          background: "linear-gradient(160deg,#1A1208,#2C2416)",
-          color: "#F4F0E8",
-          padding: "22px 24px 18px",
-        }}
-      >
-        <button
-          onClick={onBack}
-          style={{
-            background: "none",
-            border: "none",
-            color: "#8B7355",
-            fontSize: 13,
-            cursor: "pointer",
-            fontFamily: "inherit",
-            marginBottom: 12,
-          }}
-        >
-          ← Zurück
-        </button>
-        <div style={{ fontFamily: "'Georgia', serif", fontSize: 28, marginBottom: 4 }}>Neue Stelle</div>
-        <div style={{ fontSize: 13, color: "#8B7355" }}>
-          Veröffentliche eine neue Ehrenamtsstelle im Stil der Demo
-        </div>
-      </div>
-
-      <div style={{ padding: "24px 24px 100px", maxWidth: 980 }}>
-        <div style={cardStyle}>
-          <div style={{ fontSize: 10, color: "#8B7355", letterSpacing: 2, textTransform: "uppercase", marginBottom: 10 }}>
-            Basisdaten
+    <div>
+      <Header title="Neue Stelle" onBack={onBack} />
+      <div style={{ padding: "20px 20px 100px" }}>
+        <Input
+          label="Titel"
+          value={titel}
+          onChange={setTitel}
+          placeholder="z.B. Bachpatenschaft"
+        />
+        <div style={{ marginBottom: 14 }}>
+          <div
+            style={{
+              fontSize: 12,
+              color: "#8B7355",
+              marginBottom: 6,
+              letterSpacing: 0.5,
+            }}
+          >
+            BESCHREIBUNG
           </div>
-          <Input
-            label="Titel"
-            value={titel}
-            onChange={setTitel}
-            placeholder="z.B. Bachpatenschaft"
+          <textarea
+            value={beschreibung}
+            onChange={(e) => setBeschreibung(e.target.value)}
+            placeholder="Was erwartet die Freiwilligen?"
+            rows={3}
+            style={{
+              width: "100%",
+              padding: "10px 12px",
+              borderRadius: 10,
+              border: "1px solid #E0D8C8",
+              background: "#FAF7F2",
+              fontFamily: "inherit",
+              fontSize: 14,
+              color: "#2C2416",
+              resize: "none",
+              boxSizing: "border-box",
+            }}
           />
-          <div style={{ marginBottom: 14 }}>
-            <div style={{ fontSize: 12, color: "#8B7355", marginBottom: 6, letterSpacing: 0.5 }}>Beschreibung</div>
-            <textarea
-              value={beschreibung}
-              onChange={(e) => setBeschreibung(e.target.value)}
-              placeholder="Was erwartet die Freiwilligen?"
-              rows={4}
-              style={{
-                width: "100%",
-                padding: "12px 14px",
-                borderRadius: 10,
-                border: "1px solid #E0D8C8",
-                background: "#F4F0E8",
-                fontFamily: "inherit",
-                fontSize: 14,
-                color: "#2C2416",
-                resize: "vertical",
-                boxSizing: "border-box",
-              }}
-            />
+        </div>
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 12, color: "#8B7355", marginBottom: 8 }}>
+            TYP
           </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
+          <div style={{ display: "flex", gap: 8 }}>
             <button
               onClick={() => setTyp("event")}
               style={{
-                padding: "12px",
+                flex: 1,
+                padding: "10px",
                 borderRadius: 10,
                 border: "none",
                 cursor: "pointer",
@@ -1293,7 +1133,8 @@ function StelleErstellenScreen({ verein, onBack, onSave }) {
             <button
               onClick={() => setTyp("dauerhaft")}
               style={{
-                padding: "12px",
+                flex: 1,
+                padding: "10px",
                 borderRadius: 10,
                 border: "none",
                 cursor: "pointer",
@@ -1307,24 +1148,18 @@ function StelleErstellenScreen({ verein, onBack, onSave }) {
               🔄 Dauerhaft
             </button>
           </div>
-
-          {typ === "dauerhaft" && (
-            <Input
-              label="Zeitaufwand pro Woche"
-              value={aufwand}
-              onChange={setAufwand}
-              type="number"
-              placeholder="z.B. 2"
-            />
-          )}
-
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+        </div>
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 12, color: "#8B7355", marginBottom: 8 }}>
+            KATEGORIE
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {KATEGORIEN.map((k) => (
               <button
                 key={k.id}
                 onClick={() => setKategorie(k.id)}
                 style={{
-                  padding: "7px 12px",
+                  padding: "6px 12px",
                   borderRadius: 20,
                   border: "none",
                   cursor: "pointer",
@@ -1338,68 +1173,157 @@ function StelleErstellenScreen({ verein, onBack, onSave }) {
               </button>
             ))}
           </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            <Input
-              label="Standort / Treffpunkt"
-              value={standort}
-              onChange={setStandort}
-              placeholder="z.B. Parkplatz Rathaus"
-            />
-            <Input
-              label="Ansprechpartner"
-              value={ansprechpartner}
-              onChange={setAnsprechpartner}
-              placeholder="z.B. Max Mustermann"
-            />
-            <Input
-              label="Kontakt-Email"
-              value={kontaktEmail}
-              onChange={setKontaktEmail}
-              placeholder="z.B. max@verein.de"
-            />
-            <Input
-              label="PLZ"
-              value={plz}
-              onChange={setPlz}
-              placeholder="z.B. 64683"
-            />
+        </div>
+        {typ === "dauerhaft" && (
+          <div style={{ marginBottom: 14 }}>
+            <div
+              style={{
+                fontSize: 12,
+                color: "#8B7355",
+                marginBottom: 6,
+                letterSpacing: 0.5,
+              }}
+            >
+              ZEITAUFWAND PRO WOCHE (PFLICHT)
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <input
+                type="number"
+                min="0.5"
+                step="0.5"
+                value={aufwand}
+                onChange={(e) => setAufwand(e.target.value)}
+                placeholder="z.B. 2"
+                style={{
+                  width: 100,
+                  padding: "11px 14px",
+                  borderRadius: 10,
+                  border: "1px solid #E0D8C8",
+                  background: "#FAF7F2",
+                  fontFamily: "inherit",
+                  fontSize: 14,
+                  color: "#2C2416",
+                  boxSizing: "border-box",
+                  outline: "none",
+                }}
+              />
+              <div
+                style={{ fontSize: 14, color: "#8B7355", fontWeight: "bold" }}
+              >
+                Stunden / Woche
+              </div>
+            </div>
           </div>
-
+        )}
+        <Input
+          label="Standort / Treffpunkt"
+          value={standort}
+          onChange={setStandort}
+          placeholder="z.B. Parkplatz Rathaus"
+        />
+        <Input
+          label="Ansprechpartner (optional)"
+          value={ansprechpartner}
+          onChange={setAnsprechpartner}
+          placeholder="z.B. Max Mustermann"
+        />
+        <Input
+          label="Kontakt-Email (optional)"
+          value={kontaktEmail}
+          onChange={setKontaktEmail}
+          placeholder="z.B. max@verein.de"
+        />
+        <Input
+          label="PLZ"
+          value={plz}
+          onChange={setPlz}
+          placeholder="z.B. 64683"
+        />
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            marginBottom: 14,
+            padding: "12px 14px",
+            background: "#FAF7F2",
+            borderRadius: 10,
+            border: "1px solid #E0D8C8",
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={dringend}
+            onChange={(e) => setDringend(e.target.checked)}
+            id="dringend"
+            style={{ width: 18, height: 18 }}
+          />
+          <label
+            htmlFor="dringend"
+            style={{ fontSize: 14, color: "#2C2416", cursor: "pointer" }}
+          >
+            🔴 Als dringend markieren
+          </label>
+        </div>
+        <div style={{ marginBottom: 20 }}>
+          <div
+            style={{
+              fontSize: 12,
+              color: "#8B7355",
+              marginBottom: 8,
+              letterSpacing: 0.5,
+            }}
+          >
+            ERFORDERLICHE KENNTNISSE (optional)
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {SKILLS.map((s) => (
+              <button
+                key={s.id}
+                type="button"
+                onClick={() =>
+                  setRequiredSkills((prev) =>
+                    prev.includes(s.id)
+                      ? prev.filter((x) => x !== s.id)
+                      : [...prev, s.id]
+                  )
+                }
+                style={{
+                  padding: "7px 12px",
+                  borderRadius: 20,
+                  border: "none",
+                  cursor: "pointer",
+                  background: requiredSkills.includes(s.id)
+                    ? "#2C2416"
+                    : "#EDE8DE",
+                  color: requiredSkills.includes(s.id) ? "#FAF7F2" : "#8B7355",
+                  fontSize: 12,
+                  fontFamily: "inherit",
+                }}
+              >
+                {s.icon} {getSkillLabel(s, "de")}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div style={{ marginBottom: 20 }}>
           <div
             style={{
               display: "flex",
+              justifyContent: "space-between",
               alignItems: "center",
-              gap: 12,
-              marginTop: 8,
-              padding: "12px 14px",
-              background: "#F4F0E8",
-              borderRadius: 10,
-              border: "1px solid #E0D8C8",
+              marginBottom: 8,
             }}
           >
-            <input
-              type="checkbox"
-              checked={dringend}
-              onChange={(e) => setDringend(e.target.checked)}
-              id="dringend"
-              style={{ width: 18, height: 18 }}
-            />
-            <label htmlFor="dringend" style={{ fontSize: 14, color: "#2C2416", cursor: "pointer" }}>
-              🔴 Als dringend markieren
-            </label>
-          </div>
-        </div>
-
-        <div style={cardStyle}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-            <div style={{ fontSize: 10, color: "#8B7355", letterSpacing: 2, textTransform: "uppercase" }}>
-              {typ === "dauerhaft" ? "Einführungsgespräch" : "Termine"}
+            <div style={{ fontSize: 12, color: "#8B7355", letterSpacing: 0.5 }}>
+              {typ === "dauerhaft"
+                ? "TERMIN ZUM ERST- / EINFÜHRUNGSGESPRÄCH"
+                : "TERMINE"}
             </div>
             <button
               onClick={addTermin}
               style={{
-                padding: "6px 12px",
+                padding: "4px 12px",
                 borderRadius: 8,
                 border: "1px solid #2C2416",
                 background: "transparent",
@@ -1412,128 +1336,135 @@ function StelleErstellenScreen({ verein, onBack, onSave }) {
               + {typ === "dauerhaft" ? "Einführungsgespräch" : "Termin"}
             </button>
           </div>
-
           {termine.map((t, i) => (
-            <div key={i} style={{ border: "1px solid #E0D8C8", borderRadius: 10, padding: 12, marginBottom: 10, background: "#F4F0E8" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr auto", gap: 8, alignItems: "end" }}>
+            <div
+              key={i}
+              style={{
+                background: "#FAF7F2",
+                borderRadius: 12,
+                padding: "12px",
+                marginBottom: 10,
+                border: "1px solid #E0D8C8",
+              }}
+            >
+              <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
                 <input
                   type="date"
                   value={t.datum}
                   onChange={(e) => updateTermin(i, "datum", e.target.value)}
-                  style={{ padding: "10px 12px", borderRadius: 8, border: "1px solid #E0D8C8", background: "#fff", fontFamily: "inherit", fontSize: 13, color: "#2C2416" }}
-                />
-                <input
-                  type="time"
-                  value={t.startzeit}
-                  onChange={(e) => updateTermin(i, "startzeit", e.target.value)}
-                  style={{ padding: "10px 12px", borderRadius: 8, border: "1px solid #E0D8C8", background: "#fff", fontFamily: "inherit", fontSize: 13, color: "#2C2416" }}
-                />
-                <input
-                  type="time"
-                  value={t.endzeit}
-                  onChange={(e) => updateTermin(i, "endzeit", e.target.value)}
-                  style={{ padding: "10px 12px", borderRadius: 8, border: "1px solid #E0D8C8", background: "#fff", fontFamily: "inherit", fontSize: 13, color: "#2C2416" }}
-                />
-                <input
-                  type="number"
-                  min="1"
-                  value={t.plaetze}
-                  onChange={(e) => updateTermin(i, "plaetze", parseInt(e.target.value) || 1)}
-                  style={{ padding: "10px 12px", borderRadius: 8, border: "1px solid #E0D8C8", background: "#fff", fontFamily: "inherit", fontSize: 13, color: "#2C2416" }}
+                  style={{
+                    flex: 2,
+                    padding: "8px 10px",
+                    borderRadius: 8,
+                    border: "1px solid #E0D8C8",
+                    background: "#fff",
+                    fontFamily: "inherit",
+                    fontSize: 13,
+                    color: "#2C2416",
+                    boxSizing: "border-box",
+                  }}
                 />
                 {termine.length > 1 && (
                   <button
                     onClick={() => removeTermin(i)}
                     style={{
-                      padding: "10px",
+                      padding: "6px 10px",
                       borderRadius: 8,
-                      border: "1px solid #D8B7B7",
-                      background: "transparent",
-                      color: "#C95F5F",
+                      border: "none",
+                      background: "#FFF0F0",
+                      color: "#E85C5C",
+                      fontSize: 12,
                       cursor: "pointer",
-                      fontFamily: "inherit",
                     }}
                   >
                     ✕
                   </button>
                 )}
               </div>
+              <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                <div style={{ flex: 1 }}>
+                  <div
+                    style={{ fontSize: 10, color: "#8B7355", marginBottom: 3 }}
+                  >
+                    STARTZEIT
+                  </div>
+                  <input
+                    type="time"
+                    value={t.startzeit}
+                    onChange={(e) =>
+                      updateTermin(i, "startzeit", e.target.value)
+                    }
+                    style={{
+                      width: "100%",
+                      padding: "8px 10px",
+                      borderRadius: 8,
+                      border: "1px solid #E0D8C8",
+                      background: "#fff",
+                      fontFamily: "inherit",
+                      fontSize: 13,
+                      color: "#2C2416",
+                      boxSizing: "border-box",
+                    }}
+                  />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div
+                    style={{ fontSize: 10, color: "#8B7355", marginBottom: 3 }}
+                  >
+                    ENDZEIT (optional)
+                  </div>
+                  <input
+                    type="time"
+                    value={t.endzeit}
+                    onChange={(e) => updateTermin(i, "endzeit", e.target.value)}
+                    style={{
+                      width: "100%",
+                      padding: "8px 10px",
+                      borderRadius: 8,
+                      border: "1px solid #E0D8C8",
+                      background: "#fff",
+                      fontFamily: "inherit",
+                      fontSize: 13,
+                      color: "#2C2416",
+                      boxSizing: "border-box",
+                    }}
+                  />
+                </div>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <div style={{ fontSize: 12, color: "#8B7355" }}>
+                  Freie Plätze:
+                </div>
+                <input
+                  type="number"
+                  min="1"
+                  value={t.plaetze}
+                  onChange={(e) =>
+                    updateTermin(i, "plaetze", parseInt(e.target.value) || 1)
+                  }
+                  style={{
+                    width: 70,
+                    padding: "6px 10px",
+                    borderRadius: 8,
+                    border: "1px solid #E0D8C8",
+                    background: "#fff",
+                    fontFamily: "inherit",
+                    fontSize: 13,
+                    color: "#2C2416",
+                  }}
+                />
+              </div>
             </div>
           ))}
         </div>
-
-        <div style={cardStyle}>
-          <div style={{ fontSize: 10, color: "#8B7355", letterSpacing: 2, textTransform: "uppercase", marginBottom: 10 }}>
-            Erforderliche Kenntnisse
-          </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {SKILLS.map((s) => (
-              <button
-                key={s.id}
-                type="button"
-                onClick={() =>
-                  setRequiredSkills((prev) =>
-                    prev.includes(s.id) ? prev.filter((x) => x !== s.id) : [...prev, s.id]
-                  )
-                }
-                style={{
-                  padding: "7px 12px",
-                  borderRadius: 20,
-                  border: "none",
-                  cursor: "pointer",
-                  background: requiredSkills.includes(s.id) ? "#2C2416" : "#EDE8DE",
-                  color: requiredSkills.includes(s.id) ? "#FAF7F2" : "#8B7355",
-                  fontSize: 12,
-                  fontFamily: "inherit",
-                }}
-              >
-                {s.icon} {getSkillLabel(s, "de")}
-              </button>
-            ))}
-          </div>
-        </div>
-
         {error && <ErrorMsg>{error}</ErrorMsg>}
-        <div style={{ display: "flex", gap: 10 }}>
-          <button
-            onClick={onBack}
-            style={{
-              flex: 1,
-              padding: "12px",
-              borderRadius: 12,
-              border: "1px solid #E0D8C8",
-              background: "transparent",
-              color: "#8B7355",
-              fontSize: 14,
-              cursor: "pointer",
-              fontFamily: "inherit",
-            }}
-          >
-            Abbrechen
-          </button>
-          <button
-            onClick={handleSave}
-            style={{
-              flex: 2,
-              padding: "12px",
-              borderRadius: 12,
-              border: "none",
-              background: "#C8A96E",
-              color: "#1A1208",
-              fontSize: 14,
-              cursor: "pointer",
-              fontFamily: "inherit",
-              fontWeight: "bold",
-            }}
-          >
-            Stelle speichern ✓
-          </button>
-        </div>
+        <BigButton onClick={handleSave} green>
+          Stelle veröffentlichen ✓
+        </BigButton>
       </div>
     </div>
   );
 }
-
 
 function VereinProfilEdit({
   verein,
