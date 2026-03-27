@@ -638,7 +638,7 @@ export default function App() {
               aktionen: (prev.data.aktionen || 0) + 1,
             },
           }));
-          showToast("✓ Angemeldet! +10 Punkte 🎉");
+          showToast("Du bist dabei 🙌\nWir freuen uns auf dich.");
           // Verein benachrichtigen
           const stelle = stellen.find((s) => s.id === stelleId);
           if (stelle?.vereine?.auth_id) {
@@ -716,7 +716,7 @@ export default function App() {
           aktionen: Math.max(0, (prev.data.aktionen || 0) - 1),
         },
       }));
-      showToast("Abgemeldet. -10 Punkte", "#E85C5C");
+      showToast("Schade, dass du dieses Mal nicht dabei bist.", "#E85C5C");
       // Verein benachrichtigen
       const abmeldeStelle = stellen.find((s) =>
         (s.termine || []).some((t) => t.id === terminId)
@@ -1082,22 +1082,6 @@ export default function App() {
               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
                 <LangSwitcher />
                 <button
-                  onClick={openGemeindeDashboard}
-                  style={{
-                    background: "#C8A96E",
-                    border: "none",
-                    color: "#1A1208",
-                    fontSize: 13,
-                    padding: "8px 16px",
-                    borderRadius: 20,
-                    cursor: "pointer",
-                    fontFamily: "inherit",
-                    fontWeight: "bold",
-                  }}
-                >
-                  Gemeinde
-                </button>
-                <button
                   onClick={() => navigateTo("login")}
                   style={{
                     background: "#3A7D44",
@@ -1443,6 +1427,7 @@ export default function App() {
           showToast={showToast}
           follows={follows}
           onToggleFollowKat={toggleFollowKategorie}
+          onWarteliste={handleWarteliste}
         />
       )}
 
