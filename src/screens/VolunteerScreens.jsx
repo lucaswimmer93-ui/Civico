@@ -17,6 +17,7 @@ function DetailScreen({
   showToast,
   follows,
   onToggleFollowKat,
+  onWarteliste,
 }) {
   const kat = getKat(stelle.kategorie);
   const lang = "de";
@@ -368,7 +369,7 @@ function DetailScreen({
                       cursor: "pointer",
                     }}
                   >
-                    {user ? "Dabei sein & helfen →" : "Anmelden zum Mitmachen →"}
+                    {user ? "Dabei sein & helfen →" : "Registrieren & helfen →"}
                   </button>
                 ) : !belegt && !isTerminNochNichtGestartet(t) ? (
                   <div
@@ -2680,7 +2681,7 @@ function EinstellungenScreen({
                 {
                   key: "email_enabled",
                   label: "📧 E-Mail",
-                  sub: "Zusammenfassung per Mail",
+                  sub: "Zusammenfassung per E-Mail",
                 },
               ].map((item) => (
                 <div
@@ -2774,12 +2775,12 @@ function EinstellungenScreen({
                 {
                   key: "neue_stellen",
                   label: "🌱 Neue Stellen",
-                  sub: "In gefolgten Kategorien & Vereinen"
+                  sub: "Benachrichtigungen zu neuen Stellen in gefolgten Vereinen und Kategorien",
                 },
                 {
                   key: "freie_plaetze",
                   label: "🎉 Freie Plätze",
-                  sub: "Nur wenn in gefolgten Vereinen oder Kategorien ein Platz frei wird"
+                  sub: "Nur für gefolgte Vereine oder Kategorien",
                 },
                 {
                   key: "vereins_news",

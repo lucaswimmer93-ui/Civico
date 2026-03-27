@@ -1433,7 +1433,7 @@ function StelleErstellenScreen({ verein, onBack, onSave }) {
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                 <div style={{ fontSize: 12, color: "#8B7355" }}>
-                  Freie Plätze:
+                  Gesuchte Helfer:
                 </div>
                 <input
                   type="number"
@@ -2491,7 +2491,7 @@ function StelleBearbeitenScreen({ stelle, verein, onBack, onSave }) {
                     style={{ display: "flex", alignItems: "center", gap: 10 }}
                   >
                     <div style={{ fontSize: 12, color: "#8B7355" }}>
-                      Freie Plätze:
+                      Gesuchte Helfer:
                     </div>
                     <input
                       type="number"

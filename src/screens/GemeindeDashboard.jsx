@@ -138,7 +138,7 @@ export default function GemeindeDashboard({
       {tab === 'organisationen' && (
         <div style={{ padding:'0 16px 24px' }}>
           {organisationen.length === 0 ? (
-            <EmptyState icon="🏢" text="Noch keine Organisationen" sub="Hier erscheinen Vereine und Organisationen deiner Gemeinde." />
+            <EmptyState icon="🏢" text="Noch keine Organisationen" sub="Hier kann die Gemeinde Vereine einsehen und verwalten." />
           ) : organisationen.map((org)=>(
             <div key={org.id || org.name} style={{ background:'#FAF7F2', borderRadius:18, padding:16, marginBottom:10, border:'1px solid #E6D9C2' }}>
               <div style={{ fontWeight:700 }}>{org.name || org.vereinsname}</div>
