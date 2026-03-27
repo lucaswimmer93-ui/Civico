@@ -10,6 +10,7 @@ function LoginScreen({
   onImpressum,
   onDatenschutz,
   onAgb,
+  onRequestMagicLink,
 }) {
   const [mode, setMode] = useState("auswahl");
   const [email, setEmail] = useState("");
@@ -25,6 +26,7 @@ function LoginScreen({
   const [regWebsite, setRegWebsite] = useState("");
   const [selectedSkills, setSelectedSkills] = useState([]);
   const [sprachen, setSprachen] = useState("");
+  const [geburtsdatum, setGeburtsdatum] = useState("");
   const [datenschutz, setDatenschutz] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -69,7 +71,7 @@ function LoginScreen({
   };
 
   const handleRegisterFreiwilliger = async () => {
-    if (!name || !email || !password) {
+    if (!name || !email || !password || !geburtsdatum) {
       setError("Bitte alle Felder ausfüllen.");
       return;
     }
@@ -116,6 +118,8 @@ function LoginScreen({
         aktionen: 0,
         skills: selectedSkills,
         sprachen,
+        geburtsdatum,
+        datenschutz_einwilligung: datenschutz,
       });
     setLoading(false);
     setEmailSent(true);
@@ -154,11 +158,17 @@ function LoginScreen({
       return;
     }
     const gemeinde_id = await getGemeindeByPlz(plz);
+    if (!gemeinde_id) {
+      await supabase.auth.signOut();
+      setLoading(false);
+      setError("Für diese PLZ wurde noch keine Gemeinde gefunden.");
+      return;
+    }
     await supabase
       .from("vereine")
       .insert({
         auth_id: authData.user.id,
-        gemeinde_id: gemeinde_id || null,
+        gemeinde_id,
         name: orgName,
         email,
         ort,
@@ -181,7 +191,7 @@ function LoginScreen({
     }
     setLoading(true);
     await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: "https://mycivico.de/reset",
+      redirectTo: `${window.location.origin}/?type=recovery`,
     });
     setLoading(false);
     showToast("✓ Reset-Link gesendet!");
@@ -334,13 +344,13 @@ function LoginScreen({
             <RoleCard
               icon="🏢"
               title="Ich bin ein Verein"
-              sub="Unabhängig registrieren, Stellen ausschreiben & Freiwillige finden"
+              sub="Stellen ausschreiben & Freiwillige finden"
               onClick={() => setMode("verein")}
             />
             <RoleCard
               icon="🏛️"
               title="Ich bin eine Gemeinde"
-              sub="Vereine einladen, verwalten & eigene Stellen veröffentlichen"
+              sub="Organisationen verwalten & eigene Stellen veröffentlichen"
               onClick={() => setMode("gemeinde")}
             />
           </div>
@@ -390,10 +400,56 @@ function LoginScreen({
                 type="password"
                 placeholder="••••••"
               />
+              {mode === 'gemeinde' && (
+                <div style={{
+                  marginTop: -6,
+                  marginBottom: 14,
+                  fontSize: 12,
+                  color: '#8B7355',
+                  lineHeight: 1.6,
+                }}>
+                  Beim ersten Login kannst du dir über den Magic-Link direkt dein Passwort setzen. Danach funktioniert der normale Login mit Email und Passwort.
+                </div>
+              )}
               {error && <ErrorMsg>{error}</ErrorMsg>}
               <BigButton onClick={() => handleLogin(mode)} disabled={loading}>
                 {loading ? "Laden..." : "Anmelden"}
               </BigButton>
+              {mode === "gemeinde" && typeof onRequestMagicLink === "function" && (
+                <button
+                  onClick={async () => {
+                    if (!email) {
+                      setError('Bitte Email eingeben.');
+                      return;
+                    }
+                    setLoading(true);
+                    setError('');
+                    const ok = await onRequestMagicLink(email);
+                    setLoading(false);
+                    if (ok) {
+                      setEmailSent(true);
+                    } else {
+                      setError('Magic-Link konnte nicht gesendet werden.');
+                    }
+                  }}
+                  style={{
+                    width: '100%',
+                    marginTop: 10,
+                    padding: '12px 16px',
+                    borderRadius: 14,
+                    border: '1px solid #D8CFBF',
+                    background: '#FAF7F2',
+                    color: '#2C2416',
+                    fontSize: 14,
+                    fontFamily: 'inherit',
+                    fontWeight: 'bold',
+                    cursor: 'pointer',
+                  }}
+                  disabled={loading}
+                >
+                  Magic-Link erneut senden
+                </button>
+              )}
               <div style={{ textAlign: "center", marginTop: 12 }}>
                 <button
                   onClick={() => {
@@ -540,6 +596,12 @@ function LoginScreen({
               value={sprachen}
               onChange={setSprachen}
               placeholder="z.B. Englisch, Türkisch"
+            />
+            <Input
+              label="Geburtsdatum (Pflicht)"
+              value={geburtsdatum}
+              onChange={setGeburtsdatum}
+              type="date"
             />
             <DatenschutzBox
               datenschutz={datenschutz}

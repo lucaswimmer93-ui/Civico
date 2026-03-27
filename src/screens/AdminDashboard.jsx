@@ -128,6 +128,58 @@ function SectionTitle({ kicker, title, sub, right }) {
   );
 }
 
+function Table({ columns, rows, emptyTitle, emptySub }) {
+  if (!rows?.length) {
+    return <EmptyBlock title={emptyTitle} sub={emptySub} />;
+  }
+
+  return (
+    <div style={{ overflowX: 'auto' }}>
+      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+        <thead>
+          <tr>
+            {columns.map((col) => (
+              <th key={col.key} style={{ textAlign: 'left', padding: '0 0 10px', color: COLORS.muted, fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', borderBottom: '1px solid #EFE8DB' }}>
+                {col.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row, idx) => (
+            <tr key={row.id || row.key || idx}>
+              {columns.map((col) => (
+                <td key={col.key} style={{ padding: '12px 0', borderBottom: '1px solid #EFE8DB', verticalAlign: 'top' }}>
+                  {col.render ? col.render(row) : row[col.key] ?? '—'}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function formatNumber(value) {
+  if (value === null || value === undefined || value === '') return '0';
+  const num = Number(value);
+  if (Number.isNaN(num)) return String(value);
+  return new Intl.NumberFormat('de-DE', { maximumFractionDigits: 2 }).format(num);
+}
+
+function miniBar(value, max) {
+  const pct = max > 0 ? Math.max(4, Math.round((value / max) * 100)) : 0;
+  return (
+    <div style={{ width: '100%', minWidth: 120 }}>
+      <div style={{ fontWeight: 700, marginBottom: 6 }}>{formatNumber(value)}</div>
+      <div style={{ height: 8, background: '#EEE5D8', borderRadius: 999, overflow: 'hidden' }}>
+        <div style={{ width: `${pct}%`, height: '100%', background: 'linear-gradient(135deg,#1A1208,#5B9BD5)' }} />
+      </div>
+    </div>
+  );
+}
+
 export default function AdminDashboard({
   admin,
   gemeinden = [],
@@ -140,29 +192,43 @@ export default function AdminDashboard({
   onVerifyVerein,
   onTogglePlan,
   onRefresh,
+  analytics = {},
+  onGeneratePdf,
 }) {
   const [tab, setTab] = useState('uebersicht');
   const [gemeindeSearch, setGemeindeSearch] = useState('');
   const [vereinSearch, setVereinSearch] = useState('');
   const [paymentSearch, setPaymentSearch] = useState('');
   const [inboxSearch, setInboxSearch] = useState('');
+  const [analyticsSearch, setAnalyticsSearch] = useState('');
 
   const tabs = [
     ['uebersicht', 'Übersicht'],
     ['gemeinden', 'Gemeinden'],
     ['vereine', 'Vereine'],
     ['payments', 'Payments'],
+    ['analytics', 'Analyse'],
     ['inbox', 'Inbox'],
   ];
 
+  const stats = analytics.dashboard || {};
+  const funnel = analytics.funnel || {};
+  const vereineStats = analytics.vereineStats || [];
+  const gemeindenStats = analytics.gemeindenStats || [];
+  const altersStats = analytics.altersStats || [];
+  const altersRegionStats = analytics.altersRegionStats || [];
+  const regionStats = analytics.regionStats || [];
+  const csrStats = analytics.csrStats || [];
+  const monatsStats = analytics.monatsStats || [];
+
   const metrics = useMemo(() => {
-    const activeStellen = stellen.filter((s) => !s.archiviert).length;
+    const activeStellen = Number(stats.aktive_stellen_count ?? stellen.filter((s) => !s.archiviert).length);
     const verifiziert = organisationen.filter((v) => v.verifiziert).length;
     const unverified = organisationen.length - verifiziert;
-    const dueForReminder = organisationen.filter((v) => (zustandeMap.get(v.id) || 0) >= 3 && !v.plan_aktiv).length;
+    const dueForReminder = Number(stats.pay_relevante_vereine_count ?? organisationen.filter((v) => (zustandeMap.get(v.id) || 0) >= 3 && !v.plan_aktiv).length);
     const offeneEinladungen = anfragen.filter((a) => (a.status || '').toLowerCase() !== 'angenommen').length;
     return { activeStellen, verifiziert, unverified, dueForReminder, offeneEinladungen };
-  }, [stellen, organisationen, anfragen, zustandeMap]);
+  }, [stellen, organisationen, anfragen, zustandeMap, stats]);
 
   const gemeindeRows = useMemo(() => {
     return gemeinden
@@ -213,7 +279,23 @@ export default function AdminDashboard({
     });
   }, [anfragen, inboxSearch]);
 
+  const filteredVereineStats = useMemo(() => {
+    return vereineStats.filter((v) => {
+      const hay = `${v.name || ''} ${v.email || ''} ${v.gemeinde_name || ''} ${v.region_name || ''}`.toLowerCase();
+      return !analyticsSearch || hay.includes(analyticsSearch.toLowerCase());
+    });
+  }, [vereineStats, analyticsSearch]);
+
+  const filteredGemeindenStats = useMemo(() => {
+    return gemeindenStats.filter((g) => {
+      const hay = `${g.name || ''} ${g.ort || ''} ${g.region_name || ''} ${g.bundesland || ''} ${g.landkreis || ''}`.toLowerCase();
+      return !analyticsSearch || hay.includes(analyticsSearch.toLowerCase());
+    });
+  }, [gemeindenStats, analyticsSearch]);
+
   const topGemeinden = gemeindeRows.slice(0, 5);
+  const maxRegionHours = Math.max(0, ...regionStats.map((r) => Number(r.gesamtstunden || 0)));
+  const maxCsrHours = Math.max(0, ...csrStats.map((r) => Number(r.gesamtstunden || 0)));
 
   return (
     <div>
@@ -222,19 +304,14 @@ export default function AdminDashboard({
           <button
             key={id}
             onClick={() => setTab(id)}
-            style={{
-              ...button(tab === id ? 'primary' : 'secondary'),
-              padding: '10px 14px',
-            }}
+            style={{ ...button(tab === id ? 'primary' : 'secondary'), padding: '10px 14px' }}
           >
             {label}
           </button>
         ))}
       </div>
 
-      {loading ? (
-        <div style={{ ...card({ marginBottom: 16 }), color: COLORS.muted }}>Daten werden geladen …</div>
-      ) : null}
+      {loading ? <div style={{ ...card({ marginBottom: 16 }), color: COLORS.muted }}>Daten werden geladen …</div> : null}
 
       {tab === 'uebersicht' ? (
         <div>
@@ -246,12 +323,12 @@ export default function AdminDashboard({
           />
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 12, marginBottom: 18 }}>
-            <StatCard label="Gemeinden" value={gemeinden.length} sub="angeschlossene Orte" />
-            <StatCard label="Vereine" value={organisationen.length} sub={`${metrics.verifiziert} verifiziert · ${metrics.unverified} offen`} />
-            <StatCard label="Freiwillige" value={freiwillige.length} sub="registrierte Helfer" />
-            <StatCard label="Aktive Stellen" value={metrics.activeStellen} sub="nicht archiviert" />
-            <StatCard label="Offene Inbox" value={metrics.offeneEinladungen} sub="Einladungen / Rückläufer" />
-            <StatCard label="Pay Reminder" value={metrics.dueForReminder} sub="ab 3 Einsätzen ohne aktiven Plan" />
+            <StatCard label="Gemeinden" value={formatNumber(stats.gemeinden_count ?? gemeinden.length)} sub="angeschlossene Orte" />
+            <StatCard label="Vereine" value={formatNumber(stats.vereine_count ?? organisationen.length)} sub={`${metrics.verifiziert} verifiziert · ${metrics.unverified} offen`} />
+            <StatCard label="Freiwillige" value={formatNumber(stats.freiwillige_count ?? freiwillige.length)} sub="registrierte Helfer" />
+            <StatCard label="Aktive Stellen" value={formatNumber(metrics.activeStellen)} sub="nicht archiviert" />
+            <StatCard label="Stunden" value={formatNumber(stats.gesamtstunden || 0)} sub="erfasste Einsatzstunden" />
+            <StatCard label="Pay Reminder" value={formatNumber(metrics.dueForReminder)} sub="ab 3 Einsätzen ohne aktiven Plan" />
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: 16 }}>
@@ -359,7 +436,7 @@ export default function AdminDashboard({
 
       {tab === 'payments' ? (
         <div>
-          <SectionTitle kicker="Monetarisierung" title="Pay-Erinnerungen steuern" sub="Ab dem dritten zustande gekommenen Einsatz wird der Verein hier relevant. Genau diese Logik ziehst du im Backend später endgültig fest." />
+          <SectionTitle kicker="Monetarisierung" title="Pay-Erinnerungen steuern" sub="Ab dem dritten zustande gekommenen Einsatz wird der Verein hier relevant." />
           <div style={{ ...card({ marginBottom: 16 }) }}>
             <SearchField value={paymentSearch} onChange={setPaymentSearch} placeholder="Nach Verein oder E-Mail suchen" />
           </div>
@@ -389,9 +466,177 @@ export default function AdminDashboard({
         </div>
       ) : null}
 
+      {tab === 'analytics' ? (
+        <div>
+          <SectionTitle
+            kicker="Steuerung & Reporting"
+            title="Analyse, Regionen, CSR und Demografie"
+            sub="Hier steuerst du die Plattform wirklich. Wachstum, regionale Wirkung, Altersstruktur und PDF-Berichte laufen an einem Ort zusammen."
+            right={
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button onClick={() => onGeneratePdf && onGeneratePdf('plattform')} style={button('secondary')}>Plattform-PDF</button>
+                <button onClick={() => onGeneratePdf && onGeneratePdf('regionen')} style={button('secondary')}>Regionen-PDF</button>
+                <button onClick={() => onGeneratePdf && onGeneratePdf('csr')} style={button('secondary')}>CSR-PDF</button>
+                <button onClick={() => onGeneratePdf && onGeneratePdf('alter')} style={button('primary')}>Demografie-PDF</button>
+              </div>
+            }
+          />
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(180px,1fr))', gap: 12, marginBottom: 18 }}>
+            <StatCard label="Zustande gekommene Einsätze" value={formatNumber(stats.zustande_gekommene_einsaetze_count || 0)} sub="aus Einsatzreports" />
+            <StatCard label="Erfasste Stunden" value={formatNumber(stats.gesamtstunden || 0)} sub="für CSR und Regionalreports" />
+            <StatCard label="Pay-relevante Vereine" value={formatNumber(stats.pay_relevante_vereine_count || 0)} sub="3+ Einsätze" />
+            <StatCard label="Angenommene Einladungen" value={formatNumber(funnel.angenommene_einladungen || 0)} sub={`von ${formatNumber(funnel.verein_einladungen || 0)} Einladungen`} />
+          </div>
+
+          <div style={{ ...card({ marginBottom: 16 }) }}>
+            <SearchField value={analyticsSearch} onChange={setAnalyticsSearch} placeholder="Analyse nach Gemeinde, Region, Verein oder Bundesland filtern" />
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 1fr', gap: 16, marginBottom: 16 }}>
+            <div style={card()}>
+              <SectionTitle kicker="Funnel" title="Vom Invite bis zur Nutzung" />
+              <div style={{ display: 'grid', gap: 10 }}>
+                {[
+                  ['Gemeinden', funnel.gemeinden || 0],
+                  ['Vereinseinladungen', funnel.verein_einladungen || 0],
+                  ['Angenommene Einladungen', funnel.angenommene_einladungen || 0],
+                  ['Registrierte Vereine', funnel.registrierte_vereine || 0],
+                  ['Vereine mit Stelle', funnel.vereine_mit_stelle || 0],
+                  ['Vereine mit Einsatz', funnel.vereine_mit_einsatz || 0],
+                  ['Vereine pay-relevant', funnel.vereine_pay_relevant || 0],
+                ].map(([label, value]) => (
+                  <div key={label} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingBottom: 8, borderBottom: '1px solid #EFE8DB' }}>
+                    <div style={{ color: COLORS.text, fontWeight: 700 }}>{label}</div>
+                    <div style={{ color: COLORS.muted }}>{formatNumber(value)}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div style={card()}>
+              <SectionTitle kicker="Demografie" title="Altersgruppen" sub="Nicht öffentlich im Profil, aber zentral für regionale Wirkung und Zielgruppenanalyse." />
+              <Table
+                columns={[
+                  { key: 'altersgruppe', label: 'Altersgruppe' },
+                  { key: 'freiwillige_count', label: 'Freiwillige', render: (r) => formatNumber(r.freiwillige_count) },
+                  { key: 'teilnahmen_count', label: 'Teilnahmen', render: (r) => formatNumber(r.teilnahmen_count) },
+                  { key: 'nicht_erschienen_count', label: 'No-Shows', render: (r) => formatNumber(r.nicht_erschienen_count) },
+                ]}
+                rows={altersStats}
+                emptyTitle="Noch keine Altersdaten"
+                emptySub="Sobald Freiwillige mit Geburtsdatum registriert sind, siehst du hier die Verteilung."
+              />
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+            <div style={card()}>
+              <SectionTitle kicker="Regionen" title="Regionale Wirkung" sub="Das ist die Basis für deine regionalen Statistiken und spätere PDF-Reports für Kommunen." />
+              {regionStats.length === 0 ? (
+                <EmptyBlock title="Noch keine Regionaldaten" sub="Sobald Einsatzreports vorliegen und Gemeinden Regionen zugewiesen sind, erscheint hier die Wirkung nach Region." />
+              ) : regionStats.map((row, idx) => (
+                <div key={`${row.region_name}-${idx}`} style={{ display: 'grid', gridTemplateColumns: '1.3fr 140px 120px 120px', gap: 12, padding: '12px 0', borderBottom: '1px solid #EFE8DB', alignItems: 'center' }}>
+                  <div>
+                    <div style={{ fontWeight: 700 }}>{row.region_name || 'Unbekannt'}</div>
+                    <div style={{ fontSize: 12, color: COLORS.muted }}>{row.bundesland || 'ohne Bundesland'} · {formatNumber(row.gemeinden_count || 0)} Gemeinden</div>
+                  </div>
+                  <div>{miniBar(Number(row.gesamtstunden || 0), maxRegionHours)}</div>
+                  <div style={{ color: COLORS.muted }}>{formatNumber(row.completed_einsaetze_count || 0)} Einsätze</div>
+                  <div style={{ color: COLORS.muted }}>{formatNumber(row.betreute_personen || 0)} Personen</div>
+                </div>
+              ))}
+            </div>
+
+            <div style={card()}>
+              <SectionTitle kicker="CSR" title="Wirkungsbereiche" sub="Zeigt dir, wo gesellschaftliche Wirkung entsteht und wie viele Stunden je Themenfeld laufen." />
+              {csrStats.length === 0 ? (
+                <EmptyBlock title="Noch keine CSR-Daten" sub="Sobald Einsatzreports mit Wirkungsbereich erzeugt sind, wird hier deine Impact-Sicht aufgebaut." />
+              ) : csrStats.map((row, idx) => (
+                <div key={`${row.wirkungsbereich}-${idx}`} style={{ display: 'grid', gridTemplateColumns: '1.2fr 140px 120px 120px', gap: 12, padding: '12px 0', borderBottom: '1px solid #EFE8DB', alignItems: 'center' }}>
+                  <div>
+                    <div style={{ fontWeight: 700 }}>{row.wirkungsbereich || 'Unbekannt'}</div>
+                    <div style={{ fontSize: 12, color: COLORS.muted }}>{formatNumber(row.helfer_tatsaechlich_summe || 0)} Helfer insgesamt</div>
+                  </div>
+                  <div>{miniBar(Number(row.gesamtstunden || 0), maxCsrHours)}</div>
+                  <div style={{ color: COLORS.muted }}>{formatNumber(row.completed_einsaetze_count || 0)} Einsätze</div>
+                  <div style={{ color: COLORS.muted }}>{formatNumber(row.betreute_personen || 0)} Personen</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 16 }}>
+            <div style={card()}>
+              <SectionTitle kicker="Gemeinden" title="Gemeindestatistik" />
+              <Table
+                columns={[
+                  { key: 'name', label: 'Gemeinde', render: (r) => <div><div style={{ fontWeight: 700 }}>{r.name}</div><div style={{ fontSize: 12, color: COLORS.muted }}>{r.region_name || 'ohne Region'}{r.bundesland ? ` · ${r.bundesland}` : ''}</div></div> },
+                  { key: 'vereine_count', label: 'Vereine', render: (r) => formatNumber(r.vereine_count) },
+                  { key: 'freiwillige_count', label: 'Freiwillige', render: (r) => formatNumber(r.freiwillige_count) },
+                  { key: 'completed_einsaetze_count', label: 'Einsätze', render: (r) => formatNumber(r.completed_einsaetze_count) },
+                  { key: 'gesamtstunden', label: 'Stunden', render: (r) => formatNumber(r.gesamtstunden) },
+                ]}
+                rows={filteredGemeindenStats}
+                emptyTitle="Noch keine Gemeindestatistik"
+                emptySub="Sobald Gemeinden und Einsatzreports vorhanden sind, erscheint hier deine regionale Gemeindesicht."
+              />
+            </div>
+
+            <div style={card()}>
+              <SectionTitle kicker="Vereine" title="Vereinsstatistik" />
+              <Table
+                columns={[
+                  { key: 'name', label: 'Verein', render: (r) => <div><div style={{ fontWeight: 700 }}>{r.name}</div><div style={{ fontSize: 12, color: COLORS.muted }}>{r.gemeinde_name || 'ohne Gemeinde'}{r.region_name ? ` · ${r.region_name}` : ''}</div></div> },
+                  { key: 'stellen_count', label: 'Stellen', render: (r) => formatNumber(r.stellen_count) },
+                  { key: 'completed_einsaetze_count', label: 'Einsätze', render: (r) => formatNumber(r.completed_einsaetze_count) },
+                  { key: 'gesamtstunden', label: 'Stunden', render: (r) => formatNumber(r.gesamtstunden) },
+                  { key: 'status', label: 'Status', render: (r) => <span style={badge(r.plan_aktiv ? 'ok' : (Number(r.completed_einsaetze_count || 0) >= 3 ? 'warn' : 'default'))}>{r.plan_aktiv ? 'Plan aktiv' : (Number(r.completed_einsaetze_count || 0) >= 3 ? 'Pay relevant' : 'Free')}</span> },
+                ]}
+                rows={filteredVereineStats}
+                emptyTitle="Noch keine Vereinsstatistik"
+                emptySub="Sobald Vereine Stellen und Einsatzreports haben, erscheint hier die Auswertung."
+              />
+            </div>
+
+            <div style={card()}>
+              <SectionTitle kicker="Zeitverlauf" title="Monatliche Entwicklung" sub="Hilft dir später bei Förderanträgen, Quartalsberichten und Vorstandspräsentationen." />
+              <Table
+                columns={[
+                  { key: 'monat', label: 'Monat' },
+                  { key: 'completed_einsaetze_count', label: 'Einsätze', render: (r) => formatNumber(r.completed_einsaetze_count) },
+                  { key: 'gesamtstunden', label: 'Stunden', render: (r) => formatNumber(r.gesamtstunden) },
+                  { key: 'helfer_tatsaechlich_summe', label: 'Helfer', render: (r) => formatNumber(r.helfer_tatsaechlich_summe) },
+                  { key: 'betreute_personen', label: 'Personen', render: (r) => formatNumber(r.betreute_personen) },
+                ]}
+                rows={monatsStats}
+                emptyTitle="Noch kein Monatsverlauf"
+                emptySub="Sobald Einsatzreports vorliegen, kann das System echte Zeitverläufe ausgeben."
+              />
+            </div>
+
+            <div style={card()}>
+              <SectionTitle kicker="Region x Alter" title="Altersgruppen nach Gemeinde / Region" />
+              <Table
+                columns={[
+                  { key: 'gemeinde_name', label: 'Gemeinde' },
+                  { key: 'region_name', label: 'Region' },
+                  { key: 'altersgruppe', label: 'Altersgruppe' },
+                  { key: 'freiwillige_count', label: 'Freiwillige', render: (r) => formatNumber(r.freiwillige_count) },
+                  { key: 'teilnahmen_count', label: 'Teilnahmen', render: (r) => formatNumber(r.teilnahmen_count) },
+                ]}
+                rows={altersRegionStats}
+                emptyTitle="Noch keine regionalen Altersdaten"
+                emptySub="Sobald Freiwillige mit Geburtsdatum und Einsatzdaten vorhanden sind, wird hier die regionale Demografie sichtbar."
+              />
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {tab === 'inbox' ? (
         <div>
-          <SectionTitle kicker="Rückläufer" title="Inbox" sub="Einladungen, Rückmeldungen und offene Anfragen an einem Ort. So musst du nicht in verschiedene Dashboards springen." />
+          <SectionTitle kicker="Rückläufer" title="Inbox" sub="Einladungen, Rückmeldungen und offene Anfragen an einem Ort." />
           <div style={{ ...card({ marginBottom: 16 }) }}>
             <SearchField value={inboxSearch} onChange={setInboxSearch} placeholder="Nach Verein, Kontakt oder E-Mail suchen" />
           </div>
@@ -434,7 +679,7 @@ export default function AdminDashboard({
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <span style={badge('info')}>Separate Admin-Anwendung</span>
             <span style={badge('ok')}>Gleiche Supabase-Basis</span>
-            <span style={badge('warn')}>Backend-Freischaltungen folgen</span>
+            <span style={badge('warn')}>PDF-Reports aktiviert</span>
           </div>
         </div>
       </div>
