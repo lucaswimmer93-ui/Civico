@@ -188,6 +188,7 @@ export default function App() {
 
   const [user, setUser] = useState(null);
   const [stellen, setStellen] = useState([]);
+  const [vereineImUmkreis, setVereineImUmkreis] = useState([]);
   const [screen, setScreen] = useState(getInitialScreenFromPath);
   const [history, setHistory] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -583,6 +584,72 @@ export default function App() {
     setTimeout(() => setToast(null), 3000);
   };
 
+
+  const loadVereine = async (
+    plz = null,
+    umkreis = null,
+    gemeinde_id = null
+  ) => {
+    try {
+      if (plz && umkreis) {
+        const { data: plzData } = await supabase
+          .from("plz_koordinaten")
+          .select("lat, lng")
+          .eq("plz", plz)
+          .maybeSingle();
+
+        if (plzData) {
+          const { data: ids, error: rpcError } = await supabase.rpc("vereine_in_umkreis", {
+            lat: plzData.lat,
+            lng: plzData.lng,
+            radius_km: umkreis >= 9999 ? 9999 : umkreis,
+          });
+
+          if (!rpcError && ids?.length) {
+            const vereinIds = ids.map((r) => r.verein_id || r.id || r).filter(Boolean);
+            const { data: vereineData, error: vereineError } = await supabase
+              .from("vereine")
+              .select("*")
+              .in("id", vereinIds)
+              .eq("verifiziert", true)
+              .order("name", { ascending: true });
+
+            if (!vereineError && vereineData) {
+              const sortMap = new Map(vereinIds.map((id, index) => [id, index]));
+              setVereineImUmkreis(
+                [...vereineData].sort(
+                  (a, b) => (sortMap.get(a.id) ?? 9999) - (sortMap.get(b.id) ?? 9999)
+                )
+              );
+              return;
+            }
+          }
+
+          setVereineImUmkreis([]);
+          return;
+        }
+      }
+
+      let query = supabase
+        .from("vereine")
+        .select("*")
+        .eq("verifiziert", true)
+        .order("name", { ascending: true });
+
+      if (gemeinde_id) {
+        query = query.eq("gemeinde_id", gemeinde_id);
+      }
+
+      const { data, error } = await query;
+      if (!error && data) {
+        setVereineImUmkreis(data);
+      }
+    } catch (e) {
+      console.log("Vereine laden fehlgeschlagen:", e);
+      setVereineImUmkreis([]);
+    }
+  };
+
   const loadStellen = async (
     gemeinde_id = null,
     plz = null,
@@ -665,6 +732,29 @@ export default function App() {
     }
   };
 
+
+  useEffect(() => {
+    const radiusPlz =
+      filterPlz ||
+      (user?.type === "freiwilliger" ? user.data.plz : null) ||
+      null;
+
+    const radiusUmkreis = filterPlz
+      ? filterUmkreis
+      : user?.type === "freiwilliger"
+      ? user.data.umkreis
+      : null;
+
+    loadVereine(radiusPlz, radiusUmkreis, gemeindeId);
+  }, [
+    filterPlz,
+    filterUmkreis,
+    gemeindeId,
+    user?.type,
+    user?.data?.plz,
+    user?.data?.umkreis,
+  ]);
+
   useEffect(() => {
     const isAuthConfirmedPath = typeof window !== "undefined" && window.location.pathname === "/auth/confirmed";
 
@@ -697,6 +787,7 @@ export default function App() {
           setUser({ type: "freiwilliger", data: profil });
           setGemeindeId(profil.gemeinde_id);
           loadStellen(profil.gemeinde_id, profil.plz, profil.umkreis);
+          loadVereine(profil.plz, profil.umkreis, profil.gemeinde_id);
           loadFollows(profil.id);
           loadNotifications(profil.id);
           setScreen("home");
@@ -711,6 +802,7 @@ export default function App() {
           setUser({ type: "verein", data: verein });
           setGemeindeId(verein.gemeinde_id);
           loadStellen(verein.gemeinde_id);
+          loadVereine(null, null, verein.gemeinde_id);
           setScreen("dashboard");
           autoArchivieren(verein.id);
           supabase
@@ -732,6 +824,7 @@ export default function App() {
           setUser({ type: "gemeinde", data: gemeinde });
           setGemeindeId(gemeinde.id);
           loadStellen(gemeinde.id);
+          loadVereine(null, null, gemeinde.id);
           setScreen("gemeinde-dashboard");
           return;
         }
@@ -744,6 +837,7 @@ export default function App() {
         if (admin) {
           setUser({ type: "admin", data: admin });
           loadStellen();
+          loadVereine();
           setScreen("admin-dashboard");
           return;
         }
@@ -775,6 +869,7 @@ export default function App() {
         { event: "*", schema: "public", table: "bewerbungen" },
         () => {
           loadStellen();
+          loadVereine();
           reloadSelectedRealtime();
         }
       )
@@ -783,6 +878,7 @@ export default function App() {
         { event: "*", schema: "public", table: "termine" },
         () => {
           loadStellen();
+          loadVereine();
           reloadSelectedRealtime();
         }
       )
@@ -1187,11 +1283,20 @@ export default function App() {
     }
   };
 
-  const derivedOrganisationen = Array.from(
-    new Map(
-      stellen.filter((s) => s.vereine).map((s) => [s.vereine.id, s.vereine])
-    ).values()
-  );
+  const derivedOrganisationen = vereineImUmkreis;
+
+  const vereineListeSource = [
+    ...stellen,
+    ...vereineImUmkreis
+      .filter((v) => !stellen.some((s) => s.verein_id === v.id))
+      .map((v) => ({
+        id: `verein-${v.id}`,
+        verein_id: v.id,
+        vereine: v,
+        termine: [],
+        titel: null,
+      })),
+  ];
 
   const openGemeindeDashboard = () => {
     const demoGemeinde = {
@@ -1641,7 +1746,7 @@ export default function App() {
             {/* VEREINE TAB */}
             {homeTab === "vereine" && (
               <VereineListe
-                stellen={stellen}
+                stellen={vereineListeSource}
                 user={user}
                 follows={follows}
                 onToggleFollow={toggleFollowVerein}
@@ -1732,6 +1837,9 @@ export default function App() {
             setUser({ type, data });
             setGemeindeId(gid);
             loadStellen(gid);
+            if (type === "freiwilliger") loadVereine(data.plz, data.umkreis, gid);
+            else if (type === "verein" || type === "gemeinde") loadVereine(null, null, gid);
+            else loadVereine();
             setHistory([]);
             if (type === "verein" || type === "organisation") {
               setScreen("dashboard");
