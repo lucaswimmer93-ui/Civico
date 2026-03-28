@@ -2396,11 +2396,6 @@ export default function App() {
 
       {screen === "admin-dashboard" && user?.type === "admin" && (
         <AdminDashboard
-          gemeinden={[]}
-          organisationen={derivedOrganisationen}
-          freiwillige={[]}
-          stellen={stellen}
-          anfragen={adminInbox}
           onBack={goBack}
           logout={logout}
         />
