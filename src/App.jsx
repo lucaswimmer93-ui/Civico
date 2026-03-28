@@ -39,89 +39,6 @@ import GemeindeDashboard from './screens/GemeindeDashboard';
 import AdminDashboard from './screens/AdminDashboard';
 import { Chip, SectionLabel, EmptyState, BottomBar, StelleCard, VereineListe } from './components/ui';
 
-const getInitialScreenFromPath = () => {
-  if (typeof window === "undefined") return "home";
-  const path = window.location.pathname || "/";
-  if (path === "/auth/confirmed") return "auth-confirmed";
-  return "home";
-};
-
-function AuthConfirmedScreen({ onLogin }) {
-  const handleToLogin = () => {
-    if (typeof window !== "undefined") {
-      window.history.replaceState({}, "", "/");
-    }
-    onLogin();
-  };
-
-  return (
-    <div
-      style={{
-        minHeight: "100vh",
-        background: "linear-gradient(160deg, #1A1208 0%, #2C2416 60%, #3D3020 100%)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 20,
-      }}
-    >
-      <div
-        style={{
-          width: "100%",
-          maxWidth: 440,
-          background: "#F4F0E8",
-          borderRadius: 24,
-          padding: "36px 28px",
-          textAlign: "center",
-          boxShadow: "0 10px 30px rgba(0,0,0,0.18)",
-        }}
-      >
-        <div style={{ fontSize: 52, marginBottom: 12 }}>✅</div>
-        <div
-          style={{
-            fontSize: 26,
-            fontWeight: "bold",
-            color: "#2C2416",
-            marginBottom: 10,
-            letterSpacing: 1,
-          }}
-        >
-          E-Mail bestätigt
-        </div>
-        <div
-          style={{
-            fontSize: 15,
-            lineHeight: 1.6,
-            color: "#8B7355",
-            marginBottom: 24,
-          }}
-        >
-          Dein Konto wurde erfolgreich verifiziert.
-          <br />
-          Du kannst dich jetzt bei Civico anmelden.
-        </div>
-        <button
-          onClick={handleToLogin}
-          style={{
-            padding: "12px 24px",
-            borderRadius: 12,
-            border: "none",
-            background: "#2C2416",
-            color: "#FAF7F2",
-            fontSize: 14,
-            fontFamily: "inherit",
-            fontWeight: "bold",
-            cursor: "pointer",
-          }}
-        >
-          Zum Login
-        </button>
-      </div>
-    </div>
-  );
-}
-
-
 export default function App() {
   const [lang, setLang] = useState("de");
   const t = T[lang];
@@ -188,8 +105,7 @@ export default function App() {
 
   const [user, setUser] = useState(null);
   const [stellen, setStellen] = useState([]);
-  const [vereineImUmkreis, setVereineImUmkreis] = useState([]);
-  const [screen, setScreen] = useState(getInitialScreenFromPath);
+  const [screen, setScreen] = useState("home");
   const [history, setHistory] = useState([]);
   const [selected, setSelected] = useState(null);
   const [selectedVerein, setSelectedVerein] = useState(null);
@@ -572,9 +488,6 @@ export default function App() {
     }
   };
   const goHome = () => {
-    if (typeof window !== "undefined" && window.location.pathname === "/auth/confirmed") {
-      window.history.replaceState({}, "", "/");
-    }
     setHistory([]);
     setScreen("home");
   };
@@ -582,72 +495,6 @@ export default function App() {
   const showToast = (msg, color = "#3A7D44") => {
     setToast({ msg, color });
     setTimeout(() => setToast(null), 3000);
-  };
-
-
-  const loadVereine = async (
-    plz = null,
-    umkreis = null,
-    gemeinde_id = null
-  ) => {
-    try {
-      if (plz && umkreis) {
-        const { data: plzData } = await supabase
-          .from("plz_koordinaten")
-          .select("lat, lng")
-          .eq("plz", plz)
-          .maybeSingle();
-
-        if (plzData) {
-          const { data: ids, error: rpcError } = await supabase.rpc("vereine_in_umkreis", {
-            lat: plzData.lat,
-            lng: plzData.lng,
-            radius_km: umkreis >= 9999 ? 9999 : umkreis,
-          });
-
-          if (!rpcError && ids?.length) {
-            const vereinIds = ids.map((r) => r.verein_id || r.id || r).filter(Boolean);
-            const { data: vereineData, error: vereineError } = await supabase
-              .from("vereine")
-              .select("*")
-              .in("id", vereinIds)
-              .eq("verifiziert", true)
-              .order("name", { ascending: true });
-
-            if (!vereineError && vereineData) {
-              const sortMap = new Map(vereinIds.map((id, index) => [id, index]));
-              setVereineImUmkreis(
-                [...vereineData].sort(
-                  (a, b) => (sortMap.get(a.id) ?? 9999) - (sortMap.get(b.id) ?? 9999)
-                )
-              );
-              return;
-            }
-          }
-
-          setVereineImUmkreis([]);
-          return;
-        }
-      }
-
-      let query = supabase
-        .from("vereine")
-        .select("*")
-        .eq("verifiziert", true)
-        .order("name", { ascending: true });
-
-      if (gemeinde_id) {
-        query = query.eq("gemeinde_id", gemeinde_id);
-      }
-
-      const { data, error } = await query;
-      if (!error && data) {
-        setVereineImUmkreis(data);
-      }
-    } catch (e) {
-      console.log("Vereine laden fehlgeschlagen:", e);
-      setVereineImUmkreis([]);
-    }
   };
 
   const loadStellen = async (
@@ -732,32 +579,7 @@ export default function App() {
     }
   };
 
-
   useEffect(() => {
-    const radiusPlz =
-      filterPlz ||
-      (user?.type === "freiwilliger" ? user.data.plz : null) ||
-      null;
-
-    const radiusUmkreis = filterPlz
-      ? filterUmkreis
-      : user?.type === "freiwilliger"
-      ? user.data.umkreis
-      : null;
-
-    loadVereine(radiusPlz, radiusUmkreis, gemeindeId);
-  }, [
-    filterPlz,
-    filterUmkreis,
-    gemeindeId,
-    user?.type,
-    user?.data?.plz,
-    user?.data?.umkreis,
-  ]);
-
-  useEffect(() => {
-    const isAuthConfirmedPath = typeof window !== "undefined" && window.location.pathname === "/auth/confirmed";
-
     const setupServiceWorker = async () => {
       if (!("serviceWorker" in navigator)) return;
 
@@ -772,11 +594,6 @@ export default function App() {
     setupServiceWorker();
     loadStellen();
     supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (isAuthConfirmedPath) {
-        setScreen("auth-confirmed");
-        return;
-      }
-
       if (session) {
         const { data: profil } = await supabase
           .from("freiwillige")
@@ -787,7 +604,6 @@ export default function App() {
           setUser({ type: "freiwilliger", data: profil });
           setGemeindeId(profil.gemeinde_id);
           loadStellen(profil.gemeinde_id, profil.plz, profil.umkreis);
-          loadVereine(profil.plz, profil.umkreis, profil.gemeinde_id);
           loadFollows(profil.id);
           loadNotifications(profil.id);
           setScreen("home");
@@ -802,7 +618,6 @@ export default function App() {
           setUser({ type: "verein", data: verein });
           setGemeindeId(verein.gemeinde_id);
           loadStellen(verein.gemeinde_id);
-          loadVereine(null, null, verein.gemeinde_id);
           setScreen("dashboard");
           autoArchivieren(verein.id);
           supabase
@@ -824,7 +639,6 @@ export default function App() {
           setUser({ type: "gemeinde", data: gemeinde });
           setGemeindeId(gemeinde.id);
           loadStellen(gemeinde.id);
-          loadVereine(null, null, gemeinde.id);
           setScreen("gemeinde-dashboard");
           return;
         }
@@ -837,7 +651,6 @@ export default function App() {
         if (admin) {
           setUser({ type: "admin", data: admin });
           loadStellen();
-          loadVereine();
           setScreen("admin-dashboard");
           return;
         }
@@ -869,7 +682,6 @@ export default function App() {
         { event: "*", schema: "public", table: "bewerbungen" },
         () => {
           loadStellen();
-          loadVereine();
           reloadSelectedRealtime();
         }
       )
@@ -878,7 +690,6 @@ export default function App() {
         { event: "*", schema: "public", table: "termine" },
         () => {
           loadStellen();
-          loadVereine();
           reloadSelectedRealtime();
         }
       )
@@ -1283,20 +1094,11 @@ export default function App() {
     }
   };
 
-  const derivedOrganisationen = vereineImUmkreis;
-
-  const vereineListeSource = [
-    ...stellen,
-    ...vereineImUmkreis
-      .filter((v) => !stellen.some((s) => s.verein_id === v.id))
-      .map((v) => ({
-        id: `verein-${v.id}`,
-        verein_id: v.id,
-        vereine: v,
-        termine: [],
-        titel: null,
-      })),
-  ];
+  const derivedOrganisationen = Array.from(
+    new Map(
+      stellen.filter((s) => s.vereine).map((s) => [s.vereine.id, s.vereine])
+    ).values()
+  );
 
   const openGemeindeDashboard = () => {
     const demoGemeinde = {
@@ -1357,16 +1159,7 @@ export default function App() {
         </div>
       )}
 
-
-      {screen === "auth-confirmed" && (
-        <AuthConfirmedScreen onLogin={() => {
-          setHistory([]);
-          setScreen("login");
-        }} />
-      )}
-
       {/* HOME */}
-
       {screen === "home" && (
         <div>
           <div
@@ -1746,7 +1539,7 @@ export default function App() {
             {/* VEREINE TAB */}
             {homeTab === "vereine" && (
               <VereineListe
-                stellen={vereineListeSource}
+                stellen={stellen}
                 user={user}
                 follows={follows}
                 onToggleFollow={toggleFollowVerein}
@@ -1837,9 +1630,6 @@ export default function App() {
             setUser({ type, data });
             setGemeindeId(gid);
             loadStellen(gid);
-            if (type === "freiwilliger") loadVereine(data.plz, data.umkreis, gid);
-            else if (type === "verein" || type === "gemeinde") loadVereine(null, null, gid);
-            else loadVereine();
             setHistory([]);
             if (type === "verein" || type === "organisation") {
               setScreen("dashboard");
@@ -2396,6 +2186,11 @@ export default function App() {
 
       {screen === "admin-dashboard" && user?.type === "admin" && (
         <AdminDashboard
+          gemeinden={[]}
+          organisationen={derivedOrganisationen}
+          freiwillige={[]}
+          stellen={stellen}
+          anfragen={adminInbox}
           onBack={goBack}
           logout={logout}
         />
