@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { supabase, T, KATEGORIEN, SKILLS, getSkillLabel, getKat, getMedaille, getNextMedaille, getMedailleName, IMPRESSUM_TEXT, DATENSCHUTZ_TEXT, AGB_TEXT, formatDate, getGemeindeByPlz, isKlarname, isTerminNochNichtGestartet, isTerminAktuell } from '../core/shared';
 import { Header, StelleCard, VereineListe, BottomBar, DatenschutzBox, Input, BigButton, Chip, InfoChip, SectionLabel, RoleCard, EmptyState, ErrorMsg } from '../components/ui';
 
+const DRAFT_KEY = 'civico_login_draft_v1';
+
 function LoginScreen({
   initialMode = null,
   onLogin,
@@ -25,6 +27,7 @@ function LoginScreen({
   const [regWebsite, setRegWebsite] = useState("");
   const [selectedSkills, setSelectedSkills] = useState([]);
   const [sprachen, setSprachen] = useState("");
+  const [geburtsdatum, setGeburtsdatum] = useState("");
   const [datenschutz, setDatenschutz] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -33,13 +36,94 @@ function LoginScreen({
   const lang = "de";
 
   useEffect(() => {
-    if (initialMode) {
-      setMode(initialMode);
+    try {
+      const raw = sessionStorage.getItem(DRAFT_KEY);
+      const draft = raw ? JSON.parse(raw) : null;
+
+      if (initialMode) {
+        setMode(initialMode);
+      } else if (draft?.mode) {
+        setMode(draft.mode);
+      } else {
+        setMode("auswahl");
+      }
+
+      if (draft) {
+        setEmail(draft.email || "");
+        setPassword(draft.password || "");
+        setName(draft.name || "");
+        setOrgName(draft.orgName || "");
+        setOrt(draft.ort || "");
+        setPlz(draft.plz || "");
+        setRegStrasse(draft.regStrasse || "");
+        setHausnummer(draft.hausnummer || "");
+        setKontaktEmailReg(draft.kontaktEmail || "");
+        setRegTelefon(draft.regTelefon || "");
+        setRegWebsite(draft.regWebsite || "");
+        setSelectedSkills(Array.isArray(draft.selectedSkills) ? draft.selectedSkills : []);
+        setSprachen(draft.sprachen || "");
+        setGeburtsdatum(draft.geburtsdatum || "");
+        setDatenschutz(!!draft.datenschutz);
+        setResetMode(!!draft.resetMode);
+      }
+
       setError("");
-    } else {
-      setMode("auswahl");
+    } catch (e) {
+      if (initialMode) setMode(initialMode);
+      else setMode("auswahl");
     }
   }, [initialMode]);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(
+        DRAFT_KEY,
+        JSON.stringify({
+          mode,
+          email,
+          password,
+          name,
+          orgName,
+          ort,
+          plz,
+          regStrasse,
+          hausnummer,
+          kontaktEmail,
+          regTelefon,
+          regWebsite,
+          selectedSkills,
+          sprachen,
+          geburtsdatum,
+          datenschutz,
+          resetMode,
+        })
+      );
+    } catch (e) {}
+  }, [
+    mode,
+    email,
+    password,
+    name,
+    orgName,
+    ort,
+    plz,
+    regStrasse,
+    hausnummer,
+    kontaktEmail,
+    regTelefon,
+    regWebsite,
+    selectedSkills,
+    sprachen,
+    geburtsdatum,
+    datenschutz,
+    resetMode,
+  ]);
+
+  const clearDraft = () => {
+    try {
+      sessionStorage.removeItem(DRAFT_KEY);
+    } catch (e) {}
+  };
 
   const handleLogin = async (type) => {
     if (!email || !password) {
@@ -47,6 +131,7 @@ function LoginScreen({
       return;
     }
     setLoading(true);
+    setError("");
     const { data: authData, error: authError } =
       await supabase.auth.signInWithPassword({ email, password });
     if (authError) {
@@ -65,11 +150,12 @@ function LoginScreen({
       setError("Profil nicht gefunden.");
       return;
     }
+    clearDraft();
     onLogin(type, profil, profil.gemeinde_id);
   };
 
   const handleRegisterFreiwilliger = async () => {
-    if (!name || !email || !password) {
+    if (!name || !email || !password || !geburtsdatum) {
       setError("Bitte alle Felder ausfüllen.");
       return;
     }
@@ -94,6 +180,7 @@ function LoginScreen({
       password,
       options: { data: { name, type: "freiwilliger" } },
     });
+
     if (authError) {
       setLoading(false);
       setError("Email bereits registriert.");
@@ -115,17 +202,20 @@ function LoginScreen({
         aktionen: 0,
         skills: selectedSkills,
         sprachen,
+        geburtsdatum,
       });
 
     if (insertError) {
+      console.error("Freiwilligen-Registrierung fehlgeschlagen:", insertError);
       await supabase.auth.signOut();
       setLoading(false);
-      setError("Registrierung fehlgeschlagen. Bitte versuche es erneut.");
+      setError(`Registrierung fehlgeschlagen. ${insertError.message || "Bitte versuche es erneut."}`);
       return;
     }
 
     setLoading(false);
     setEmailSent(true);
+    clearDraft();
   };
 
   const handleRegisterVerein = async () => {
@@ -158,6 +248,7 @@ function LoginScreen({
       password,
       options: { data: { name: orgName, type: "verein" } },
     });
+
     if (authError) {
       setLoading(false);
       setError("Email bereits registriert.");
@@ -184,14 +275,16 @@ function LoginScreen({
       });
 
     if (insertError) {
+      console.error("Vereins-Registrierung fehlgeschlagen:", insertError);
       await supabase.auth.signOut();
       setLoading(false);
-      setError("Registrierung fehlgeschlagen. Bitte versuche es erneut.");
+      setError(`Registrierung fehlgeschlagen. ${insertError.message || "Bitte versuche es erneut."}`);
       return;
     }
 
     setLoading(false);
     setEmailSent(true);
+    clearDraft();
   };
 
   const handleReset = async () => {
@@ -512,6 +605,12 @@ function LoginScreen({
               type="password"
               placeholder="••••••"
             />
+            <Input
+              label="Geburtsdatum (Pflicht)"
+              value={geburtsdatum}
+              onChange={setGeburtsdatum}
+              type="date"
+            />
             <div style={{ marginBottom: 14 }}>
               <div
                 style={{
@@ -607,7 +706,7 @@ function LoginScreen({
               🏢 Verein registrieren
             </div>
             <div style={{ fontSize: 12, color: "#8B7355", marginBottom: 20 }}>
-              Dein Verein wird nach Prüfung freigeschaltet.
+              Dein Verein bestätigt seine E-Mail und kann danach direkt loslegen.
             </div>
             <Input
               label="Name des Vereins *"
