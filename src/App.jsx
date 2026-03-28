@@ -39,6 +39,89 @@ import GemeindeDashboard from './screens/GemeindeDashboard';
 import AdminDashboard from './screens/AdminDashboard';
 import { Chip, SectionLabel, EmptyState, BottomBar, StelleCard, VereineListe } from './components/ui';
 
+const getInitialScreenFromPath = () => {
+  if (typeof window === "undefined") return "home";
+  const path = window.location.pathname || "/";
+  if (path === "/auth/confirmed") return "auth-confirmed";
+  return "home";
+};
+
+function AuthConfirmedScreen({ onLogin }) {
+  const handleToLogin = () => {
+    if (typeof window !== "undefined") {
+      window.history.replaceState({}, "", "/");
+    }
+    onLogin();
+  };
+
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        background: "linear-gradient(160deg, #1A1208 0%, #2C2416 60%, #3D3020 100%)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 20,
+      }}
+    >
+      <div
+        style={{
+          width: "100%",
+          maxWidth: 440,
+          background: "#F4F0E8",
+          borderRadius: 24,
+          padding: "36px 28px",
+          textAlign: "center",
+          boxShadow: "0 10px 30px rgba(0,0,0,0.18)",
+        }}
+      >
+        <div style={{ fontSize: 52, marginBottom: 12 }}>✅</div>
+        <div
+          style={{
+            fontSize: 26,
+            fontWeight: "bold",
+            color: "#2C2416",
+            marginBottom: 10,
+            letterSpacing: 1,
+          }}
+        >
+          E-Mail bestätigt
+        </div>
+        <div
+          style={{
+            fontSize: 15,
+            lineHeight: 1.6,
+            color: "#8B7355",
+            marginBottom: 24,
+          }}
+        >
+          Dein Konto wurde erfolgreich verifiziert.
+          <br />
+          Du kannst dich jetzt bei Civico anmelden.
+        </div>
+        <button
+          onClick={handleToLogin}
+          style={{
+            padding: "12px 24px",
+            borderRadius: 12,
+            border: "none",
+            background: "#2C2416",
+            color: "#FAF7F2",
+            fontSize: 14,
+            fontFamily: "inherit",
+            fontWeight: "bold",
+            cursor: "pointer",
+          }}
+        >
+          Zum Login
+        </button>
+      </div>
+    </div>
+  );
+}
+
+
 export default function App() {
   const [lang, setLang] = useState("de");
   const t = T[lang];
@@ -105,7 +188,7 @@ export default function App() {
 
   const [user, setUser] = useState(null);
   const [stellen, setStellen] = useState([]);
-  const [screen, setScreen] = useState("home");
+  const [screen, setScreen] = useState(getInitialScreenFromPath);
   const [history, setHistory] = useState([]);
   const [selected, setSelected] = useState(null);
   const [selectedVerein, setSelectedVerein] = useState(null);
@@ -488,6 +571,9 @@ export default function App() {
     }
   };
   const goHome = () => {
+    if (typeof window !== "undefined" && window.location.pathname === "/auth/confirmed") {
+      window.history.replaceState({}, "", "/");
+    }
     setHistory([]);
     setScreen("home");
   };
@@ -580,6 +666,8 @@ export default function App() {
   };
 
   useEffect(() => {
+    const isAuthConfirmedPath = typeof window !== "undefined" && window.location.pathname === "/auth/confirmed";
+
     const setupServiceWorker = async () => {
       if (!("serviceWorker" in navigator)) return;
 
@@ -594,6 +682,11 @@ export default function App() {
     setupServiceWorker();
     loadStellen();
     supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (isAuthConfirmedPath) {
+        setScreen("auth-confirmed");
+        return;
+      }
+
       if (session) {
         const { data: profil } = await supabase
           .from("freiwillige")
@@ -1159,7 +1252,16 @@ export default function App() {
         </div>
       )}
 
+
+      {screen === "auth-confirmed" && (
+        <AuthConfirmedScreen onLogin={() => {
+          setHistory([]);
+          setScreen("login");
+        }} />
+      )}
+
       {/* HOME */}
+
       {screen === "home" && (
         <div>
           <div
