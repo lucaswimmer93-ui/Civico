@@ -13,6 +13,7 @@ const getBaseUrl = () => {
 };
 
 const getEmailRedirectUrl = () => `${getBaseUrl()}${EMAIL_REDIRECT_PATH}`;
+const normalizeEmail = (value) => (value || '').trim().toLowerCase();
 
 
 function LoginScreen({
@@ -146,7 +147,7 @@ function LoginScreen({
     setError("");
 
     const { data: authData, error: authError } =
-      await supabase.auth.signInWithPassword({ email, password });
+      await supabase.auth.signInWithPassword({ email: normalizeEmail(email), password });
 
     if (authError) {
       setLoading(false);
@@ -278,7 +279,7 @@ function LoginScreen({
     setError("");
 
     const { data: authData, error: authError } = await supabase.auth.signUp({
-      email,
+      email: normalizeEmail(email),
       password,
       options: {
         emailRedirectTo: getEmailRedirectUrl(),
@@ -299,8 +300,14 @@ function LoginScreen({
     });
 
     if (authError) {
+      console.error("Registrierung fehlgeschlagen:", authError);
       setLoading(false);
-      setError("Email bereits registriert.");
+      const message = authError?.message || "Registrierung fehlgeschlagen.";
+      if (/already registered|already been registered|user already registered|email address is invalid|signup is disabled|rate limit/i.test(message)) {
+        setError(message);
+      } else {
+        setError(`Registrierung fehlgeschlagen. ${message}`);
+      }
       return;
     }
 
@@ -341,7 +348,7 @@ function LoginScreen({
     setError("");
 
     const { data: authData, error: authError } = await supabase.auth.signUp({
-      email,
+      email: normalizeEmail(email),
       password,
       options: {
         emailRedirectTo: getEmailRedirectUrl(),
@@ -362,8 +369,14 @@ function LoginScreen({
     });
 
     if (authError) {
+      console.error("Registrierung fehlgeschlagen:", authError);
       setLoading(false);
-      setError("Email bereits registriert.");
+      const message = authError?.message || "Registrierung fehlgeschlagen.";
+      if (/already registered|already been registered|user already registered|email address is invalid|signup is disabled|rate limit/i.test(message)) {
+        setError(message);
+      } else {
+        setError(`Registrierung fehlgeschlagen. ${message}`);
+      }
       return;
     }
 
@@ -384,7 +397,7 @@ function LoginScreen({
       return;
     }
     setLoading(true);
-    await supabase.auth.resetPasswordForEmail(email, {
+    await supabase.auth.resetPasswordForEmail(normalizeEmail(email), {
       redirectTo: `${getBaseUrl()}/reset`,
     });
     setLoading(false);
