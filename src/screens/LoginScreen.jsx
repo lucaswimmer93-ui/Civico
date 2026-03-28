@@ -3,6 +3,17 @@ import { supabase, T, KATEGORIEN, SKILLS, getSkillLabel, getKat, getMedaille, ge
 import { Header, StelleCard, VereineListe, BottomBar, DatenschutzBox, Input, BigButton, Chip, InfoChip, SectionLabel, RoleCard, EmptyState, ErrorMsg } from '../components/ui';
 
 const DRAFT_KEY = 'civico_login_draft_v1';
+const EMAIL_REDIRECT_PATH = '/auth/confirmed';
+
+const getBaseUrl = () => {
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return window.location.origin;
+  }
+  return 'https://mycivico.de';
+};
+
+const getEmailRedirectUrl = () => `${getBaseUrl()}${EMAIL_REDIRECT_PATH}`;
+
 
 function LoginScreen({
   initialMode = null,
@@ -349,7 +360,7 @@ function LoginScreen({
     }
     setLoading(true);
     await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: "https://mycivico.de/reset",
+      redirectTo: `${getBaseUrl()}/reset`,
     });
     setLoading(false);
     showToast("✓ Reset-Link gesendet!");
