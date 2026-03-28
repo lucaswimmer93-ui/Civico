@@ -85,7 +85,10 @@ function LoginScreen({
       setError("Bitte Datenschutzerklärung und AGB akzeptieren.");
       return;
     }
+
     setLoading(true);
+    setError("");
+
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email,
       password,
@@ -96,18 +99,14 @@ function LoginScreen({
       setError("Email bereits registriert.");
       return;
     }
-    const gemeinde_id = await getGemeindeByPlz(plz);
-    if (!gemeinde_id) {
-      await supabase.auth.signOut();
-      setLoading(false);
-      setError("Für diese PLZ wurde noch keine Gemeinde gefunden.");
-      return;
-    }
-    await supabase
+
+    const gemeinde_id = plz ? await getGemeindeByPlz(plz) : null;
+
+    const { error: insertError } = await supabase
       .from("freiwillige")
       .insert({
         auth_id: authData.user.id,
-        gemeinde_id,
+        gemeinde_id: gemeinde_id || null,
         name,
         email,
         plz,
@@ -117,6 +116,14 @@ function LoginScreen({
         skills: selectedSkills,
         sprachen,
       });
+
+    if (insertError) {
+      await supabase.auth.signOut();
+      setLoading(false);
+      setError("Registrierung fehlgeschlagen. Bitte versuche es erneut.");
+      return;
+    }
+
     setLoading(false);
     setEmailSent(true);
   };
@@ -142,7 +149,10 @@ function LoginScreen({
       setError("Bitte Datenschutzerklärung und AGB akzeptieren.");
       return;
     }
+
     setLoading(true);
+    setError("");
+
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email,
       password,
@@ -153,18 +163,14 @@ function LoginScreen({
       setError("Email bereits registriert.");
       return;
     }
-    const gemeinde_id = await getGemeindeByPlz(plz);
-    if (!gemeinde_id) {
-      await supabase.auth.signOut();
-      setLoading(false);
-      setError("Für diese PLZ wurde noch keine Gemeinde gefunden.");
-      return;
-    }
-    await supabase
+
+    const gemeinde_id = plz ? await getGemeindeByPlz(plz) : null;
+
+    const { error: insertError } = await supabase
       .from("vereine")
       .insert({
         auth_id: authData.user.id,
-        gemeinde_id,
+        gemeinde_id: gemeinde_id || null,
         name: orgName,
         email,
         ort,
@@ -176,6 +182,14 @@ function LoginScreen({
         logo: "🏢",
         verifiziert: false,
       });
+
+    if (insertError) {
+      await supabase.auth.signOut();
+      setLoading(false);
+      setError("Registrierung fehlgeschlagen. Bitte versuche es erneut.");
+      return;
+    }
+
     setLoading(false);
     setEmailSent(true);
   };
