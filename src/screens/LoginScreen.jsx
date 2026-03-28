@@ -170,6 +170,24 @@ function LoginScreen({
       .eq("auth_id", user.id)
       .maybeSingle();
 
+    if (
+      type === "verein" &&
+      profil &&
+      profil.verifiziert === false &&
+      user.email_confirmed_at
+    ) {
+      const { data: updatedProfil, error: updateProfilError } = await supabase
+        .from("vereine")
+        .update({ verifiziert: true })
+        .eq("auth_id", user.id)
+        .select("*")
+        .maybeSingle();
+
+      if (!updateProfilError && updatedProfil) {
+        profil = updatedProfil;
+      }
+    }
+
     if (!profil && !profilError && (type === "freiwilliger" || type === "verein")) {
       const meta = user.user_metadata || {};
       const gemeinde_id = meta.plz ? await getGemeindeByPlz(meta.plz) : null;
@@ -188,6 +206,10 @@ function LoginScreen({
               skills: Array.isArray(meta.skills) ? meta.skills : selectedSkills,
               sprachen: meta.sprachen || sprachen || "",
               geburtsdatum: meta.geburtsdatum || geburtsdatum || null,
+              datenschutz_einwilligung:
+                typeof meta.datenschutz_einwilligung === "boolean"
+                  ? meta.datenschutz_einwilligung
+                  : !!datenschutz,
             }
           : {
               auth_id: user.id,
@@ -201,7 +223,7 @@ function LoginScreen({
               telefon: meta.telefon || regTelefon || null,
               website: meta.website || regWebsite || null,
               logo: meta.logo || "🏢",
-              verifiziert: false,
+              verifiziert: true,
             };
 
       const { error: bootstrapError } = await supabase.from(table).insert(payload);
@@ -259,6 +281,7 @@ function LoginScreen({
       email,
       password,
       options: {
+        emailRedirectTo: getEmailRedirectUrl(),
         data: {
           type: "freiwilliger",
           name,
@@ -270,6 +293,7 @@ function LoginScreen({
           skills: selectedSkills,
           sprachen,
           geburtsdatum,
+          datenschutz_einwilligung: true,
         },
       },
     });
@@ -320,6 +344,7 @@ function LoginScreen({
       email,
       password,
       options: {
+        emailRedirectTo: getEmailRedirectUrl(),
         data: {
           type: "verein",
           name: orgName,
@@ -331,7 +356,7 @@ function LoginScreen({
           telefon: regTelefon || null,
           website: regWebsite || null,
           logo: "🏢",
-          verifiziert: false,
+          verifiziert: true,
         },
       },
     });
@@ -772,7 +797,7 @@ function LoginScreen({
               🏢 Verein registrieren
             </div>
             <div style={{ fontSize: 12, color: "#8B7355", marginBottom: 20 }}>
-              Dein Verein bestätigt seine E-Mail und kann danach direkt loslegen.
+              Dein Verein bestätigt seine E-Mail und kann danach direkt Helfer finden.
             </div>
             <Input
               label="Name des Vereins *"
@@ -863,7 +888,7 @@ function LoginScreen({
             />
             {error && <ErrorMsg>{error}</ErrorMsg>}
             <BigButton onClick={handleRegisterVerein} disabled={loading} green>
-              {loading ? "Laden..." : "Antrag stellen"}
+              {loading ? "Laden..." : "Helfer finden"}
             </BigButton>
           </div>
         )}
