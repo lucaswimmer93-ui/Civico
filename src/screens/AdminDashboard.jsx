@@ -21,8 +21,7 @@ function StatCard({ label, value, sub }) {
 
 export default function AdminDashboard({ onBack, logout }) {
   const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState('');
-  const [formError, setFormError] = useState('');
+  const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [inviteLink, setInviteLink] = useState('');
 
@@ -33,7 +32,6 @@ export default function AdminDashboard({ onBack, logout }) {
   const [bundesland, setBundesland] = useState('Hessen');
   const [nachricht, setNachricht] = useState('Kurze Info für die Gemeinde');
   const [savingGemeinde, setSavingGemeinde] = useState(false);
-  const [plzFilter, setPlzFilter] = useState('');
 
   const [dashboardStats, setDashboardStats] = useState(null);
   const [funnelStats, setFunnelStats] = useState(null);
@@ -42,10 +40,11 @@ export default function AdminDashboard({ onBack, logout }) {
   const [altersgruppenStats, setAltersgruppenStats] = useState([]);
   const [regionStats, setRegionStats] = useState([]);
   const [csrStats, setCsrStats] = useState([]);
+  const [plzFilter, setPlzFilter] = useState('');
 
   const loadAdminData = async () => {
     setLoading(true);
-    setLoadError('');
+    setError('');
 
     const [
       dashboardRes,
@@ -76,7 +75,7 @@ export default function AdminDashboard({ onBack, logout }) {
     ].find(Boolean);
 
     if (firstError) {
-      setLoadError(firstError.message || 'Admin-Daten konnten nicht geladen werden.');
+      setError(firstError.message || 'Admin-Daten konnten nicht geladen werden.');
     }
 
     setDashboardStats(dashboardRes.data || null);
@@ -99,38 +98,56 @@ export default function AdminDashboard({ onBack, logout }) {
     const cleanPlz = String(plz || '').trim();
     const cleanOrt = String(ort || '').trim();
     const cleanBundesland = String(bundesland || '').trim() || 'Hessen';
-    const cleanNachricht = String(nachricht || '').trim();
 
     if (!cleanName || !cleanEmail) {
-      setFormError('Gemeindename und Admin-E-Mail sind Pflichtfelder.');
+      setError('Gemeindename und Admin-E-Mail sind Pflichtfelder.');
       return;
     }
 
     setSavingGemeinde(true);
-    setFormError('');
+    setError('');
     setSuccess('');
     setInviteLink('');
 
-    const { data, error } = await supabase.functions.invoke('admin-create-gemeinde-invite', {
+    const {
+      data: { session },
+      error: sessionError,
+    } = await supabase.auth.getSession();
+
+    console.log('ADMIN SESSION CHECK:', session);
+    if (sessionError) {
+      console.error('SESSION ERROR:', sessionError);
+    }
+
+    if (!session) {
+      setSavingGemeinde(false);
+      setError('Keine aktive Supabase-Session gefunden. Bitte einmal vollständig neu als Admin einloggen.');
+      return;
+    }
+
+    const { data, error: invokeError } = await supabase.functions.invoke('admin-create-gemeinde-invite', {
       body: {
         name: cleanName,
         email: cleanEmail,
         plz: cleanPlz,
         ort: cleanOrt,
         bundesland: cleanBundesland,
-        nachricht: cleanNachricht,
+        nachricht,
       },
     });
 
+    console.log('ADMIN CREATE GEMEINDE RESPONSE:', data);
+    console.log('ADMIN CREATE GEMEINDE ERROR:', invokeError);
+
     setSavingGemeinde(false);
 
-    if (error) {
-      setFormError(error.message || 'Gemeinde konnte nicht angelegt werden.');
+    if (invokeError) {
+      setError(invokeError.message || 'Gemeinde konnte nicht angelegt werden.');
       return;
     }
 
     if (!data?.ok) {
-      setFormError(data?.error || 'Gemeinde konnte nicht angelegt werden.');
+      setError(data?.error || 'Gemeinde konnte nicht angelegt werden.');
       return;
     }
 
@@ -140,27 +157,10 @@ export default function AdminDashboard({ onBack, logout }) {
     setAdminEmail('');
     setPlz('');
     setOrt('');
-    setBundesland('Hessen');
     setNachricht('Kurze Info für die Gemeinde');
 
     await loadAdminData();
   };
-
-  const copyInviteLink = async () => {
-    if (!inviteLink) return;
-    try {
-      await navigator.clipboard.writeText(inviteLink);
-      setSuccess('Einladungslink kopiert.');
-    } catch {
-      setFormError('Link konnte nicht automatisch kopiert werden.');
-    }
-  };
-
-  const topGemeinden = useMemo(() => {
-    return [...gemeindenStats]
-      .sort((a, b) => ((b.gesamtstunden || 0) + (b.completed_einsaetze_count || 0)) - ((a.gesamtstunden || 0) + (a.completed_einsaetze_count || 0)))
-      .slice(0, 5);
-  }, [gemeindenStats]);
 
   const plzRows = useMemo(() => {
     return gemeindenStats
@@ -176,32 +176,40 @@ export default function AdminDashboard({ onBack, logout }) {
       .sort((a, b) => a.plz.localeCompare(b.plz));
   }, [gemeindenStats, plzFilter]);
 
+  const topGemeinden = useMemo(() => {
+    return [...gemeindenStats]
+      .sort((a, b) => ((b.gesamtstunden || 0) + (b.completed_einsaetze_count || 0)) - ((a.gesamtstunden || 0) + (a.completed_einsaetze_count || 0)))
+      .slice(0, 5);
+  }, [gemeindenStats]);
+
+  const copyInviteLink = async () => {
+    if (!inviteLink) return;
+    try {
+      await navigator.clipboard.writeText(inviteLink);
+      setSuccess('Einladungslink kopiert.');
+    } catch (e) {
+      setError('Link konnte nicht automatisch kopiert werden.');
+    }
+  };
+
   return (
     <div>
-      <Header
-        title="Admin-Dashboard"
-        subtitle="CSR, Gemeinden, Vereine und Demografie"
-        onBack={onBack}
-        onLogout={logout}
-      />
-
+      <Header title="Admin-Dashboard" subtitle="CSR, Gemeinden, Vereine und Demografie" onBack={onBack} onLogout={logout} />
       <div style={{ padding: '0 16px 24px' }}>
         <div style={{ ...cardStyle, marginBottom: 18 }}>
-          <div style={{ fontSize: 22, fontWeight: 700, marginBottom: 16 }}>Gemeinde anlegen</div>
-
+          <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 12 }}>Gemeinde anlegen</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.2fr 0.8fr 1fr', gap: 12, marginBottom: 12 }}>
             <Input label="Gemeindename" value={gemeindeName} onChange={(e) => setGemeindeName(e.target ? e.target.value : e)} />
             <Input label="Admin-E-Mail" value={adminEmail} onChange={(e) => setAdminEmail(e.target ? e.target.value : e)} />
             <Input label="PLZ" value={plz} onChange={(e) => setPlz(e.target ? e.target.value : e)} />
             <Input label="Ort" value={ort} onChange={(e) => setOrt(e.target ? e.target.value : e)} />
           </div>
-
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 160px', gap: 12, marginBottom: 12 }}>
             <Input label="Nachricht" value={nachricht} onChange={(e) => setNachricht(e.target ? e.target.value : e)} />
             <Input label="Bundesland" value={bundesland} onChange={(e) => setBundesland(e.target ? e.target.value : e)} />
           </div>
 
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
             <button
               onClick={handleCreateGemeinde}
               disabled={savingGemeinde}
@@ -218,7 +226,6 @@ export default function AdminDashboard({ onBack, logout }) {
             >
               {savingGemeinde ? 'Speichern...' : 'Gemeinde speichern'}
             </button>
-
             {inviteLink ? (
               <button
                 onClick={copyInviteLink}
@@ -238,22 +245,10 @@ export default function AdminDashboard({ onBack, logout }) {
             ) : null}
           </div>
 
-          {success ? (
-            <div style={{ marginTop: 12, color: '#2C6B36', fontSize: 13, fontWeight: 700 }}>{success}</div>
-          ) : null}
-          {formError ? (
-            <div style={{ marginTop: 12, color: '#B53A2D', fontSize: 13, fontWeight: 700 }}>{formError}</div>
-          ) : null}
-          {inviteLink ? (
-            <div style={{ marginTop: 10, fontSize: 12, color: '#8B7355', wordBreak: 'break-all' }}>{inviteLink}</div>
-          ) : null}
+          {success ? <div style={{ marginTop: 12, color: '#2C6B36', fontSize: 13, fontWeight: 700 }}>{success}</div> : null}
+          {error ? <div style={{ marginTop: 12, color: '#B53A2D', fontSize: 13, fontWeight: 700 }}>{error}</div> : null}
+          {inviteLink ? <div style={{ marginTop: 10, fontSize: 12, color: '#8B7355', wordBreak: 'break-all' }}>{inviteLink}</div> : null}
         </div>
-
-        {loadError ? (
-          <div style={{ ...cardStyle, marginBottom: 18, color: '#B53A2D', fontWeight: 700 }}>
-            {loadError}
-          </div>
-        ) : null}
 
         <div style={{ marginBottom: 18 }}>
           <div style={{ fontSize: 12, color: '#8B7355', marginBottom: 8 }}>Systemübersicht</div>
