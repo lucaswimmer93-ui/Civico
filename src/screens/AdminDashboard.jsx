@@ -24,6 +24,8 @@ export default function AdminDashboard({ onBack, logout }) {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [inviteLink, setInviteLink] = useState('');
+  const [debugInfo, setDebugInfo] = useState('DEBUG aktiv');
+  const [sessionInfo, setSessionInfo] = useState('Session noch nicht geprüft');
 
   const [gemeindeName, setGemeindeName] = useState('');
   const [adminEmail, setAdminEmail] = useState('');
@@ -41,6 +43,10 @@ export default function AdminDashboard({ onBack, logout }) {
   const [regionStats, setRegionStats] = useState([]);
   const [csrStats, setCsrStats] = useState([]);
   const [plzFilter, setPlzFilter] = useState('');
+
+  useEffect(() => {
+    console.log('ADMIN DASHBOARD DEBUG VISIBLE AKTIV');
+  }, []);
 
   const loadAdminData = async () => {
     setLoading(true);
@@ -104,26 +110,21 @@ export default function AdminDashboard({ onBack, logout }) {
       return;
     }
 
+    const { data: { session } } = await supabase.auth.getSession();
+    console.log('ADMIN SESSION CHECK:', session);
+    setSessionInfo(session ? `Session vorhanden: ${session.user?.email || 'ohne Email'}` : 'KEINE SESSION');
+
+    if (!session) {
+      setError('Keine aktive Supabase-Session gefunden. Bitte als echter Admin neu einloggen.');
+      setSuccess('');
+      return;
+    }
+
     setSavingGemeinde(true);
     setError('');
     setSuccess('');
     setInviteLink('');
-
-    const {
-      data: { session },
-      error: sessionError,
-    } = await supabase.auth.getSession();
-
-    console.log('ADMIN SESSION CHECK:', session);
-    if (sessionError) {
-      console.error('SESSION ERROR:', sessionError);
-    }
-
-    if (!session) {
-      setSavingGemeinde(false);
-      setError('Keine aktive Supabase-Session gefunden. Bitte einmal vollständig neu als Admin einloggen.');
-      return;
-    }
+    setDebugInfo('Function-Aufruf läuft ...');
 
     const { data, error: invokeError } = await supabase.functions.invoke('admin-create-gemeinde-invite', {
       body: {
@@ -142,17 +143,22 @@ export default function AdminDashboard({ onBack, logout }) {
     setSavingGemeinde(false);
 
     if (invokeError) {
-      setError(invokeError.message || 'Gemeinde konnte nicht angelegt werden.');
+      const msg = invokeError.message || 'Gemeinde konnte nicht angelegt werden.';
+      setError(`DEBUG INVOKE FEHLER: ${msg}`);
+      setDebugInfo(`InvokeError: ${msg}`);
       return;
     }
 
     if (!data?.ok) {
-      setError(data?.error || 'Gemeinde konnte nicht angelegt werden.');
+      const msg = data?.error || 'Gemeinde konnte nicht angelegt werden.';
+      setError(`DEBUG BACKEND FEHLER: ${msg}`);
+      setDebugInfo(`BackendError: ${msg}`);
       return;
     }
 
     setSuccess(`Gemeinde gespeichert. Einladung für ${data.email} wurde erzeugt.`);
     setInviteLink(data.action_link || '');
+    setDebugInfo('Erfolg');
     setGemeindeName('');
     setAdminEmail('');
     setPlz('');
@@ -194,8 +200,14 @@ export default function AdminDashboard({ onBack, logout }) {
 
   return (
     <div>
-      <Header title="Admin-Dashboard" subtitle="CSR, Gemeinden, Vereine und Demografie" onBack={onBack} onLogout={logout} />
+      <Header title="Admin-Dashboard DEBUG VISIBLE" subtitle="CSR, Gemeinden, Vereine und Demografie" onBack={onBack} onLogout={logout} />
       <div style={{ padding: '0 16px 24px' }}>
+        <div style={{ ...cardStyle, marginBottom: 18, border: '2px solid #C8A96E' }}>
+          <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Debug-Status</div>
+          <div style={{ fontSize: 13, color: '#5C4A32', marginBottom: 6 }}>{debugInfo}</div>
+          <div style={{ fontSize: 13, color: '#5C4A32' }}>{sessionInfo}</div>
+        </div>
+
         <div style={{ ...cardStyle, marginBottom: 18 }}>
           <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 12 }}>Gemeinde anlegen</div>
           <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.2fr 0.8fr 1fr', gap: 12, marginBottom: 12 }}>
@@ -323,56 +335,6 @@ export default function AdminDashboard({ onBack, logout }) {
               <div style={{ fontSize: 12, color: '#8B7355' }}>{row.vereine} Vereine</div>
               <div style={{ fontSize: 12, color: '#8B7355' }}>{row.stellen} Stellen</div>
               <div style={{ fontSize: 12, color: '#8B7355' }}>{row.gesamtstunden} Std.</div>
-            </div>
-          ))}
-        </div>
-
-        <div style={{ ...cardStyle, marginBottom: 18 }}>
-          <SectionLabel>Gemeinden im Detail</SectionLabel>
-          {gemeindenStats.length === 0 ? (
-            <EmptyState icon="🏛️" text="Noch keine Gemeinden" sub="Sobald Gemeinden angelegt sind, erscheinen hier die Detailstatistiken." />
-          ) : gemeindenStats.map((g) => (
-            <div key={g.id} style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr 0.8fr 0.8fr 0.8fr 0.8fr', gap: 10, padding: '10px 0', borderBottom: '1px solid #EFE8DB' }}>
-              <div style={{ fontWeight: 700 }}>{g.name || g.ort || 'Gemeinde'}</div>
-              <div style={{ fontSize: 12, color: '#8B7355' }}>{g.vereine_count || 0} Vereine</div>
-              <div style={{ fontSize: 12, color: '#8B7355' }}>{g.freiwillige_count || 0} Freiwillige</div>
-              <div style={{ fontSize: 12, color: '#8B7355' }}>{g.stellen_count || 0} Stellen</div>
-              <div style={{ fontSize: 12, color: '#8B7355' }}>{g.completed_einsaetze_count || 0} Einsätze</div>
-              <div style={{ fontSize: 12, color: '#8B7355' }}>{g.gesamtstunden || 0} Std.</div>
-            </div>
-          ))}
-        </div>
-
-        <div style={{ ...cardStyle, marginBottom: 18 }}>
-          <SectionLabel>Vereine im Detail</SectionLabel>
-          {vereineStats.length === 0 ? (
-            <EmptyState icon="🏢" text="Noch keine Vereine" sub="Sobald Vereine registriert sind, erscheinen hier ihre Leistungsdaten." />
-          ) : vereineStats.map((v) => (
-            <div key={v.id} style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 0.8fr 0.8fr 0.8fr 0.8fr 0.8fr', gap: 10, padding: '10px 0', borderBottom: '1px solid #EFE8DB' }}>
-              <div style={{ fontWeight: 700 }}>{v.name}</div>
-              <div style={{ fontSize: 12, color: '#5C4A32' }}>{v.gemeinde_name || 'ohne Gemeinde'}</div>
-              <div style={{ fontSize: 12, color: '#8B7355' }}>{v.stellen_count || 0} Stellen</div>
-              <div style={{ fontSize: 12, color: '#8B7355' }}>{v.termine_count || 0} Termine</div>
-              <div style={{ fontSize: 12, color: '#8B7355' }}>{v.completed_einsaetze_count || 0} Einsätze</div>
-              <div style={{ fontSize: 12, color: '#8B7355' }}>{v.gesamtstunden || 0} Std.</div>
-              <div style={{ fontSize: 12, color: '#8B7355' }}>{v.aktive_bewerbungen_count || 0} Bewerbungen</div>
-            </div>
-          ))}
-        </div>
-
-        <div style={cardStyle}>
-          <SectionLabel>Regionale Wirkung</SectionLabel>
-          {regionStats.length === 0 ? (
-            <EmptyState icon="🗺️" text="Noch keine Regionaldaten" sub="Sobald Gemeinden Regionen zugeordnet sind, erscheinen hier die aggregierten Werte." />
-          ) : regionStats.map((row) => (
-            <div key={`${row.region_name}-${row.bundesland}`} style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr 0.8fr 0.8fr 0.8fr 0.8fr 0.9fr', gap: 10, padding: '10px 0', borderBottom: '1px solid #EFE8DB' }}>
-              <div style={{ fontWeight: 700 }}>{row.region_name}</div>
-              <div style={{ fontSize: 12, color: '#5C4A32' }}>{row.bundesland}</div>
-              <div style={{ fontSize: 12, color: '#8B7355' }}>{row.gemeinden_count || 0} Gemeinden</div>
-              <div style={{ fontSize: 12, color: '#8B7355' }}>{row.vereine_count || 0} Vereine</div>
-              <div style={{ fontSize: 12, color: '#8B7355' }}>{row.completed_einsaetze_count || 0} Einsätze</div>
-              <div style={{ fontSize: 12, color: '#8B7355' }}>{row.gesamtstunden || 0} Std.</div>
-              <div style={{ fontSize: 12, color: '#8B7355' }}>{row.orga_ersparnis_stunden || 0} Std. Ersparnis</div>
             </div>
           ))}
         </div>
