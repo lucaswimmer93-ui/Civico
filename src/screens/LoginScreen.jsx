@@ -130,26 +130,95 @@ function LoginScreen({
       setError("Bitte Email und Passwort eingeben.");
       return;
     }
+
     setLoading(true);
     setError("");
+
     const { data: authData, error: authError } =
       await supabase.auth.signInWithPassword({ email, password });
+
     if (authError) {
       setLoading(false);
       setError("Email oder Passwort falsch. Email zuerst bestätigen!");
       return;
     }
-    const table = type === "freiwilliger" ? "freiwillige" : type === "verein" ? "vereine" : type === "gemeinde" ? "gemeinden" : "admins";
-    const { data: profil } = await supabase
+
+    const user = authData?.user;
+    const table =
+      type === "freiwilliger"
+        ? "freiwillige"
+        : type === "verein"
+        ? "vereine"
+        : type === "gemeinde"
+        ? "gemeinden"
+        : "admins";
+
+    let { data: profil, error: profilError } = await supabase
       .from(table)
       .select("*")
-      .eq("auth_id", authData.user.id)
-      .single();
+      .eq("auth_id", user.id)
+      .maybeSingle();
+
+    if (!profil && !profilError && (type === "freiwilliger" || type === "verein")) {
+      const meta = user.user_metadata || {};
+      const gemeinde_id = meta.plz ? await getGemeindeByPlz(meta.plz) : null;
+
+      const payload =
+        type === "freiwilliger"
+          ? {
+              auth_id: user.id,
+              gemeinde_id: gemeinde_id || null,
+              name: meta.name || name,
+              email: user.email,
+              plz: meta.plz || plz || "",
+              umkreis: Number.isFinite(meta.umkreis) ? meta.umkreis : 25,
+              punkte: Number.isFinite(meta.punkte) ? meta.punkte : 0,
+              aktionen: Number.isFinite(meta.aktionen) ? meta.aktionen : 0,
+              skills: Array.isArray(meta.skills) ? meta.skills : selectedSkills,
+              sprachen: meta.sprachen || sprachen || "",
+              geburtsdatum: meta.geburtsdatum || geburtsdatum || null,
+            }
+          : {
+              auth_id: user.id,
+              gemeinde_id: gemeinde_id || null,
+              name: meta.name || orgName,
+              email: user.email,
+              ort: meta.ort || ort || "",
+              plz: meta.plz || plz || "",
+              strasse: meta.strasse || `${regStrasse} ${hausnummer}`.trim(),
+              kontakt_email: meta.kontakt_email || kontaktEmail || user.email,
+              telefon: meta.telefon || regTelefon || null,
+              website: meta.website || regWebsite || null,
+              logo: meta.logo || "🏢",
+              verifiziert: false,
+            };
+
+      const { error: bootstrapError } = await supabase.from(table).insert(payload);
+
+      if (bootstrapError) {
+        console.error(`${type}-Profilanlage beim Login fehlgeschlagen:`, bootstrapError);
+        setLoading(false);
+        setError(`Anmeldung fehlgeschlagen. ${bootstrapError.message || "Profil konnte nicht erstellt werden."}`);
+        return;
+      }
+
+      const { data: profilNeu, error: profilNeuError } = await supabase
+        .from(table)
+        .select("*")
+        .eq("auth_id", user.id)
+        .maybeSingle();
+
+      profil = profilNeu;
+      profilError = profilNeuError;
+    }
+
     setLoading(false);
-    if (!profil) {
+
+    if (profilError || !profil) {
       setError("Profil nicht gefunden.");
       return;
     }
+
     clearDraft();
     onLogin(type, profil, profil.gemeinde_id);
   };
@@ -178,7 +247,20 @@ function LoginScreen({
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: { name, type: "freiwilliger" } },
+      options: {
+        data: {
+          type: "freiwilliger",
+          name,
+          email,
+          plz,
+          umkreis: 25,
+          punkte: 0,
+          aktionen: 0,
+          skills: selectedSkills,
+          sprachen,
+          geburtsdatum,
+        },
+      },
     });
 
     if (authError) {
@@ -187,29 +269,9 @@ function LoginScreen({
       return;
     }
 
-    const gemeinde_id = plz ? await getGemeindeByPlz(plz) : null;
-
-    const { error: insertError } = await supabase
-      .from("freiwillige")
-      .insert({
-        auth_id: authData.user.id,
-        gemeinde_id: gemeinde_id || null,
-        name,
-        email,
-        plz,
-        umkreis: 25,
-        punkte: 0,
-        aktionen: 0,
-        skills: selectedSkills,
-        sprachen,
-        geburtsdatum,
-      });
-
-    if (insertError) {
-      console.error("Freiwilligen-Registrierung fehlgeschlagen:", insertError);
-      await supabase.auth.signOut();
+    if (!authData?.user?.id) {
       setLoading(false);
-      setError(`Registrierung fehlgeschlagen. ${insertError.message || "Bitte versuche es erneut."}`);
+      setError("Registrierung fehlgeschlagen. Bitte versuche es erneut.");
       return;
     }
 
@@ -246,7 +308,21 @@ function LoginScreen({
     const { data: authData, error: authError } = await supabase.auth.signUp({
       email,
       password,
-      options: { data: { name: orgName, type: "verein" } },
+      options: {
+        data: {
+          type: "verein",
+          name: orgName,
+          email,
+          ort,
+          plz,
+          strasse: regStrasse + " " + hausnummer,
+          kontakt_email: kontaktEmail,
+          telefon: regTelefon || null,
+          website: regWebsite || null,
+          logo: "🏢",
+          verifiziert: false,
+        },
+      },
     });
 
     if (authError) {
@@ -255,30 +331,9 @@ function LoginScreen({
       return;
     }
 
-    const gemeinde_id = plz ? await getGemeindeByPlz(plz) : null;
-
-    const { error: insertError } = await supabase
-      .from("vereine")
-      .insert({
-        auth_id: authData.user.id,
-        gemeinde_id: gemeinde_id || null,
-        name: orgName,
-        email,
-        ort,
-        plz,
-        strasse: regStrasse + " " + hausnummer,
-        kontakt_email: kontaktEmail,
-        telefon: regTelefon || null,
-        website: regWebsite || null,
-        logo: "🏢",
-        verifiziert: false,
-      });
-
-    if (insertError) {
-      console.error("Vereins-Registrierung fehlgeschlagen:", insertError);
-      await supabase.auth.signOut();
+    if (!authData?.user?.id) {
       setLoading(false);
-      setError(`Registrierung fehlgeschlagen. ${insertError.message || "Bitte versuche es erneut."}`);
+      setError("Registrierung fehlgeschlagen. Bitte versuche es erneut.");
       return;
     }
 
