@@ -39,6 +39,109 @@ import GemeindeDashboard from './screens/GemeindeDashboard';
 import AdminDashboard from './screens/AdminDashboard';
 import { Chip, SectionLabel, EmptyState, BottomBar, StelleCard, VereineListe } from './components/ui';
 
+
+const getInitialScreenFromPath = () => {
+  if (typeof window === "undefined") return "home";
+  const path = window.location.pathname || "/";
+  if (path === "/auth/confirmed") return "auth-confirmed";
+  if (path === "/set-password" || path === "/reset") return "set-password";
+  return "home";
+};
+
+function AuthConfirmedScreen({ onLogin }) {
+  const handleToLogin = () => {
+    if (typeof window !== "undefined") {
+      window.history.replaceState({}, "", "/");
+    }
+    onLogin();
+  };
+
+  return (
+    <div style={{ minHeight: "100vh", background: "linear-gradient(160deg, #1A1208 0%, #2C2416 60%, #3D3020 100%)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div style={{ width: "100%", maxWidth: 440, background: "#F4F0E8", borderRadius: 24, padding: "36px 28px", textAlign: "center", boxShadow: "0 10px 30px rgba(0,0,0,0.18)" }}>
+        <div style={{ fontSize: 52, marginBottom: 12 }}>✅</div>
+        <div style={{ fontSize: 26, fontWeight: "bold", color: "#2C2416", marginBottom: 10, letterSpacing: 1 }}>E-Mail bestätigt</div>
+        <div style={{ fontSize: 15, lineHeight: 1.6, color: "#8B7355", marginBottom: 24 }}>Dein Konto wurde erfolgreich verifiziert.<br />Du kannst dich jetzt bei Civico anmelden.</div>
+        <button onClick={handleToLogin} style={{ padding: "12px 24px", borderRadius: 12, border: "none", background: "#2C2416", color: "#FAF7F2", fontSize: 14, fontFamily: "inherit", fontWeight: "bold", cursor: "pointer" }}>Zum Login</button>
+      </div>
+    </div>
+  );
+}
+
+function SetPasswordScreen({ onDone }) {
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  const handleSave = async () => {
+    setError("");
+    setMessage("");
+
+    if (!password || !confirmPassword) {
+      setError("Bitte beide Passwortfelder ausfüllen.");
+      return;
+    }
+    if (password.length < 6) {
+      setError("Passwort muss mindestens 6 Zeichen haben.");
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError("Die Passwörter stimmen nicht überein.");
+      return;
+    }
+
+    setLoading(true);
+    const { error: updateError } = await supabase.auth.updateUser({ password });
+    setLoading(false);
+
+    if (updateError) {
+      setError(updateError.message || "Passwort konnte nicht gesetzt werden.");
+      return;
+    }
+
+    if (typeof window !== "undefined") {
+      window.history.replaceState({}, "", "/");
+    }
+    setMessage("Passwort erfolgreich gesetzt.");
+  };
+
+  return (
+    <div style={{ minHeight: "100vh", background: "linear-gradient(160deg, #1A1208 0%, #2C2416 60%, #3D3020 100%)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div style={{ width: "100%", maxWidth: 460, background: "#F4F0E8", borderRadius: 24, padding: "36px 28px", boxShadow: "0 10px 30px rgba(0,0,0,0.18)" }}>
+        <div style={{ textAlign: "center", marginBottom: 24 }}>
+          <div style={{ fontSize: 48, marginBottom: 10 }}>🔐</div>
+          <div style={{ fontSize: 24, fontWeight: "bold", color: "#2C2416", marginBottom: 8 }}>Neues Passwort setzen</div>
+          <div style={{ fontSize: 14, color: "#8B7355", lineHeight: 1.6 }}>Vergib jetzt dein neues Passwort für Civico.</div>
+        </div>
+
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 12, color: "#8B7355", marginBottom: 8, letterSpacing: 0.5 }}>NEUES PASSWORT</div>
+          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••" style={{ width: "100%", padding: "12px 14px", borderRadius: 12, border: "1px solid #E0D8C8", background: "#FAF7F2", fontFamily: "inherit", fontSize: 14, color: "#2C2416", boxSizing: "border-box" }} />
+        </div>
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: 12, color: "#8B7355", marginBottom: 8, letterSpacing: 0.5 }}>PASSWORT WIEDERHOLEN</div>
+          <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="••••••" style={{ width: "100%", padding: "12px 14px", borderRadius: 12, border: "1px solid #E0D8C8", background: "#FAF7F2", fontFamily: "inherit", fontSize: 14, color: "#2C2416", boxSizing: "border-box" }} />
+        </div>
+
+        {error ? <div style={{ marginBottom: 14, color: "#B53A2D", fontSize: 13, fontWeight: 700 }}>{error}</div> : null}
+        {message ? <div style={{ marginBottom: 14, color: "#2C6B36", fontSize: 13, fontWeight: 700 }}>{message}</div> : null}
+
+        {!message ? (
+          <button onClick={handleSave} disabled={loading} style={{ width: "100%", padding: "12px 18px", borderRadius: 14, border: "none", background: "#2C2416", color: "#fff", cursor: loading ? "default" : "pointer", fontFamily: "inherit", fontWeight: 700, marginBottom: 10 }}>
+            {loading ? "Speichern..." : "Passwort speichern"}
+          </button>
+        ) : (
+          <button onClick={onDone} style={{ width: "100%", padding: "12px 18px", borderRadius: 14, border: "none", background: "#2C2416", color: "#fff", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, marginBottom: 10 }}>
+            Zum Login
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [lang, setLang] = useState("de");
   const t = T[lang];
@@ -105,7 +208,7 @@ export default function App() {
 
   const [user, setUser] = useState(null);
   const [stellen, setStellen] = useState([]);
-  const [screen, setScreen] = useState("home");
+  const [screen, setScreen] = useState(getInitialScreenFromPath);
   const [history, setHistory] = useState([]);
   const [selected, setSelected] = useState(null);
   const [selectedVerein, setSelectedVerein] = useState(null);
@@ -580,6 +683,8 @@ export default function App() {
   };
 
   useEffect(() => {
+    const currentPath = typeof window !== "undefined" ? window.location.pathname : "/";
+
     const setupServiceWorker = async () => {
       if (!("serviceWorker" in navigator)) return;
 
@@ -592,6 +697,14 @@ export default function App() {
     };
 
     setupServiceWorker();
+    if (currentPath === "/auth/confirmed") {
+      setScreen("auth-confirmed");
+      return;
+    }
+    if (currentPath === "/set-password" || currentPath === "/reset") {
+      setScreen("set-password");
+      return;
+    }
     loadStellen();
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session) {
@@ -1157,6 +1270,20 @@ export default function App() {
         >
           {toast.msg}
         </div>
+      )}
+
+      {screen === "auth-confirmed" && (
+        <AuthConfirmedScreen onLogin={() => {
+          setHistory([]);
+          setScreen("login");
+        }} />
+      )}
+
+      {screen === "set-password" && (
+        <SetPasswordScreen onDone={() => {
+          setHistory([]);
+          setScreen("login");
+        }} />
       )}
 
       {/* HOME */}
