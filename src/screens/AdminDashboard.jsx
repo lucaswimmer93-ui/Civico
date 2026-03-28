@@ -1,118 +1,368 @@
-
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { supabase } from '../core/shared';
 import { Header, Input, SectionLabel, EmptyState } from '../components/ui';
 
+const cardStyle = {
+  background: '#FAF7F2',
+  borderRadius: 18,
+  padding: 18,
+  border: '1px solid #E6D9C2',
+};
+
+function StatCard({ label, value, sub }) {
+  return (
+    <div style={cardStyle}>
+      <div style={{ color: '#8B7355', fontSize: 12, marginBottom: 8 }}>{label}</div>
+      <div style={{ fontSize: 28, fontWeight: 700 }}>{value}</div>
+      {sub ? <div style={{ color: '#8B7355', fontSize: 12, marginTop: 6 }}>{sub}</div> : null}
+    </div>
+  );
+}
+
 export default function AdminDashboard({
-  gemeinden = [],
-  organisationen = [],
-  freiwillige = [],
-  stellen = [],
-  anfragen = [],
   onBack,
   logout,
 }) {
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [inviteLink, setInviteLink] = useState('');
+
+  const [gemeindeName, setGemeindeName] = useState('');
+  const [adminEmail, setAdminEmail] = useState('');
+  const [plz, setPlz] = useState('');
+  const [ort, setOrt] = useState('');
+  const [bundesland, setBundesland] = useState('Hessen');
+  const [nachricht, setNachricht] = useState('Kurze Info für die Gemeinde');
+  const [savingGemeinde, setSavingGemeinde] = useState(false);
+
+  const [dashboardStats, setDashboardStats] = useState(null);
+  const [funnelStats, setFunnelStats] = useState(null);
+  const [gemeindenStats, setGemeindenStats] = useState([]);
+  const [vereineStats, setVereineStats] = useState([]);
+  const [altersgruppenStats, setAltersgruppenStats] = useState([]);
+  const [regionStats, setRegionStats] = useState([]);
+  const [csrStats, setCsrStats] = useState([]);
   const [plzFilter, setPlzFilter] = useState('');
 
-  const normalize = (v) => String(v || '').trim();
+  const loadAdminData = async () => {
+    setLoading(true);
+    setError('');
 
-  const topGemeinden = useMemo(() => {
-    const map = new Map();
-    gemeinden.forEach((g) => {
-      map.set(g.id || g.name || g.ort, {
-        id: g.id || g.name || g.ort,
-        name: g.name || g.ort || 'Gemeinde',
-        freiwillige: 0,
-        organisationen: 0,
-        stellen: 0,
-      });
+    const [
+      dashboardRes,
+      funnelRes,
+      gemeindenRes,
+      vereineRes,
+      altersgruppenRes,
+      regionRes,
+      csrRes,
+    ] = await Promise.all([
+      supabase.from('admin_dashboard_stats').select('*').maybeSingle(),
+      supabase.from('admin_funnel_stats').select('*').maybeSingle(),
+      supabase.from('admin_gemeinden_stats').select('*').order('gesamtstunden', { ascending: false }),
+      supabase.from('admin_vereine_stats').select('*').order('gesamtstunden', { ascending: false }),
+      supabase.from('admin_altersgruppen_stats').select('*'),
+      supabase.from('admin_regionale_impact_stats').select('*').order('gesamtstunden', { ascending: false }),
+      supabase.from('admin_csr_stats').select('*').order('gesamtstunden', { ascending: false }),
+    ]);
+
+    const firstError = [
+      dashboardRes.error,
+      funnelRes.error,
+      gemeindenRes.error,
+      vereineRes.error,
+      altersgruppenRes.error,
+      regionRes.error,
+      csrRes.error,
+    ].find(Boolean);
+
+    if (firstError) {
+      setError(firstError.message || 'Admin-Daten konnten nicht geladen werden.');
+    }
+
+    setDashboardStats(dashboardRes.data || null);
+    setFunnelStats(funnelRes.data || null);
+    setGemeindenStats(gemeindenRes.data || []);
+    setVereineStats(vereineRes.data || []);
+    setAltersgruppenStats(altersgruppenRes.data || []);
+    setRegionStats(regionRes.data || []);
+    setCsrStats(csrRes.data || []);
+    setLoading(false);
+  };
+
+  useEffect(() => {
+    loadAdminData();
+  }, []);
+
+  const handleCreateGemeinde = async () => {
+    const cleanName = String(gemeindeName || '').trim();
+    const cleanEmail = String(adminEmail || '').trim().toLowerCase();
+    const cleanPlz = String(plz || '').trim();
+    const cleanOrt = String(ort || '').trim();
+    const cleanBundesland = String(bundesland || '').trim() || 'Hessen';
+
+    if (!cleanName || !cleanEmail) {
+      setError('Gemeindename und Admin-E-Mail sind Pflichtfelder.');
+      return;
+    }
+
+    setSavingGemeinde(true);
+    setError('');
+    setSuccess('');
+    setInviteLink('');
+
+    const { data, error: invokeError } = await supabase.functions.invoke('admin-create-gemeinde-invite', {
+      body: {
+        name: cleanName,
+        email: cleanEmail,
+        plz: cleanPlz,
+        ort: cleanOrt,
+        bundesland: cleanBundesland,
+        nachricht,
+      },
     });
-    freiwillige.forEach((f) => {
-      const key = f.gemeinde_id || f.gemeinde || f.ort;
-      if (!map.has(key)) map.set(key, { id:key, name:key || 'Gemeinde', freiwillige:0, organisationen:0, stellen:0 });
-      map.get(key).freiwillige += 1;
-    });
-    organisationen.forEach((o) => {
-      const key = o.gemeinde_id || o.gemeinde || o.ort;
-      if (!map.has(key)) map.set(key, { id:key, name:key || 'Gemeinde', freiwillige:0, organisationen:0, stellen:0 });
-      map.get(key).organisationen += 1;
-    });
-    stellen.forEach((s) => {
-      const key = s.gemeinde_id || s.gemeinde || s.ort;
-      if (!map.has(key)) map.set(key, { id:key, name:key || 'Gemeinde', freiwillige:0, organisationen:0, stellen:0 });
-      map.get(key).stellen += 1;
-    });
-    return [...map.values()].sort((a,b) => (b.freiwillige + b.stellen) - (a.freiwillige + a.stellen)).slice(0,5);
-  }, [gemeinden, organisationen, freiwillige, stellen]);
+
+    setSavingGemeinde(false);
+
+    if (invokeError) {
+      setError(invokeError.message || 'Gemeinde konnte nicht angelegt werden.');
+      return;
+    }
+
+    if (!data?.ok) {
+      setError(data?.error || 'Gemeinde konnte nicht angelegt werden.');
+      return;
+    }
+
+    setSuccess(`Gemeinde gespeichert. Einladung für ${data.email} wurde erzeugt.`);
+    setInviteLink(data.action_link || '');
+    setGemeindeName('');
+    setAdminEmail('');
+    setPlz('');
+    setOrt('');
+    setNachricht('Kurze Info für die Gemeinde');
+
+    await loadAdminData();
+  };
 
   const plzRows = useMemo(() => {
-    const buckets = new Map();
-    const add = (type, item) => {
-      const key = normalize(item.plz) || 'ohne PLZ';
-      if (!buckets.has(key)) buckets.set(key, { plz:key, freiwillige:0, organisationen:0, stellen:0 });
-      buckets.get(key)[type] += 1;
-    };
-    freiwillige.forEach((x) => add('freiwillige', x));
-    organisationen.forEach((x) => add('organisationen', x));
-    stellen.forEach((x) => add('stellen', x));
-    return [...buckets.values()].filter((row) => !plzFilter || row.plz.startsWith(normalize(plzFilter))).sort((a,b) => a.plz.localeCompare(b.plz));
-  }, [freiwillige, organisationen, stellen, plzFilter]);
+    return gemeindenStats
+      .map((g) => ({
+        plz: String(g.plz || 'ohne PLZ'),
+        gemeinde_name: g.name || g.ort || 'Gemeinde',
+        freiwillige: g.freiwillige_count || 0,
+        vereine: g.vereine_count || 0,
+        stellen: g.stellen_count || 0,
+        gesamtstunden: g.gesamtstunden || 0,
+      }))
+      .filter((row) => !plzFilter || row.plz.startsWith(String(plzFilter).trim()))
+      .sort((a, b) => a.plz.localeCompare(b.plz));
+  }, [gemeindenStats, plzFilter]);
+
+  const topGemeinden = useMemo(() => {
+    return [...gemeindenStats]
+      .sort((a, b) => ((b.gesamtstunden || 0) + (b.completed_einsaetze_count || 0)) - ((a.gesamtstunden || 0) + (a.completed_einsaetze_count || 0)))
+      .slice(0, 5);
+  }, [gemeindenStats]);
+
+  const copyInviteLink = async () => {
+    if (!inviteLink) return;
+    try {
+      await navigator.clipboard.writeText(inviteLink);
+      setSuccess('Einladungslink kopiert.');
+    } catch (e) {
+      setError('Link konnte nicht automatisch kopiert werden.');
+    }
+  };
 
   return (
     <div>
-      <Header title="Admin-Dashboard" subtitle="Systemübersicht" onBack={onBack} onLogout={logout} />
-      <div style={{ padding:'0 16px 24px' }}>
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:18 }}>
-          {[
-            ['Gemeinden', gemeinden.length],
-            ['Organisationen', organisationen.length],
-            ['Freiwillige', freiwillige.length],
-            ['Stellen', stellen.length],
-          ].map(([label, value]) => (
-            <div key={label} style={{ background:'#FAF7F2', borderRadius:18, padding:18, border:'1px solid #E6D9C2' }}>
-              <div style={{ color:'#8B7355', fontSize:12, marginBottom:8 }}>{label}</div>
-              <div style={{ fontSize:28, fontWeight:700 }}>{value}</div>
-            </div>
-          ))}
+      <Header title="Admin-Dashboard" subtitle="CSR, Gemeinden, Vereine und Demografie" onBack={onBack} onLogout={logout} />
+      <div style={{ padding: '0 16px 24px' }}>
+        <div style={{ ...cardStyle, marginBottom: 18 }}>
+          <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 12 }}>Gemeinde anlegen</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1.2fr 0.8fr 1fr', gap: 12, marginBottom: 12 }}>
+            <Input label="Gemeindename" value={gemeindeName} onChange={(e) => setGemeindeName(e.target ? e.target.value : e)} />
+            <Input label="Admin-E-Mail" value={adminEmail} onChange={(e) => setAdminEmail(e.target ? e.target.value : e)} />
+            <Input label="PLZ" value={plz} onChange={(e) => setPlz(e.target ? e.target.value : e)} />
+            <Input label="Ort" value={ort} onChange={(e) => setOrt(e.target ? e.target.value : e)} />
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 160px', gap: 12, marginBottom: 12 }}>
+            <Input label="Nachricht" value={nachricht} onChange={(e) => setNachricht(e.target ? e.target.value : e)} />
+            <Input label="Bundesland" value={bundesland} onChange={(e) => setBundesland(e.target ? e.target.value : e)} />
+          </div>
+
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+            <button
+              onClick={handleCreateGemeinde}
+              disabled={savingGemeinde}
+              style={{
+                background: '#2C2416',
+                color: '#fff',
+                border: 'none',
+                borderRadius: 14,
+                padding: '12px 18px',
+                cursor: savingGemeinde ? 'default' : 'pointer',
+                fontFamily: 'inherit',
+                fontWeight: 700,
+              }}
+            >
+              {savingGemeinde ? 'Speichern...' : 'Gemeinde speichern'}
+            </button>
+            {inviteLink ? (
+              <button
+                onClick={copyInviteLink}
+                style={{
+                  background: '#FAF7F2',
+                  color: '#2C2416',
+                  border: '1px solid #E6D9C2',
+                  borderRadius: 14,
+                  padding: '12px 18px',
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                  fontWeight: 700,
+                }}
+              >
+                Einladungslink kopieren
+              </button>
+            ) : null}
+          </div>
+
+          {success ? (
+            <div style={{ marginTop: 12, color: '#2C6B36', fontSize: 13, fontWeight: 700 }}>{success}</div>
+          ) : null}
+          {error ? (
+            <div style={{ marginTop: 12, color: '#B53A2D', fontSize: 13, fontWeight: 700 }}>{error}</div>
+          ) : null}
+          {inviteLink ? (
+            <div style={{ marginTop: 10, fontSize: 12, color: '#8B7355', wordBreak: 'break-all' }}>{inviteLink}</div>
+          ) : null}
         </div>
 
-        <div style={{ background:'#FAF7F2', borderRadius:18, padding:18, border:'1px solid #E6D9C2', marginBottom:18 }}>
+        <div style={{ marginBottom: 18 }}>
+          <div style={{ fontSize: 12, color: '#8B7355', marginBottom: 8 }}>Systemübersicht</div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <StatCard label="Gemeinden" value={dashboardStats?.gemeinden_count ?? 0} sub="kommunale Accounts" />
+            <StatCard label="Organisationen" value={dashboardStats?.vereine_count ?? 0} sub="registrierte Vereine" />
+            <StatCard label="Freiwillige" value={dashboardStats?.freiwillige_count ?? 0} sub="aktive Nutzerbasis" />
+            <StatCard label="Stellen" value={dashboardStats?.aktive_stellen_count ?? 0} sub="aktive Ehrenamtsstellen" />
+            <StatCard label="Zustande gekommene Einsätze" value={dashboardStats?.zustande_gekommene_einsaetze_count ?? 0} sub="abgeschlossene Termine" />
+            <StatCard label="Gesamtstunden" value={dashboardStats?.gesamtstunden ?? 0} sub="geleistete Ehrenamtsstunden" />
+            <StatCard label="Pay-relevante Vereine" value={dashboardStats?.pay_relevante_vereine_count ?? 0} sub="ab 3 Einsätzen" />
+            <StatCard label="Angenommene Einladungen" value={funnelStats?.angenommene_einladungen ?? 0} sub={`von ${funnelStats?.verein_einladungen ?? 0} Einladungen`} />
+          </div>
+        </div>
+
+        <div style={{ ...cardStyle, marginBottom: 18 }}>
           <SectionLabel>Top 5 Gemeinden</SectionLabel>
-          {topGemeinden.length === 0 ? (
-            <EmptyState icon="📊" text="Noch keine Gemeindedaten" sub="Sobald Gemeinden, Freiwillige und Stellen vorhanden sind, erscheint hier das Ranking." />
+          {loading ? (
+            <div style={{ color: '#8B7355', fontSize: 13 }}>Lade Gemeindedaten...</div>
+          ) : topGemeinden.length === 0 ? (
+            <EmptyState icon="📊" text="Noch keine Gemeindedaten" sub="Sobald Gemeinden und Einsätze vorhanden sind, erscheint hier das Ranking." />
           ) : topGemeinden.map((g) => (
-            <div key={g.id} style={{ display:'grid', gridTemplateColumns:'1.2fr 1fr 1fr 1fr', gap:10, padding:'10px 0', borderBottom:'1px solid #EFE8DB' }}>
-              <div style={{ fontWeight:700 }}>{g.name}</div>
-              <div style={{ fontSize:12, color:'#8B7355' }}>{g.freiwillige} Freiwillige</div>
-              <div style={{ fontSize:12, color:'#8B7355' }}>{g.organisationen} Organisationen</div>
-              <div style={{ fontSize:12, color:'#8B7355' }}>{g.stellen} Stellen</div>
+            <div key={g.id} style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.9fr 0.9fr 0.9fr 0.9fr', gap: 10, padding: '10px 0', borderBottom: '1px solid #EFE8DB' }}>
+              <div style={{ fontWeight: 700 }}>{g.name || g.ort || 'Gemeinde'}</div>
+              <div style={{ fontSize: 12, color: '#8B7355' }}>{g.freiwillige_count || 0} Freiwillige</div>
+              <div style={{ fontSize: 12, color: '#8B7355' }}>{g.vereine_count || 0} Vereine</div>
+              <div style={{ fontSize: 12, color: '#8B7355' }}>{g.stellen_count || 0} Stellen</div>
+              <div style={{ fontSize: 12, color: '#8B7355' }}>{g.gesamtstunden || 0} Std.</div>
             </div>
           ))}
         </div>
 
-        <div style={{ background:'#FAF7F2', borderRadius:18, padding:18, border:'1px solid #E6D9C2', marginBottom:18 }}>
+        <div style={{ ...cardStyle, marginBottom: 18 }}>
+          <SectionLabel>CSR- & Wirkungsdashboard</SectionLabel>
+          {csrStats.length === 0 ? (
+            <EmptyState icon="🌍" text="Noch keine CSR-Daten" sub="Sobald Einsatzreports vorhanden sind, siehst du hier Wirkungsbereiche und Stunden." />
+          ) : csrStats.map((row) => (
+            <div key={row.wirkungsbereich} style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr 0.9fr 0.9fr 0.9fr', gap: 10, padding: '10px 0', borderBottom: '1px solid #EFE8DB' }}>
+              <div style={{ fontWeight: 700 }}>{row.wirkungsbereich}</div>
+              <div style={{ fontSize: 12, color: '#8B7355' }}>{row.completed_einsaetze_count || 0} Einsätze</div>
+              <div style={{ fontSize: 12, color: '#8B7355' }}>{row.helfer_tatsaechlich_summe || 0} Helfer</div>
+              <div style={{ fontSize: 12, color: '#8B7355' }}>{row.gesamtstunden || 0} Std.</div>
+              <div style={{ fontSize: 12, color: '#8B7355' }}>{row.orga_ersparnis_stunden || 0} Std. Ersparnis</div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ ...cardStyle, marginBottom: 18 }}>
+          <SectionLabel>Altersgruppen: Wo wird am meisten Ehrenamt gemacht?</SectionLabel>
+          {altersgruppenStats.length === 0 ? (
+            <EmptyState icon="🧑‍🤝‍🧑" text="Noch keine Demografie-Daten" sub="Sobald Geburtsdaten und Teilnahmen vorhanden sind, erscheint hier die Verteilung." />
+          ) : altersgruppenStats.map((row) => (
+            <div key={row.altersgruppe} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 10, padding: '10px 0', borderBottom: '1px solid #EFE8DB' }}>
+              <div style={{ fontWeight: 700 }}>{row.altersgruppe}</div>
+              <div style={{ fontSize: 12, color: '#8B7355' }}>{row.freiwillige_count || 0} Freiwillige</div>
+              <div style={{ fontSize: 12, color: '#8B7355' }}>{row.teilnahmen_count || 0} Teilnahmen</div>
+              <div style={{ fontSize: 12, color: '#8B7355' }}>{row.nicht_erschienen_count || 0} No-Shows</div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ ...cardStyle, marginBottom: 18 }}>
           <SectionLabel>PLZ-Analyse</SectionLabel>
-          <Input label="PLZ-Filter" value={plzFilter} onChange={(e)=>setPlzFilter(e.target ? e.target.value : e)} />
+          <Input label="PLZ-Filter" value={plzFilter} onChange={(e) => setPlzFilter(e.target ? e.target.value : e)} />
           {plzRows.length === 0 ? (
             <EmptyState icon="📍" text="Keine Daten zur gewählten PLZ" sub="Passe den Filter an oder ergänze Gemeinden und Nutzer." />
           ) : plzRows.map((row) => (
-            <div key={row.plz} style={{ display:'grid', gridTemplateColumns:'90px 1fr 1fr 1fr', gap:10, padding:'10px 0', borderBottom:'1px solid #EFE8DB' }}>
-              <div style={{ fontWeight:700 }}>{row.plz}</div>
-              <div style={{ fontSize:12, color:'#8B7355' }}>{row.freiwillige} Freiwillige</div>
-              <div style={{ fontSize:12, color:'#8B7355' }}>{row.organisationen} Organisationen</div>
-              <div style={{ fontSize:12, color:'#8B7355' }}>{row.stellen} Stellen</div>
+            <div key={`${row.plz}-${row.gemeinde_name}`} style={{ display: 'grid', gridTemplateColumns: '90px 1.2fr 0.9fr 0.9fr 0.9fr 0.9fr', gap: 10, padding: '10px 0', borderBottom: '1px solid #EFE8DB' }}>
+              <div style={{ fontWeight: 700 }}>{row.plz}</div>
+              <div style={{ fontSize: 12, color: '#5C4A32' }}>{row.gemeinde_name}</div>
+              <div style={{ fontSize: 12, color: '#8B7355' }}>{row.freiwillige} Freiwillige</div>
+              <div style={{ fontSize: 12, color: '#8B7355' }}>{row.vereine} Vereine</div>
+              <div style={{ fontSize: 12, color: '#8B7355' }}>{row.stellen} Stellen</div>
+              <div style={{ fontSize: 12, color: '#8B7355' }}>{row.gesamtstunden} Std.</div>
             </div>
           ))}
         </div>
 
-        <div style={{ background:'#FAF7F2', borderRadius:18, padding:18, border:'1px solid #E6D9C2' }}>
-          <SectionLabel>Offene Anfragen</SectionLabel>
-          {anfragen.length === 0 ? (
-            <EmptyState icon="📬" text="Keine offenen Anfragen" sub="Partneranfragen und Kontaktformulare können hier zentral bearbeitet werden." />
-          ) : anfragen.filter((a) => !plzFilter || String(a.plz || '').startsWith(plzFilter)).map((a, idx) => (
-            <div key={a.id || idx} style={{ padding:'10px 0', borderBottom:'1px solid #EFE8DB' }}>
-              <div style={{ fontWeight:700 }}>{a.title || a.betreff || 'Anfrage'}</div>
-              <div style={{ fontSize:12, color:'#8B7355' }}>{a.email || a.absender || 'unbekannt'} · {a.plz || 'ohne PLZ'}</div>
-              <div style={{ fontSize:13, color:'#5C4A32', marginTop:6 }}>{a.message || a.text || ''}</div>
+        <div style={{ ...cardStyle, marginBottom: 18 }}>
+          <SectionLabel>Gemeinden im Detail</SectionLabel>
+          {gemeindenStats.length === 0 ? (
+            <EmptyState icon="🏛️" text="Noch keine Gemeinden" sub="Sobald Gemeinden angelegt sind, erscheinen hier die Detailstatistiken." />
+          ) : gemeindenStats.map((g) => (
+            <div key={g.id} style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr 0.8fr 0.8fr 0.8fr 0.8fr', gap: 10, padding: '10px 0', borderBottom: '1px solid #EFE8DB' }}>
+              <div style={{ fontWeight: 700 }}>{g.name || g.ort || 'Gemeinde'}</div>
+              <div style={{ fontSize: 12, color: '#8B7355' }}>{g.vereine_count || 0} Vereine</div>
+              <div style={{ fontSize: 12, color: '#8B7355' }}>{g.freiwillige_count || 0} Freiwillige</div>
+              <div style={{ fontSize: 12, color: '#8B7355' }}>{g.stellen_count || 0} Stellen</div>
+              <div style={{ fontSize: 12, color: '#8B7355' }}>{g.completed_einsaetze_count || 0} Einsätze</div>
+              <div style={{ fontSize: 12, color: '#8B7355' }}>{g.gesamtstunden || 0} Std.</div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ ...cardStyle, marginBottom: 18 }}>
+          <SectionLabel>Vereine im Detail</SectionLabel>
+          {vereineStats.length === 0 ? (
+            <EmptyState icon="🏢" text="Noch keine Vereine" sub="Sobald Vereine registriert sind, erscheinen hier ihre Leistungsdaten." />
+          ) : vereineStats.map((v) => (
+            <div key={v.id} style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr 0.8fr 0.8fr 0.8fr 0.8fr 0.8fr', gap: 10, padding: '10px 0', borderBottom: '1px solid #EFE8DB' }}>
+              <div style={{ fontWeight: 700 }}>{v.name}</div>
+              <div style={{ fontSize: 12, color: '#5C4A32' }}>{v.gemeinde_name || 'ohne Gemeinde'}</div>
+              <div style={{ fontSize: 12, color: '#8B7355' }}>{v.stellen_count || 0} Stellen</div>
+              <div style={{ fontSize: 12, color: '#8B7355' }}>{v.termine_count || 0} Termine</div>
+              <div style={{ fontSize: 12, color: '#8B7355' }}>{v.completed_einsaetze_count || 0} Einsätze</div>
+              <div style={{ fontSize: 12, color: '#8B7355' }}>{v.gesamtstunden || 0} Std.</div>
+              <div style={{ fontSize: 12, color: '#8B7355' }}>{v.aktive_bewerbungen_count || 0} Bewerbungen</div>
+            </div>
+          ))}
+        </div>
+
+        <div style={cardStyle}>
+          <SectionLabel>Regionale Wirkung</SectionLabel>
+          {regionStats.length === 0 ? (
+            <EmptyState icon="🗺️" text="Noch keine Regionaldaten" sub="Sobald Gemeinden Regionen zugeordnet sind, erscheinen hier die aggregierten Werte." />
+          ) : regionStats.map((row) => (
+            <div key={`${row.region_name}-${row.bundesland}`} style={{ display: 'grid', gridTemplateColumns: '1.2fr 0.8fr 0.8fr 0.8fr 0.8fr 0.8fr 0.9fr', gap: 10, padding: '10px 0', borderBottom: '1px solid #EFE8DB' }}>
+              <div style={{ fontWeight: 700 }}>{row.region_name}</div>
+              <div style={{ fontSize: 12, color: '#5C4A32' }}>{row.bundesland}</div>
+              <div style={{ fontSize: 12, color: '#8B7355' }}>{row.gemeinden_count || 0} Gemeinden</div>
+              <div style={{ fontSize: 12, color: '#8B7355' }}>{row.vereine_count || 0} Vereine</div>
+              <div style={{ fontSize: 12, color: '#8B7355' }}>{row.completed_einsaetze_count || 0} Einsätze</div>
+              <div style={{ fontSize: 12, color: '#8B7355' }}>{row.gesamtstunden || 0} Std.</div>
+              <div style={{ fontSize: 12, color: '#8B7355' }}>{row.orga_ersparnis_stunden || 0} Std. Ersparnis</div>
             </div>
           ))}
         </div>
