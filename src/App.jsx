@@ -43,10 +43,77 @@ import { Chip, SectionLabel, EmptyState, BottomBar, StelleCard, VereineListe } f
 const getInitialScreenFromPath = () => {
   if (typeof window === "undefined") return "home";
   const path = window.location.pathname || "/";
+  if (path === "/auth/callback") return "auth-callback";
   if (path === "/auth/confirmed") return "auth-confirmed";
-  if (path === "/set-password" || path === "/reset") return "set-password";
+  if (path === "/set-password") return "set-password";
   return "home";
 };
+
+function AuthCallbackScreen() {
+  useEffect(() => {
+    const handleAuth = async () => {
+      try {
+        const url = new URL(window.location.href);
+        const code = url.searchParams.get("code");
+
+        const hash = window.location.hash.startsWith("#")
+          ? window.location.hash.slice(1)
+          : window.location.hash;
+        const hashParams = new URLSearchParams(hash);
+
+        const accessToken = hashParams.get("access_token");
+        const refreshToken = hashParams.get("refresh_token");
+        const type = url.searchParams.get("type") || hashParams.get("type");
+
+        if (code) {
+          const { error } = await supabase.auth.exchangeCodeForSession(code);
+          if (error) throw error;
+        }
+
+        if (accessToken && refreshToken) {
+          const { error } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          });
+          if (error) throw error;
+        }
+
+        if (type === "recovery" || type === "invite") {
+          window.location.replace("/set-password");
+          return;
+        }
+
+        window.location.replace("/");
+      } catch (err) {
+        console.error("Auth callback error:", err);
+        if (typeof window !== "undefined") {
+          window.alert("Link ungültig oder abgelaufen.");
+          window.location.replace("/");
+        }
+      }
+    };
+
+    handleAuth();
+  }, []);
+
+  if (checkingSession) {
+    return (
+      <div style={{ minHeight: "100vh", background: "linear-gradient(160deg, #1A1208 0%, #2C2416 60%, #3D3020 100%)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, color: "#F4F0E8", fontSize: 16 }}>
+        Session wird geprüft ...
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ minHeight: "100vh", background: "linear-gradient(160deg, #1A1208 0%, #2C2416 60%, #3D3020 100%)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div style={{ width: "100%", maxWidth: 440, background: "#F4F0E8", borderRadius: 24, padding: "36px 28px", textAlign: "center", boxShadow: "0 10px 30px rgba(0,0,0,0.18)" }}>
+        <div style={{ fontSize: 52, marginBottom: 12 }}>🔄</div>
+        <div style={{ fontSize: 24, fontWeight: "bold", color: "#2C2416", marginBottom: 10 }}>Authentifizierung läuft</div>
+        <div style={{ fontSize: 15, lineHeight: 1.6, color: "#8B7355" }}>Bitte kurz warten ...</div>
+      </div>
+    </div>
+  );
+}
 
 function AuthConfirmedScreen({ onLogin }) {
   const handleToLogin = () => {
@@ -72,8 +139,37 @@ function SetPasswordScreen({ onDone }) {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+
+    const checkSession = async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!active) return;
+
+      if (!session) {
+        if (typeof window !== "undefined") {
+          window.history.replaceState({}, "", "/");
+        }
+        onDone();
+        return;
+      }
+
+      setCheckingSession(false);
+    };
+
+    checkSession();
+
+    return () => {
+      active = false;
+    };
+  }, [onDone]);
 
   const handleSave = async () => {
     setError("");
@@ -105,6 +201,10 @@ function SetPasswordScreen({ onDone }) {
       window.history.replaceState({}, "", "/");
     }
     setMessage("Passwort erfolgreich gesetzt.");
+
+    setTimeout(() => {
+      onDone();
+    }, 1200);
   };
 
   return (
@@ -697,11 +797,15 @@ export default function App() {
     };
 
     setupServiceWorker();
+    if (currentPath === "/auth/callback") {
+      setScreen("auth-callback");
+      return;
+    }
     if (currentPath === "/auth/confirmed") {
       setScreen("auth-confirmed");
       return;
     }
-    if (currentPath === "/set-password" || currentPath === "/reset") {
+    if (currentPath === "/set-password") {
       setScreen("set-password");
       return;
     }
@@ -1270,6 +1374,10 @@ export default function App() {
         >
           {toast.msg}
         </div>
+      )}
+
+      {screen === "auth-callback" && (
+        <AuthCallbackScreen />
       )}
 
       {screen === "auth-confirmed" && (
