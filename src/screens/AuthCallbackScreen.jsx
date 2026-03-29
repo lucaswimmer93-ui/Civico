@@ -6,47 +6,43 @@ export default function AuthCallbackScreen() {
     const handleAuth = async () => {
       try {
         const url = new URL(window.location.href);
+
         const code = url.searchParams.get("code");
 
-        const hash = window.location.hash.startsWith("#")
-          ? window.location.hash.slice(1)
-          : window.location.hash;
+        // 🔥 HASH auslesen (WICHTIG)
+        const hash = window.location.hash.replace("#", "");
         const hashParams = new URLSearchParams(hash);
 
-        const accessToken = hashParams.get("access_token");
-        const refreshToken = hashParams.get("refresh_token");
-        const type = url.searchParams.get("type") || hashParams.get("type");
+        const access_token = hashParams.get("access_token");
+        const refresh_token = hashParams.get("refresh_token");
+        const type = hashParams.get("type"); // 🔥 HIER kommt recovery / invite
 
+        console.log("TYPE:", type);
+
+        // PKCE Flow
         if (code) {
           const { error } = await supabase.auth.exchangeCodeForSession(code);
           if (error) throw error;
         }
 
-        if (accessToken && refreshToken) {
+        // HASH Flow
+        if (access_token && refresh_token) {
           const { error } = await supabase.auth.setSession({
-            access_token: accessToken,
-            refresh_token: refreshToken,
+            access_token,
+            refresh_token,
           });
           if (error) throw error;
         }
 
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-
-        if (!session) {
-          throw new Error("Keine Session aus dem Auth-Link hergestellt.");
-        }
-
+        // 🔥 ENTSCHEIDUNG
         if (type === "recovery" || type === "invite") {
           window.location.replace("/set-password");
-          return;
+        } else {
+          window.location.replace("/");
         }
-
-        window.location.replace("/");
-      } catch (error) {
-        console.error("Auth callback failed:", error);
-        window.alert("Link ungültig oder abgelaufen.");
+      } catch (err) {
+        console.error("Auth Fehler:", err);
+        alert("Link ungültig oder abgelaufen");
         window.location.replace("/");
       }
     };
@@ -54,19 +50,5 @@ export default function AuthCallbackScreen() {
     handleAuth();
   }, []);
 
-  return (
-    <div
-      style={{
-        minHeight: "100vh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        background: "linear-gradient(160deg, #1A1208 0%, #2C2416 60%, #3D3020 100%)",
-        color: "#F4F0E8",
-        fontFamily: "inherit",
-      }}
-    >
-      Authentifizierung läuft ...
-    </div>
-  );
+  return <div style={{ padding: 40 }}>Authentifizierung läuft...</div>;
 }
