@@ -398,7 +398,7 @@ function LoginScreen({
     }
     setLoading(true);
     await supabase.auth.resetPasswordForEmail(normalizeEmail(email), {
-      redirectTo: `${getBaseUrl()}/reset`,
+      redirectTo: `${getBaseUrl()}/auth/callback`,
     });
     setLoading(false);
     showToast("✓ Reset-Link gesendet!");
