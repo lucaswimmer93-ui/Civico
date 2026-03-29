@@ -5,12 +5,12 @@ import { Header, StelleCard, VereineListe, BottomBar, DatenschutzBox, Input, Big
 const DRAFT_KEY = 'civico_login_draft_v1';
 const EMAIL_REDIRECT_PATH = '/auth/confirmed';
 
-const getBaseUrl = () => {
-  if (typeof window !== 'undefined' && window.location?.origin) {
-    return window.location.origin;
-  }
-  return 'https://mycivico.de';
-};
+const APP_URL =
+  typeof import.meta !== "undefined" && import.meta.env?.VITE_APP_URL
+    ? import.meta.env.VITE_APP_URL
+    : "https://app.mycivico.de";
+
+const getBaseUrl = () => APP_URL;
 
 const getEmailRedirectUrl = () => `${getBaseUrl()}${EMAIL_REDIRECT_PATH}`;
 const normalizeEmail = (value) => (value || '').trim().toLowerCase();
