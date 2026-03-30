@@ -771,30 +771,34 @@ export default function App() {
   useEffect(() => {
     const currentPath = typeof window !== "undefined" ? window.location.pathname : "/";
 
-    const setupServiceWorker = async () => {
-      if (!("serviceWorker" in navigator)) return;
-
-      try {
-        const reg = await navigator.serviceWorker.register("/civico-sw.js");
-        console.log("SW registered:", reg.scope);
-      } catch (err) {
-        console.log("SW failed:", err);
-      }
-    };
-
-    setupServiceWorker();
-    if (currentPath === "/auth/callback") {
+    // 1. Auth-Routen immer zuerst behandeln
+    if (currentPath.startsWith("/auth/callback")) {
       setScreen("auth-callback");
       return;
     }
-    if (currentPath === "/auth/confirmed") {
+    if (currentPath.startsWith("/auth/confirmed")) {
       setScreen("auth-confirmed");
       return;
     }
-    if (currentPath === "/set-password") {
+    if (currentPath.startsWith("/set-password")) {
       setScreen("set-password");
       return;
     }
+
+    // 2. Service Worker nur auf normalen Seiten aktivieren
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker
+        .getRegistrations()
+        .then((regs) => regs.forEach((reg) => reg.unregister()))
+        .catch((err) => console.log("SW cleanup failed:", err));
+
+      navigator.serviceWorker
+        .register("/civico-sw.js")
+        .then((reg) => console.log("SW registered:", reg.scope))
+        .catch((err) => console.log("SW failed:", err));
+    }
+
+    // 3. Normale App laden
     loadStellen();
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session) {
