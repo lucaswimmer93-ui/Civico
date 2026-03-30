@@ -78,13 +78,9 @@ function AuthCallbackScreen() {
           if (error) throw error;
         }
 
-                if (type === "recovery" || type === "invite") {
-          sessionStorage.setItem("civico_auth_flow", "set-password");
-          window.location.replace("/set-password");
-          return;
-        }
-
-        window.location.replace("/");
+                        sessionStorage.setItem("civico_auth_flow", "set-password");
+        window.location.replace("/set-password");
+        return;
       } catch (err) {
         console.error("Auth callback error:", err);
         if (typeof window !== "undefined") {
@@ -190,7 +186,8 @@ function SetPasswordScreen({ onDone }) {
       return;
     }
 
-    if (typeof window !== "undefined") {
+        if (typeof window !== "undefined") {
+      sessionStorage.removeItem("civico_auth_flow");
       window.history.replaceState({}, "", "/");
     }
     setMessage("Passwort erfolgreich gesetzt.");
@@ -900,7 +897,6 @@ export default function App() {
         }
       }
     });
-  }, []);
   }, []);
 
   // Realtime subscription
