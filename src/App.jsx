@@ -429,12 +429,12 @@ export default function App() {
   };
 
   useEffect(() => {
-    // Service Worker registrieren (PWA + Push)
+    // Service Worker für Auth-Flow deaktivieren und alte Registrierungen entfernen
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker
-        .register("/civico-sw.js")
-        .then((reg) => console.log("SW registered:", reg.scope))
-        .catch((err) => console.log("SW failed:", err));
+        .getRegistrations()
+        .then((regs) => regs.forEach((reg) => reg.unregister()))
+        .catch((err) => console.log("SW cleanup failed:", err));
     }
 
     loadStellen();
@@ -927,29 +927,8 @@ export default function App() {
     ).values()
   );
 
-  const openGemeindeDashboard = () => {
-    const demoGemeinde = {
-      id: gemeindeId || 1,
-      name: 'Gemeinde Einhausen',
-      ort: 'Einhausen',
-      bundesland: 'Hessen',
-    };
-    setUser({ type: 'gemeinde', data: demoGemeinde });
-    setGemeindeId(demoGemeinde.id);
-    setScreen('gemeinde-dashboard');
-    setHistory([]);
-  };
 
-  const openAdminDashboard = () => {
-    const demoAdmin = {
-      id: 1,
-      name: 'Admin',
-      email: 'admin@civico.local',
-    };
-    setUser({ type: 'admin', data: demoAdmin });
-    setScreen('admin-dashboard');
-    setHistory([]);
-  };
+
 
 
   return (
@@ -1081,22 +1060,6 @@ export default function App() {
             ) : (
               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
                 <LangSwitcher />
-                <button
-                  onClick={openGemeindeDashboard}
-                  style={{
-                    background: "#C8A96E",
-                    border: "none",
-                    color: "#1A1208",
-                    fontSize: 13,
-                    padding: "8px 16px",
-                    borderRadius: 20,
-                    cursor: "pointer",
-                    fontFamily: "inherit",
-                    fontWeight: "bold",
-                  }}
-                >
-                  Gemeinde
-                </button>
                 <button
                   onClick={() => navigateTo("login")}
                   style={{
@@ -1400,26 +1363,6 @@ export default function App() {
             onAgb={() => navigateTo("agb")}
             t={t}
           />
-          {!user && (
-            <button
-              onClick={openAdminDashboard}
-              style={{
-                position: "fixed",
-                right: 18,
-                bottom: 14,
-                background: "transparent",
-                border: "none",
-                color: "#8B7355",
-                fontSize: 11,
-                opacity: 0.65,
-                cursor: "pointer",
-                fontFamily: "inherit",
-                letterSpacing: 0.3,
-              }}
-            >
-              Admin
-            </button>
-          )}
         </div>
       )}
 
