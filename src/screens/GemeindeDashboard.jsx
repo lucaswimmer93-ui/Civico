@@ -28,7 +28,7 @@ export default function GemeindeDashboard({
   });
 
   const gemeindeStellen = useMemo(
-    () => stellen.filter((s) => s.gemeinde_id === user?.id || s.created_by_type === 'gemeinde'),
+    () => stellen.filter((s) => s.gemeinde_id === user?.id),
     [stellen, user]
   );
 
