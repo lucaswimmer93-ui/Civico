@@ -105,7 +105,6 @@ export default function App() {
 
   const [user, setUser] = useState(null);
   const [stellen, setStellen] = useState([]);
-  const [gemeindeOrganisationen, setGemeindeOrganisationen] = useState([]);
   const [screen, setScreen] = useState("home");
   const [history, setHistory] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -375,7 +374,6 @@ export default function App() {
             }
           } else {
             setStellen([]);
-    setGemeindeOrganisationen([]);
             return;
           }
         }
@@ -392,28 +390,6 @@ export default function App() {
     if (gemeinde_id) query = query.eq("gemeinde_id", gemeinde_id);
     const { data } = await query;
     if (data) setStellen(data);
-  };
-
-
-  const loadGemeindeOrganisationen = async (gemeindeIdParam) => {
-    if (!gemeindeIdParam) {
-      setGemeindeOrganisationen([]);
-      return;
-    }
-
-    const { data, error } = await supabase
-      .from("vereine")
-      .select("*")
-      .eq("gemeinde_id", gemeindeIdParam)
-      .order("name", { ascending: true });
-
-    if (error) {
-      console.error("Fehler beim Laden der Gemeinde-Organisationen:", error);
-      setGemeindeOrganisationen([]);
-      return;
-    }
-
-    setGemeindeOrganisationen(data || []);
   };
 
   const reloadSelected = async (stelleId) => {
@@ -507,8 +483,7 @@ export default function App() {
         if (gemeinde) {
           setUser({ type: "gemeinde", data: gemeinde });
           setGemeindeId(gemeinde.id);
-          await loadStellen(gemeinde.id);
-          await loadGemeindeOrganisationen(gemeinde.id);
+          loadStellen(gemeinde.id);
           setScreen("gemeinde-dashboard");
           return;
         }
@@ -1493,15 +1468,14 @@ export default function App() {
       {/* LOGIN */}
       {screen === "login" && (
         <LoginScreen
-          onLogin={async (type, data, gid) => {
+          onLogin={(type, data, gid) => {
             setUser({ type, data });
             setGemeindeId(gid);
-            await loadStellen(gid);
+            loadStellen(gid);
             setHistory([]);
             if (type === "verein" || type === "organisation") {
               setScreen("dashboard");
             } else if (type === "gemeinde") {
-              await loadGemeindeOrganisationen(gid);
               setScreen("gemeinde-dashboard");
             } else if (type === "admin") {
               setScreen("admin-dashboard");
@@ -2037,7 +2011,7 @@ export default function App() {
         <GemeindeDashboard
           user={user.data}
           stellen={stellen}
-          organisationen={gemeindeOrganisationen}
+          organisationen={derivedOrganisationen}
           inbox={adminInbox}
           onBack={goBack}
           logout={logout}
