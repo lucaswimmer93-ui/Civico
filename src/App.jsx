@@ -19,8 +19,6 @@ import {
   isTerminAktuell,
 } from './core/shared';
 import LoginScreen from './screens/LoginScreen';
-import AuthCallbackScreen from './screens/AuthCallbackScreen';
-import SetPasswordScreen from './screens/SetPasswordScreen';
 import {
   DetailScreen,
   VereinProfilPublic,
@@ -45,9 +43,9 @@ import { Chip, SectionLabel, EmptyState, BottomBar, StelleCard, VereineListe } f
 const getInitialScreenFromPath = () => {
   if (typeof window === "undefined") return "home";
   const path = window.location.pathname || "/";
-  if (path === "/auth/callback") return "auth-callback";
-  if (path === "/auth/confirmed") return "auth-confirmed";
-  if (path === "/set-password") return "set-password";
+  if (path.startsWith("/auth/callback")) return "auth-callback";
+  if (path.startsWith("/auth/confirmed")) return "auth-confirmed";
+  if (path.startsWith("/set-password")) return "set-password";
   return "home";
 };
 
@@ -80,12 +78,7 @@ function AuthCallbackScreen() {
           if (error) throw error;
         }
 
-        if (type === "recovery" || type === "invite") {
-          window.location.replace("/set-password");
-          return;
-        }
-
-        window.location.replace("/");
+        window.location.replace("/set-password");
       } catch (err) {
         console.error("Auth callback error:", err);
         if (typeof window !== "undefined") {
@@ -97,15 +90,6 @@ function AuthCallbackScreen() {
 
     handleAuth();
   }, []);
-
-  if (checkingSession) {
-    return (
-      <div style={{ minHeight: "100vh", background: "linear-gradient(160deg, #1A1208 0%, #2C2416 60%, #3D3020 100%)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, color: "#F4F0E8", fontSize: 16 }}>
-        Session wird geprüft ...
-      </div>
-    );
-  }
-
   return (
     <div style={{ minHeight: "100vh", background: "linear-gradient(160deg, #1A1208 0%, #2C2416 60%, #3D3020 100%)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
       <div style={{ width: "100%", maxWidth: 440, background: "#F4F0E8", borderRadius: 24, padding: "36px 28px", textAlign: "center", boxShadow: "0 10px 30px rgba(0,0,0,0.18)" }}>
@@ -239,36 +223,6 @@ function SetPasswordScreen({ onDone }) {
             Zum Login
           </button>
         )}
-      </div>
-    </div>
-  );
-}
-
-
-const getInitialScreenFromPath = () => {
-  if (typeof window === "undefined") return "home";
-  const path = window.location.pathname || "/";
-  if (path.startsWith("/auth/callback")) return "auth-callback";
-  if (path.startsWith("/set-password")) return "set-password";
-  if (path.startsWith("/auth/confirmed")) return "auth-confirmed";
-  return "home";
-};
-
-function AuthConfirmedScreen({ onLogin }) {
-  const handleToLogin = () => {
-    if (typeof window !== "undefined") {
-      window.history.replaceState({}, "", "/");
-    }
-    onLogin();
-  };
-
-  return (
-    <div style={{ minHeight: "100vh", background: "linear-gradient(160deg, #1A1208 0%, #2C2416 60%, #3D3020 100%)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-      <div style={{ width: "100%", maxWidth: 440, background: "#F4F0E8", borderRadius: 24, padding: "36px 28px", textAlign: "center", boxShadow: "0 10px 30px rgba(0,0,0,0.18)" }}>
-        <div style={{ fontSize: 52, marginBottom: 12 }}>✅</div>
-        <div style={{ fontSize: 26, fontWeight: "bold", color: "#2C2416", marginBottom: 10, letterSpacing: 1 }}>E-Mail bestätigt</div>
-        <div style={{ fontSize: 15, lineHeight: 1.6, color: "#8B7355", marginBottom: 24 }}>Dein Konto wurde erfolgreich verifiziert.<br />Du kannst dich jetzt bei Civico anmelden.</div>
-        <button onClick={handleToLogin} style={{ padding: "12px 24px", borderRadius: 12, border: "none", background: "#2C2416", color: "#FAF7F2", fontSize: 14, fontFamily: "inherit", fontWeight: "bold", cursor: "pointer" }}>Zum Login</button>
       </div>
     </div>
   );
@@ -1402,39 +1356,6 @@ export default function App() {
           setHistory([]);
           setScreen("login");
         }} />
-      )}
-
-
-      {screen === "auth-callback" && (
-        <AuthCallbackScreen />
-      )}
-
-      {screen === "auth-confirmed" && (
-        <AuthConfirmedScreen onLogin={() => {
-          setHistory([]);
-          setScreen("login");
-        }} />
-      )}
-
-      {screen === "set-password" && (
-        <SetPasswordScreen
-          onSubmit={async (password) => {
-            const { error } = await supabase.auth.updateUser({ password });
-            if (error) throw error;
-            if (typeof window !== "undefined") {
-              window.history.replaceState({}, "", "/");
-            }
-            setHistory([]);
-            setScreen("login");
-          }}
-          onBack={() => {
-            if (typeof window !== "undefined") {
-              window.history.replaceState({}, "", "/");
-            }
-            setHistory([]);
-            setScreen("login");
-          }}
-        />
       )}
 
       {/* HOME */}
