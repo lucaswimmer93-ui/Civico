@@ -78,7 +78,8 @@ function AuthCallbackScreen() {
           if (error) throw error;
         }
 
-        if (type === "recovery" || type === "invite") {
+                if (type === "recovery" || type === "invite") {
+          sessionStorage.setItem("civico_auth_flow", "set-password");
           window.location.replace("/set-password");
           return;
         }
@@ -95,14 +96,6 @@ function AuthCallbackScreen() {
 
     handleAuth();
   }, []);
-
-  if (checkingSession) {
-    return (
-      <div style={{ minHeight: "100vh", background: "linear-gradient(160deg, #1A1208 0%, #2C2416 60%, #3D3020 100%)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, color: "#F4F0E8", fontSize: 16 }}>
-        Session wird geprüft ...
-      </div>
-    );
-  }
 
   return (
     <div style={{ minHeight: "100vh", background: "linear-gradient(160deg, #1A1208 0%, #2C2416 60%, #3D3020 100%)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
@@ -782,8 +775,12 @@ export default function App() {
     }
   };
 
-  useEffect(() => {
+    useEffect(() => {
     const currentPath = typeof window !== "undefined" ? window.location.pathname : "/";
+    const flowLock =
+      typeof window !== "undefined"
+        ? sessionStorage.getItem("civico_auth_flow")
+        : null;
 
     // Auth-Routen immer zuerst behandeln
     if (currentPath.startsWith("/auth/callback")) {
@@ -794,8 +791,17 @@ export default function App() {
       setScreen("auth-confirmed");
       return;
     }
-    if (currentPath.startsWith("/set-password")) {
+
+    // Flow-Lock hat Vorrang vor jeder normalen Session-Navigation
+    if (currentPath.startsWith("/set-password") || flowLock === "set-password") {
       setScreen("set-password");
+
+      if (
+        typeof window !== "undefined" &&
+        !currentPath.startsWith("/set-password")
+      ) {
+        window.location.replace("/set-password");
+      }
       return;
     }
 
@@ -813,13 +819,26 @@ export default function App() {
     }
 
     loadStellen();
+
     supabase.auth.getSession().then(async ({ data: { session } }) => {
+      const activeFlowLock =
+        typeof window !== "undefined"
+          ? sessionStorage.getItem("civico_auth_flow")
+          : null;
+
+      // Normale Redirects im Passwort-Flow komplett blockieren
+      if (activeFlowLock === "set-password") {
+        setScreen("set-password");
+        return;
+      }
+
       if (session) {
         const { data: profil } = await supabase
           .from("freiwillige")
           .select("*")
           .eq("auth_id", session.user.id)
           .single();
+
         if (profil) {
           setUser({ type: "freiwilliger", data: profil });
           setGemeindeId(profil.gemeinde_id);
@@ -829,11 +848,13 @@ export default function App() {
           setScreen("home");
           return;
         }
+
         const { data: verein } = await supabase
           .from("vereine")
           .select("*")
           .eq("auth_id", session.user.id)
           .single();
+
         if (verein) {
           setUser({ type: "verein", data: verein });
           setGemeindeId(verein.gemeinde_id);
@@ -848,6 +869,7 @@ export default function App() {
             .then(({ data }) => {
               if (data) setVereinFollowers(data);
             });
+          return;
         }
 
         const { data: gemeinde } = await supabase
@@ -855,6 +877,7 @@ export default function App() {
           .select("*")
           .eq("auth_id", session.user.id)
           .single();
+
         if (gemeinde) {
           setUser({ type: "gemeinde", data: gemeinde });
           setGemeindeId(gemeinde.id);
@@ -868,6 +891,7 @@ export default function App() {
           .select("*")
           .eq("auth_id", session.user.id)
           .single();
+
         if (admin) {
           setUser({ type: "admin", data: admin });
           loadStellen();
@@ -876,6 +900,7 @@ export default function App() {
         }
       }
     });
+  }, []);
   }, []);
 
   // Realtime subscription
