@@ -15,7 +15,6 @@ export default function AuthCallbackScreen() {
 
         const accessToken = hashParams.get("access_token");
         const refreshToken = hashParams.get("refresh_token");
-        const type = url.searchParams.get("type") || hashParams.get("type");
 
         if (code) {
           const { error } = await supabase.auth.exchangeCodeForSession(code);
@@ -30,12 +29,12 @@ export default function AuthCallbackScreen() {
           if (error) throw error;
         }
 
-        if (type === "recovery" || type === "invite") {
-          window.location.replace("/set-password");
-          return;
-        }
-
-        window.location.replace("/");
+        // Wichtig:
+        // In deiner App wird /auth/confirmed bereits separat für normale
+        // E-Mail-Bestätigungen genutzt.
+        // /auth/callback ist damit nur noch für Invite / Passwort-Reset da.
+        // Deshalb hier IMMER auf /set-password weiterleiten.
+        window.location.replace("/set-password");
       } catch (err) {
         console.error("Auth Fehler:", err);
         alert("Link ungültig oder abgelaufen");
