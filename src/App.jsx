@@ -45,9 +45,9 @@ import { Chip, SectionLabel, EmptyState, BottomBar, StelleCard, VereineListe } f
 const getInitialScreenFromPath = () => {
   if (typeof window === "undefined") return "home";
   const path = window.location.pathname || "/";
-  if (path === "/auth/callback") return "auth-callback";
-  if (path === "/auth/confirmed") return "auth-confirmed";
-  if (path === "/set-password") return "set-password";
+  if (path.startsWith("/auth/callback")) return "auth-callback";
+  if (path.startsWith("/auth/confirmed")) return "auth-confirmed";
+  if (path.startsWith("/set-password")) return "set-password";
   return "home";
 };
 
@@ -308,6 +308,16 @@ export default function App() {
 
     await supabase.auth.signOut();
     setUser(null);
+    setGemeindeId(null);
+    setStellen([]);
+    setSelected(null);
+    setSelectedVerein(null);
+    setSelectedFreiwilliger(null);
+    setVereinFollowers([]);
+    setVereinNotifications([]);
+    setAdminInbox([]);
+    setNotifications([]);
+    setFollows({ vereine: [], kategorien: [] });
     setHistory([]);
     setScreen("home");
   };
@@ -628,18 +638,20 @@ export default function App() {
     };
 
     setupServiceWorker();
-    if (currentPath === "/auth/callback") {
+
+    if (currentPath.startsWith("/auth/callback")) {
       setScreen("auth-callback");
       return;
     }
-    if (currentPath === "/auth/confirmed") {
+    if (currentPath.startsWith("/auth/confirmed")) {
       setScreen("auth-confirmed");
       return;
     }
-    if (currentPath === "/set-password") {
+    if (currentPath.startsWith("/set-password")) {
       setScreen("set-password");
       return;
     }
+
     loadStellen();
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session) {
