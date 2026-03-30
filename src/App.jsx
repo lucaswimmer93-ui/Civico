@@ -43,9 +43,9 @@ import { Chip, SectionLabel, EmptyState, BottomBar, StelleCard, VereineListe } f
 const getInitialScreenFromPath = () => {
   if (typeof window === "undefined") return "home";
   const path = window.location.pathname || "/";
-  if (path.startsWith("/auth/callback")) return "auth-callback";
-  if (path.startsWith("/auth/confirmed")) return "auth-confirmed";
-  if (path.startsWith("/set-password")) return "set-password";
+  if (path === "/auth/callback") return "auth-callback";
+  if (path === "/auth/confirmed") return "auth-confirmed";
+  if (path === "/set-password") return "set-password";
   return "home";
 };
 
@@ -78,7 +78,12 @@ function AuthCallbackScreen() {
           if (error) throw error;
         }
 
-        window.location.replace("/set-password");
+        if (type === "recovery" || type === "invite") {
+          window.location.replace("/set-password");
+          return;
+        }
+
+        window.location.replace("/");
       } catch (err) {
         console.error("Auth callback error:", err);
         if (typeof window !== "undefined") {
@@ -90,6 +95,15 @@ function AuthCallbackScreen() {
 
     handleAuth();
   }, []);
+
+  if (checkingSession) {
+    return (
+      <div style={{ minHeight: "100vh", background: "linear-gradient(160deg, #1A1208 0%, #2C2416 60%, #3D3020 100%)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, color: "#F4F0E8", fontSize: 16 }}>
+        Session wird geprüft ...
+      </div>
+    );
+  }
+
   return (
     <div style={{ minHeight: "100vh", background: "linear-gradient(160deg, #1A1208 0%, #2C2416 60%, #3D3020 100%)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
       <div style={{ width: "100%", maxWidth: 440, background: "#F4F0E8", borderRadius: 24, padding: "36px 28px", textAlign: "center", boxShadow: "0 10px 30px rgba(0,0,0,0.18)" }}>
@@ -771,7 +785,7 @@ export default function App() {
   useEffect(() => {
     const currentPath = typeof window !== "undefined" ? window.location.pathname : "/";
 
-    // 1. Auth-Routen immer zuerst behandeln
+    // Auth-Routen immer zuerst behandeln
     if (currentPath.startsWith("/auth/callback")) {
       setScreen("auth-callback");
       return;
@@ -785,7 +799,7 @@ export default function App() {
       return;
     }
 
-    // 2. Service Worker nur auf normalen Seiten aktivieren
+    // Service Worker nur auf normalen Seiten aktivieren
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker
         .getRegistrations()
@@ -798,7 +812,6 @@ export default function App() {
         .catch((err) => console.log("SW failed:", err));
     }
 
-    // 3. Normale App laden
     loadStellen();
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session) {
@@ -1307,7 +1320,29 @@ export default function App() {
     ).values()
   );
 
+  const openGemeindeDashboard = () => {
+    const demoGemeinde = {
+      id: gemeindeId || 1,
+      name: 'Gemeinde Einhausen',
+      ort: 'Einhausen',
+      bundesland: 'Hessen',
+    };
+    setUser({ type: 'gemeinde', data: demoGemeinde });
+    setGemeindeId(demoGemeinde.id);
+    setScreen('gemeinde-dashboard');
+    setHistory([]);
+  };
 
+  const openAdminDashboard = () => {
+    const demoAdmin = {
+      id: 1,
+      name: 'Admin',
+      email: 'admin@civico.local',
+    };
+    setUser({ type: 'admin', data: demoAdmin });
+    setScreen('admin-dashboard');
+    setHistory([]);
+  };
 
 
   return (
@@ -1760,6 +1795,26 @@ export default function App() {
             onAgb={() => navigateTo("agb")}
             t={t}
           />
+          {!user && (
+            <button
+              onClick={openAdminDashboard}
+              style={{
+                position: "fixed",
+                right: 18,
+                bottom: 14,
+                background: "transparent",
+                border: "none",
+                color: "#8B7355",
+                fontSize: 11,
+                opacity: 0.65,
+                cursor: "pointer",
+                fontFamily: "inherit",
+                letterSpacing: 0.3,
+              }}
+            >
+              Admin
+            </button>
+          )}
         </div>
       )}
 
