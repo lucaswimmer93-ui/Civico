@@ -19,7 +19,6 @@ import {
   isTerminAktuell,
 } from './core/shared';
 import LoginScreen from './screens/LoginScreen';
-import AuthCallbackScreen from "./screens/AuthCallbackScreen";
 import {
   DetailScreen,
   VereinProfilPublic,
@@ -50,6 +49,72 @@ const getInitialScreenFromPath = () => {
   return "home";
 };
 
+function AuthCallbackScreen() {
+  useEffect(() => {
+    const handleAuth = async () => {
+      try {
+        const url = new URL(window.location.href);
+        const code = url.searchParams.get("code");
+
+        const hash = window.location.hash.startsWith("#")
+          ? window.location.hash.slice(1)
+          : window.location.hash;
+        const hashParams = new URLSearchParams(hash);
+
+        const accessToken = hashParams.get("access_token");
+        const refreshToken = hashParams.get("refresh_token");
+        const type = url.searchParams.get("type") || hashParams.get("type");
+
+        if (code) {
+          const { error } = await supabase.auth.exchangeCodeForSession(code);
+          if (error) throw error;
+        }
+
+        if (accessToken && refreshToken) {
+          const { error } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          });
+          if (error) throw error;
+        }
+
+        if (type === "recovery" || type === "invite") {
+          window.location.replace("/set-password");
+          return;
+        }
+
+        window.location.replace("/");
+      } catch (err) {
+        console.error("Auth callback error:", err);
+        if (typeof window !== "undefined") {
+          window.alert("Link ungültig oder abgelaufen.");
+          window.location.replace("/");
+        }
+      }
+    };
+
+    handleAuth();
+  }, []);
+
+  if (checkingSession) {
+    return (
+      <div style={{ minHeight: "100vh", background: "linear-gradient(160deg, #1A1208 0%, #2C2416 60%, #3D3020 100%)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, color: "#F4F0E8", fontSize: 16 }}>
+        Session wird geprüft ...
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ minHeight: "100vh", background: "linear-gradient(160deg, #1A1208 0%, #2C2416 60%, #3D3020 100%)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div style={{ width: "100%", maxWidth: 440, background: "#F4F0E8", borderRadius: 24, padding: "36px 28px", textAlign: "center", boxShadow: "0 10px 30px rgba(0,0,0,0.18)" }}>
+        <div style={{ fontSize: 52, marginBottom: 12 }}>🔄</div>
+        <div style={{ fontSize: 24, fontWeight: "bold", color: "#2C2416", marginBottom: 10 }}>Authentifizierung läuft</div>
+        <div style={{ fontSize: 15, lineHeight: 1.6, color: "#8B7355" }}>Bitte kurz warten ...</div>
+      </div>
+    </div>
+  );
+}
+
 function AuthConfirmedScreen({ onLogin }) {
   const handleToLogin = () => {
     if (typeof window !== "undefined") {
@@ -57,14 +122,6 @@ function AuthConfirmedScreen({ onLogin }) {
     }
     onLogin();
   };
-
-  if (checkingSession) {
-    return (
-      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "linear-gradient(160deg, #1A1208 0%, #2C2416 60%, #3D3020 100%)", color: "#F4F0E8" }}>
-        Session wird geprüft ...
-      </div>
-    );
-  }
 
   return (
     <div style={{ minHeight: "100vh", background: "linear-gradient(160deg, #1A1208 0%, #2C2416 60%, #3D3020 100%)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
@@ -79,10 +136,10 @@ function AuthConfirmedScreen({ onLogin }) {
 }
 
 function SetPasswordScreen({ onDone }) {
-  const [checkingSession, setCheckingSession] = useState(true);
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
@@ -98,8 +155,9 @@ function SetPasswordScreen({ onDone }) {
 
       if (!session) {
         if (typeof window !== "undefined") {
-          window.location.replace("/");
+          window.history.replaceState({}, "", "/");
         }
+        onDone();
         return;
       }
 
@@ -111,7 +169,7 @@ function SetPasswordScreen({ onDone }) {
     return () => {
       active = false;
     };
-  }, []);
+  }, [onDone]);
 
   const handleSave = async () => {
     setError("");
@@ -143,6 +201,10 @@ function SetPasswordScreen({ onDone }) {
       window.history.replaceState({}, "", "/");
     }
     setMessage("Passwort erfolgreich gesetzt.");
+
+    setTimeout(() => {
+      onDone();
+    }, 1200);
   };
 
   return (
@@ -267,6 +329,7 @@ export default function App() {
   const [follows, setFollows] = useState({ vereine: [], kategorien: [] });
   const [notifications, setNotifications] = useState([]);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [gemeindeOrganisationen, setGemeindeOrganisationen] = useState([]);
 
   // ── Notifications ─────────────────────────────────────────────────────────
   const loadNotifications = async (userId) => {
@@ -415,6 +478,7 @@ export default function App() {
 
     await supabase.auth.signOut();
     setUser(null);
+    setGemeindeOrganisationen([]);
     setHistory([]);
     setScreen("home");
   };
@@ -688,6 +752,27 @@ export default function App() {
     if (data) setStellen(data);
   };
 
+  const loadGemeindeOrganisationen = async (gemeindeIdParam) => {
+    if (!gemeindeIdParam) {
+      setGemeindeOrganisationen([]);
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from("vereine")
+      .select("*")
+      .eq("gemeinde_id", gemeindeIdParam)
+      .order("name", { ascending: true });
+
+    if (error) {
+      console.error("Fehler beim Laden der Gemeinde-Organisationen:", error);
+      setGemeindeOrganisationen([]);
+      return;
+    }
+
+    setGemeindeOrganisationen(data || []);
+  };
+
   const reloadSelected = async (stelleId) => {
     const { data } = await supabase
       .from("stellen")
@@ -793,7 +878,8 @@ export default function App() {
         if (gemeinde) {
           setUser({ type: "gemeinde", data: gemeinde });
           setGemeindeId(gemeinde.id);
-          loadStellen(gemeinde.id);
+          await loadStellen(gemeinde.id);
+          await loadGemeindeOrganisationen(gemeinde.id);
           setScreen("gemeinde-dashboard");
           return;
         }
@@ -1249,7 +1335,7 @@ export default function App() {
     }
   };
 
-  const derivedOrganisationen = Array.from(
+  const adminOrganisationen = Array.from(
     new Map(
       stellen.filter((s) => s.vereine).map((s) => [s.vereine.id, s.vereine])
     ).values()
@@ -1314,7 +1400,9 @@ export default function App() {
         </div>
       )}
 
-      {screen === "auth-callback" && <AuthCallbackScreen />}
+      {screen === "auth-callback" && (
+        <AuthCallbackScreen />
+      )}
 
       {screen === "auth-confirmed" && (
         <AuthConfirmedScreen onLogin={() => {
@@ -1797,18 +1885,22 @@ export default function App() {
       {/* LOGIN */}
       {screen === "login" && (
         <LoginScreen
-          onLogin={(type, data, gid) => {
+          onLogin={async (type, data, gid) => {
             setUser({ type, data });
             setGemeindeId(gid);
-            loadStellen(gid);
+            await loadStellen(gid);
             setHistory([]);
             if (type === "verein" || type === "organisation") {
+              setGemeindeOrganisationen([]);
               setScreen("dashboard");
             } else if (type === "gemeinde") {
+              await loadGemeindeOrganisationen(gid);
               setScreen("gemeinde-dashboard");
             } else if (type === "admin") {
+              setGemeindeOrganisationen([]);
               setScreen("admin-dashboard");
             } else {
+              setGemeindeOrganisationen([]);
               setScreen("home");
             }
             if (type === "freiwilliger") {
@@ -2347,7 +2439,7 @@ export default function App() {
         <GemeindeDashboard
           user={user.data}
           stellen={stellen}
-          organisationen={derivedOrganisationen}
+          organisationen={gemeindeOrganisationen}
           inbox={adminInbox}
           onBack={goBack}
           logout={logout}
@@ -2358,7 +2450,7 @@ export default function App() {
       {screen === "admin-dashboard" && user?.type === "admin" && (
         <AdminDashboard
           gemeinden={[]}
-          organisationen={derivedOrganisationen}
+          organisationen={adminOrganisationen}
           freiwillige={[]}
           stellen={stellen}
           anfragen={adminInbox}
