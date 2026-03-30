@@ -19,6 +19,8 @@ import {
   isTerminAktuell,
 } from './core/shared';
 import LoginScreen from './screens/LoginScreen';
+import AuthCallbackScreen from './screens/AuthCallbackScreen';
+import SetPasswordScreen from './screens/SetPasswordScreen';
 import {
   DetailScreen,
   VereinProfilPublic,
@@ -49,71 +51,6 @@ const getInitialScreenFromPath = () => {
   return "home";
 };
 
-function AuthCallbackScreen() {
-  useEffect(() => {
-    const handleAuth = async () => {
-      try {
-        const url = new URL(window.location.href);
-        const code = url.searchParams.get("code");
-
-        const hash = window.location.hash.startsWith("#")
-          ? window.location.hash.slice(1)
-          : window.location.hash;
-        const hashParams = new URLSearchParams(hash);
-
-        const accessToken = hashParams.get("access_token");
-        const refreshToken = hashParams.get("refresh_token");
-        const type = url.searchParams.get("type") || hashParams.get("type");
-
-        if (code) {
-          const { error } = await supabase.auth.exchangeCodeForSession(code);
-          if (error) throw error;
-        }
-
-        if (accessToken && refreshToken) {
-          const { error } = await supabase.auth.setSession({
-            access_token: accessToken,
-            refresh_token: refreshToken,
-          });
-          if (error) throw error;
-        }
-
-        if (type === "recovery" || type === "invite") {
-          window.location.replace("/set-password");
-          return;
-        }
-
-        window.location.replace("/");
-      } catch (err) {
-        console.error("Auth callback error:", err);
-        if (typeof window !== "undefined") {
-          window.alert("Link ungültig oder abgelaufen.");
-          window.location.replace("/");
-        }
-      }
-    };
-
-    handleAuth();
-  }, []);
-
-  if (checkingSession) {
-    return (
-      <div style={{ minHeight: "100vh", background: "linear-gradient(160deg, #1A1208 0%, #2C2416 60%, #3D3020 100%)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, color: "#F4F0E8", fontSize: 16 }}>
-        Session wird geprüft ...
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ minHeight: "100vh", background: "linear-gradient(160deg, #1A1208 0%, #2C2416 60%, #3D3020 100%)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-      <div style={{ width: "100%", maxWidth: 440, background: "#F4F0E8", borderRadius: 24, padding: "36px 28px", textAlign: "center", boxShadow: "0 10px 30px rgba(0,0,0,0.18)" }}>
-        <div style={{ fontSize: 52, marginBottom: 12 }}>🔄</div>
-        <div style={{ fontSize: 24, fontWeight: "bold", color: "#2C2416", marginBottom: 10 }}>Authentifizierung läuft</div>
-        <div style={{ fontSize: 15, lineHeight: 1.6, color: "#8B7355" }}>Bitte kurz warten ...</div>
-      </div>
-    </div>
-  );
-}
 
 function AuthConfirmedScreen({ onLogin }) {
   const handleToLogin = () => {
@@ -135,112 +72,6 @@ function AuthConfirmedScreen({ onLogin }) {
   );
 }
 
-function SetPasswordScreen({ onDone }) {
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [checkingSession, setCheckingSession] = useState(true);
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    let active = true;
-
-    const checkSession = async () => {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-
-      if (!active) return;
-
-      if (!session) {
-        if (typeof window !== "undefined") {
-          window.history.replaceState({}, "", "/");
-        }
-        onDone();
-        return;
-      }
-
-      setCheckingSession(false);
-    };
-
-    checkSession();
-
-    return () => {
-      active = false;
-    };
-  }, [onDone]);
-
-  const handleSave = async () => {
-    setError("");
-    setMessage("");
-
-    if (!password || !confirmPassword) {
-      setError("Bitte beide Passwortfelder ausfüllen.");
-      return;
-    }
-    if (password.length < 6) {
-      setError("Passwort muss mindestens 6 Zeichen haben.");
-      return;
-    }
-    if (password !== confirmPassword) {
-      setError("Die Passwörter stimmen nicht überein.");
-      return;
-    }
-
-    setLoading(true);
-    const { error: updateError } = await supabase.auth.updateUser({ password });
-    setLoading(false);
-
-    if (updateError) {
-      setError(updateError.message || "Passwort konnte nicht gesetzt werden.");
-      return;
-    }
-
-    if (typeof window !== "undefined") {
-      window.history.replaceState({}, "", "/");
-    }
-    setMessage("Passwort erfolgreich gesetzt.");
-
-    setTimeout(() => {
-      onDone();
-    }, 1200);
-  };
-
-  return (
-    <div style={{ minHeight: "100vh", background: "linear-gradient(160deg, #1A1208 0%, #2C2416 60%, #3D3020 100%)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-      <div style={{ width: "100%", maxWidth: 460, background: "#F4F0E8", borderRadius: 24, padding: "36px 28px", boxShadow: "0 10px 30px rgba(0,0,0,0.18)" }}>
-        <div style={{ textAlign: "center", marginBottom: 24 }}>
-          <div style={{ fontSize: 48, marginBottom: 10 }}>🔐</div>
-          <div style={{ fontSize: 24, fontWeight: "bold", color: "#2C2416", marginBottom: 8 }}>Neues Passwort setzen</div>
-          <div style={{ fontSize: 14, color: "#8B7355", lineHeight: 1.6 }}>Vergib jetzt dein neues Passwort für Civico.</div>
-        </div>
-
-        <div style={{ marginBottom: 14 }}>
-          <div style={{ fontSize: 12, color: "#8B7355", marginBottom: 8, letterSpacing: 0.5 }}>NEUES PASSWORT</div>
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••" style={{ width: "100%", padding: "12px 14px", borderRadius: 12, border: "1px solid #E0D8C8", background: "#FAF7F2", fontFamily: "inherit", fontSize: 14, color: "#2C2416", boxSizing: "border-box" }} />
-        </div>
-        <div style={{ marginBottom: 14 }}>
-          <div style={{ fontSize: 12, color: "#8B7355", marginBottom: 8, letterSpacing: 0.5 }}>PASSWORT WIEDERHOLEN</div>
-          <input type="password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} placeholder="••••••" style={{ width: "100%", padding: "12px 14px", borderRadius: 12, border: "1px solid #E0D8C8", background: "#FAF7F2", fontFamily: "inherit", fontSize: 14, color: "#2C2416", boxSizing: "border-box" }} />
-        </div>
-
-        {error ? <div style={{ marginBottom: 14, color: "#B53A2D", fontSize: 13, fontWeight: 700 }}>{error}</div> : null}
-        {message ? <div style={{ marginBottom: 14, color: "#2C6B36", fontSize: 13, fontWeight: 700 }}>{message}</div> : null}
-
-        {!message ? (
-          <button onClick={handleSave} disabled={loading} style={{ width: "100%", padding: "12px 18px", borderRadius: 14, border: "none", background: "#2C2416", color: "#fff", cursor: loading ? "default" : "pointer", fontFamily: "inherit", fontWeight: 700, marginBottom: 10 }}>
-            {loading ? "Speichern..." : "Passwort speichern"}
-          </button>
-        ) : (
-          <button onClick={onDone} style={{ width: "100%", padding: "12px 18px", borderRadius: 14, border: "none", background: "#2C2416", color: "#fff", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, marginBottom: 10 }}>
-            Zum Login
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
 
 export default function App() {
   const [lang, setLang] = useState("de");
@@ -329,7 +160,6 @@ export default function App() {
   const [follows, setFollows] = useState({ vereine: [], kategorien: [] });
   const [notifications, setNotifications] = useState([]);
   const [showNotifications, setShowNotifications] = useState(false);
-  const [gemeindeOrganisationen, setGemeindeOrganisationen] = useState([]);
 
   // ── Notifications ─────────────────────────────────────────────────────────
   const loadNotifications = async (userId) => {
@@ -478,7 +308,6 @@ export default function App() {
 
     await supabase.auth.signOut();
     setUser(null);
-    setGemeindeOrganisationen([]);
     setHistory([]);
     setScreen("home");
   };
@@ -752,27 +581,6 @@ export default function App() {
     if (data) setStellen(data);
   };
 
-  const loadGemeindeOrganisationen = async (gemeindeIdParam) => {
-    if (!gemeindeIdParam) {
-      setGemeindeOrganisationen([]);
-      return;
-    }
-
-    const { data, error } = await supabase
-      .from("vereine")
-      .select("*")
-      .eq("gemeinde_id", gemeindeIdParam)
-      .order("name", { ascending: true });
-
-    if (error) {
-      console.error("Fehler beim Laden der Gemeinde-Organisationen:", error);
-      setGemeindeOrganisationen([]);
-      return;
-    }
-
-    setGemeindeOrganisationen(data || []);
-  };
-
   const reloadSelected = async (stelleId) => {
     const { data } = await supabase
       .from("stellen")
@@ -878,8 +686,7 @@ export default function App() {
         if (gemeinde) {
           setUser({ type: "gemeinde", data: gemeinde });
           setGemeindeId(gemeinde.id);
-          await loadStellen(gemeinde.id);
-          await loadGemeindeOrganisationen(gemeinde.id);
+          loadStellen(gemeinde.id);
           setScreen("gemeinde-dashboard");
           return;
         }
@@ -1335,7 +1142,7 @@ export default function App() {
     }
   };
 
-  const adminOrganisationen = Array.from(
+  const derivedOrganisationen = Array.from(
     new Map(
       stellen.filter((s) => s.vereine).map((s) => [s.vereine.id, s.vereine])
     ).values()
@@ -1412,10 +1219,24 @@ export default function App() {
       )}
 
       {screen === "set-password" && (
-        <SetPasswordScreen onDone={() => {
-          setHistory([]);
-          setScreen("login");
-        }} />
+        <SetPasswordScreen
+          onSubmit={async (password) => {
+            const { error } = await supabase.auth.updateUser({ password });
+            if (error) throw error;
+            if (typeof window !== "undefined") {
+              window.history.replaceState({}, "", "/");
+            }
+            setHistory([]);
+            setScreen("login");
+          }}
+          onBack={() => {
+            if (typeof window !== "undefined") {
+              window.history.replaceState({}, "", "/");
+            }
+            setHistory([]);
+            setScreen("login");
+          }}
+        />
       )}
 
       {/* HOME */}
@@ -1885,22 +1706,18 @@ export default function App() {
       {/* LOGIN */}
       {screen === "login" && (
         <LoginScreen
-          onLogin={async (type, data, gid) => {
+          onLogin={(type, data, gid) => {
             setUser({ type, data });
             setGemeindeId(gid);
-            await loadStellen(gid);
+            loadStellen(gid);
             setHistory([]);
             if (type === "verein" || type === "organisation") {
-              setGemeindeOrganisationen([]);
               setScreen("dashboard");
             } else if (type === "gemeinde") {
-              await loadGemeindeOrganisationen(gid);
               setScreen("gemeinde-dashboard");
             } else if (type === "admin") {
-              setGemeindeOrganisationen([]);
               setScreen("admin-dashboard");
             } else {
-              setGemeindeOrganisationen([]);
               setScreen("home");
             }
             if (type === "freiwilliger") {
@@ -2439,7 +2256,7 @@ export default function App() {
         <GemeindeDashboard
           user={user.data}
           stellen={stellen}
-          organisationen={gemeindeOrganisationen}
+          organisationen={derivedOrganisationen}
           inbox={adminInbox}
           onBack={goBack}
           logout={logout}
@@ -2450,7 +2267,7 @@ export default function App() {
       {screen === "admin-dashboard" && user?.type === "admin" && (
         <AdminDashboard
           gemeinden={[]}
-          organisationen={adminOrganisationen}
+          organisationen={derivedOrganisationen}
           freiwillige={[]}
           stellen={stellen}
           anfragen={adminInbox}
