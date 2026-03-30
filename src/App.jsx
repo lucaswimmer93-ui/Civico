@@ -194,9 +194,22 @@ function SetPasswordScreen({ onDone }) {
     const { error: updateError } = await supabase.auth.updateUser({ password });
     setLoading(false);
 
-    if (updateError) {
+        if (updateError) {
       setError(updateError.message || "Passwort konnte nicht gesetzt werden.");
-        if (checkingSession) {
+      return;
+    }
+
+        if (typeof window !== "undefined") {
+      sessionStorage.removeItem("civico_auth_flow");
+      window.history.replaceState({}, "", "/");
+    }
+    setMessage("Passwort erfolgreich gesetzt.");
+
+    setTimeout(() => {
+      onDone();
+    }, 1200);
+  };
+  if (checkingSession) {
     return (
       <div style={{ minHeight: "100vh", background: "linear-gradient(160deg, #1A1208 0%, #2C2416 60%, #3D3020 100%)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
         <div style={{ width: "100%", maxWidth: 460, background: "#F4F0E8", borderRadius: 24, padding: "36px 28px", boxShadow: "0 10px 30px rgba(0,0,0,0.18)", textAlign: "center" }}>
@@ -211,20 +224,7 @@ function SetPasswordScreen({ onDone }) {
       </div>
     );
   }
-      return;
-    }
-
-        if (typeof window !== "undefined") {
-      sessionStorage.removeItem("civico_auth_flow");
-      window.history.replaceState({}, "", "/");
-    }
-    setMessage("Passwort erfolgreich gesetzt.");
-
-    setTimeout(() => {
-      onDone();
-    }, 1200);
-  };
-
+  
   return (
     <div style={{ minHeight: "100vh", background: "linear-gradient(160deg, #1A1208 0%, #2C2416 60%, #3D3020 100%)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
       <div style={{ width: "100%", maxWidth: 460, background: "#F4F0E8", borderRadius: 24, padding: "36px 28px", boxShadow: "0 10px 30px rgba(0,0,0,0.18)" }}>
