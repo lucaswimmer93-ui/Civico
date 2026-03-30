@@ -132,21 +132,34 @@ function SetPasswordScreen({ onDone }) {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
-  useEffect(() => {
+    useEffect(() => {
     let active = true;
 
+    const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
     const checkSession = async () => {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+      let foundSession = null;
+
+      for (let i = 0; i < 10; i++) {
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+
+        if (!active) return;
+
+        if (session) {
+          foundSession = session;
+          break;
+        }
+
+        await wait(300);
+      }
 
       if (!active) return;
 
-      if (!session) {
-        if (typeof window !== "undefined") {
-          window.history.replaceState({}, "", "/");
-        }
-        onDone();
+      if (!foundSession) {
+        setError("Link ungültig oder Sitzung konnte nicht aufgebaut werden.");
+        setCheckingSession(false);
         return;
       }
 
@@ -158,7 +171,7 @@ function SetPasswordScreen({ onDone }) {
     return () => {
       active = false;
     };
-  }, [onDone]);
+  }, []);
 
   const handleSave = async () => {
     setError("");
@@ -168,8 +181,8 @@ function SetPasswordScreen({ onDone }) {
       setError("Bitte beide Passwortfelder ausfüllen.");
       return;
     }
-    if (password.length < 6) {
-      setError("Passwort muss mindestens 6 Zeichen haben.");
+    if (password.length < 8) {
+      setError("Passwort muss mindestens 8 Zeichen haben.");
       return;
     }
     if (password !== confirmPassword) {
@@ -183,6 +196,21 @@ function SetPasswordScreen({ onDone }) {
 
     if (updateError) {
       setError(updateError.message || "Passwort konnte nicht gesetzt werden.");
+        if (checkingSession) {
+    return (
+      <div style={{ minHeight: "100vh", background: "linear-gradient(160deg, #1A1208 0%, #2C2416 60%, #3D3020 100%)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+        <div style={{ width: "100%", maxWidth: 460, background: "#F4F0E8", borderRadius: 24, padding: "36px 28px", boxShadow: "0 10px 30px rgba(0,0,0,0.18)", textAlign: "center" }}>
+          <div style={{ fontSize: 48, marginBottom: 10 }}>🔄</div>
+          <div style={{ fontSize: 22, fontWeight: "bold", color: "#2C2416", marginBottom: 8 }}>
+            Einladung wird geprüft
+          </div>
+          <div style={{ fontSize: 14, color: "#8B7355", lineHeight: 1.6 }}>
+            Bitte kurz warten ...
+          </div>
+        </div>
+      </div>
+    );
+  }
       return;
     }
 
