@@ -493,7 +493,10 @@ export default function App() {
       console.log("Logout cleanup failed:", e);
     }
 
-    await supabase.auth.signOut();
+        await supabase.auth.signOut();
+    if (typeof window !== "undefined") {
+      sessionStorage.removeItem("civico_auth_flow");
+    }
     setUser(null);
     setHistory([]);
     setScreen("home");
@@ -817,14 +820,16 @@ export default function App() {
       return;
     }
 
-    // Flow-Lock hat Vorrang vor jeder normalen Session-Navigation
-    if (currentPath.startsWith("/set-password") || flowLock === "set-password") {
+        // Passwort-Seite direkt rendern
+    if (currentPath.startsWith("/set-password")) {
       setScreen("set-password");
-
-      if (
-        typeof window !== "undefined" &&
-        !currentPath.startsWith("/set-password")
-      ) {
+      return;
+    }
+              
+    // Flow-Lock NUR während Auth-Flow beachten
+    if (flowLock === "set-password" && currentPath.startsWith("/auth/")) {
+      setScreen("set-password");
+      if (typeof window !== "undefined") {
         window.location.replace("/set-password");
       }
       return;
@@ -1844,26 +1849,6 @@ export default function App() {
             onAgb={() => navigateTo("agb")}
             t={t}
           />
-          {!user && (
-            <button
-              onClick={openAdminDashboard}
-              style={{
-                position: "fixed",
-                right: 18,
-                bottom: 14,
-                background: "transparent",
-                border: "none",
-                color: "#8B7355",
-                fontSize: 11,
-                opacity: 0.65,
-                cursor: "pointer",
-                fontFamily: "inherit",
-                letterSpacing: 0.3,
-              }}
-            >
-              Admin
-            </button>
-          )}
         </div>
       )}
 
@@ -1914,6 +1899,9 @@ export default function App() {
       {screen === "login" && (
         <LoginScreen
           onLogin={(type, data, gid) => {
+                        if (typeof window !== "undefined") {
+              sessionStorage.removeItem("civico_auth_flow");
+            }
             setUser({ type, data });
             setGemeindeId(gid);
             loadStellen(gid);
