@@ -6,40 +6,36 @@ export default function AuthCallbackScreen() {
     const handleAuth = async () => {
       try {
         const url = new URL(window.location.href);
-
         const code = url.searchParams.get("code");
 
-        // 🔥 HASH auslesen (WICHTIG)
-        const hash = window.location.hash.replace("#", "");
+        const hash = window.location.hash.startsWith("#")
+          ? window.location.hash.slice(1)
+          : window.location.hash;
         const hashParams = new URLSearchParams(hash);
 
-        const access_token = hashParams.get("access_token");
-        const refresh_token = hashParams.get("refresh_token");
-        const type = hashParams.get("type"); // 🔥 HIER kommt recovery / invite
+        const accessToken = hashParams.get("access_token");
+        const refreshToken = hashParams.get("refresh_token");
+        const type = url.searchParams.get("type") || hashParams.get("type");
 
-        console.log("TYPE:", type);
-
-        // PKCE Flow
         if (code) {
           const { error } = await supabase.auth.exchangeCodeForSession(code);
           if (error) throw error;
         }
 
-        // HASH Flow
-        if (access_token && refresh_token) {
+        if (accessToken && refreshToken) {
           const { error } = await supabase.auth.setSession({
-            access_token,
-            refresh_token,
+            access_token: accessToken,
+            refresh_token: refreshToken,
           });
           if (error) throw error;
         }
 
-        // 🔥 ENTSCHEIDUNG
         if (type === "recovery" || type === "invite") {
           window.location.replace("/set-password");
-        } else {
-          window.location.replace("/");
+          return;
         }
+
+        window.location.replace("/");
       } catch (err) {
         console.error("Auth Fehler:", err);
         alert("Link ungültig oder abgelaufen");
@@ -50,5 +46,36 @@ export default function AuthCallbackScreen() {
     handleAuth();
   }, []);
 
-  return <div style={{ padding: 40 }}>Authentifizierung läuft...</div>;
+  return (
+    <div
+      style={{
+        minHeight: "100vh",
+        background: "linear-gradient(160deg, #1A1208 0%, #2C2416 60%, #3D3020 100%)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 20,
+      }}
+    >
+      <div
+        style={{
+          width: "100%",
+          maxWidth: 440,
+          background: "#F4F0E8",
+          borderRadius: 24,
+          padding: "36px 28px",
+          textAlign: "center",
+          boxShadow: "0 10px 30px rgba(0,0,0,0.18)",
+        }}
+      >
+        <div style={{ fontSize: 52, marginBottom: 12 }}>🔄</div>
+        <div style={{ fontSize: 24, fontWeight: "bold", color: "#2C2416", marginBottom: 10 }}>
+          Authentifizierung läuft
+        </div>
+        <div style={{ fontSize: 15, lineHeight: 1.6, color: "#8B7355" }}>
+          Bitte kurz warten ...
+        </div>
+      </div>
+    </div>
+  );
 }

@@ -5,6 +5,7 @@ export default function SetPasswordScreen({ email, name, onSubmit, onBack }) {
   const [passwordRepeat, setPasswordRepeat] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
 
   const handleSubmit = async () => {
     if (!password || !passwordRepeat) {
@@ -25,7 +26,9 @@ export default function SetPasswordScreen({ email, name, onSubmit, onBack }) {
     try {
       setLoading(true);
       setError('');
+      setSuccess('');
       await onSubmit(password);
+      setSuccess('Passwort erfolgreich gespeichert. Du kannst dich jetzt einloggen.');
     } catch (submitError) {
       console.log('Set password failed:', submitError);
       setError(submitError?.message || 'Passwort konnte nicht gespeichert werden.');
@@ -94,7 +97,7 @@ export default function SetPasswordScreen({ email, name, onSubmit, onBack }) {
             {name ? <div><strong>{name}</strong></div> : null}
             {email ? <div>{email}</div> : null}
             <div style={{ marginTop: 10 }}>
-              Lege jetzt dein Passwort fest. Danach landest du direkt im Gemeinde-Dashboard.
+              Lege jetzt dein Passwort fest. Danach landest du direkt im Login.
             </div>
           </div>
 
@@ -158,6 +161,21 @@ export default function SetPasswordScreen({ email, name, onSubmit, onBack }) {
               }}
             >
               {error}
+            </div>
+          )}
+
+          {success && (
+            <div
+              style={{
+                background: '#EAF8EC',
+                color: '#2C6B36',
+                borderRadius: 12,
+                padding: '12px 14px',
+                fontSize: 13,
+                marginBottom: 14,
+              }}
+            >
+              {success}
             </div>
           )}
 
