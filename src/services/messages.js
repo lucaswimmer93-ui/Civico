@@ -87,21 +87,26 @@ export async function getOrCreateVereinGemeindeThread(vereinId = null) {
     finalVereinId = actor.organizationId;
     finalGemeindeId = actor.data.gemeinde_id;
   } else if (actor.role === "gemeinde") {
-    const { data: verein, error: vereinError } = await supabase
-      .from("vereine")
-      .select("id, gemeinde_id")
-      .eq("id", vereinId)
-      .single();
 
-    if (vereinError) throw vereinError;
-    if (!verein) throw new Error("Verein nicht gefunden.");
+  if (!vereinId) {
+    throw new Error("vereinId fehlt");
+  }
 
-    if (verein.gemeinde_id !== actor.organizationId) {
-      throw new Error("Dieser Verein gehört nicht zu deiner Gemeinde.");
-    }
+  const { data: verein, error: vereinError } = await supabase
+    .from("vereine")
+    .select("id, gemeinde_id")
+    .eq("id", vereinId)
+    .maybeSingle();
 
-    finalGemeindeId = actor.organizationId;
-  } else if (actor.role === "admin") {
+  if (vereinError) throw vereinError;
+  if (!verein) throw new Error("Verein nicht gefunden.");
+
+  if (verein.gemeinde_id !== actor.organizationId) {
+    throw new Error("Dieser Verein gehört nicht zu deiner Gemeinde.");
+  }
+
+  finalGemeindeId = actor.organizationId;
+}else if (actor.role === "admin") {
     const { data: verein, error: vereinError } = await supabase
       .from("vereine")
       .select("id, gemeinde_id")
