@@ -41,6 +41,49 @@ import { Chip, SectionLabel, EmptyState, BottomBar, StelleCard, VereineListe } f
 
 
 const getInitialScreenFromPath = () => {
+  const detectAuthRedirectState = () => {
+  if (typeof window === "undefined") {
+    return {
+      pathname: "/",
+      code: null,
+      type: null,
+      accessToken: null,
+      refreshToken: null,
+      hasInviteOrRecoveryState: false,
+    };
+  }
+
+  const url = new URL(window.location.href);
+  const pathname = url.pathname || "/";
+  const code = url.searchParams.get("code");
+
+  const hash = window.location.hash.startsWith("#")
+    ? window.location.hash.slice(1)
+    : window.location.hash;
+
+  const hashParams = new URLSearchParams(hash);
+  const queryType = url.searchParams.get("type");
+  const hashType = hashParams.get("type");
+  const type = queryType || hashType;
+
+  const accessToken = hashParams.get("access_token");
+  const refreshToken = hashParams.get("refresh_token");
+
+  const hasInviteOrRecoveryState =
+    Boolean(code) ||
+    Boolean(accessToken && refreshToken) ||
+    type === "invite" ||
+    type === "recovery";
+
+  return {
+    pathname,
+    code,
+    type,
+    accessToken,
+    refreshToken,
+    hasInviteOrRecoveryState,
+  };
+};
   if (typeof window === "undefined") return "home";
   const path = window.location.pathname || "/";
   if (path === "/auth/callback") return "auth-callback";
@@ -191,7 +234,10 @@ function SetPasswordScreen({ onDone }) {
     }
 
     setLoading(true);
-    const { error: updateError } = await supabase.auth.updateUser({ password });
+    const { data: updateData, error: updateError } =
+  await supabase.auth.updateUser({ password });
+
+console.log("set-password updateUser:", { updateData, updateError });
     setLoading(false);
 
         if (updateError) {
@@ -804,7 +850,8 @@ export default function App() {
   };
 
     useEffect(() => {
-    const currentPath = typeof window !== "undefined" ? window.location.pathname : "/";
+        const authState = detectAuthRedirectState();
+    const currentPath = authState.pathname;
     const flowLock =
       typeof window !== "undefined"
         ? sessionStorage.getItem("civico_auth_flow")
@@ -815,21 +862,34 @@ export default function App() {
       setScreen("auth-callback");
       return;
     }
+
     if (currentPath.startsWith("/auth/confirmed")) {
       setScreen("auth-confirmed");
       return;
     }
 
-        // Passwort-Seite direkt rendern
+    // Invite / Recovery auch auf "/" oder anderen Routen erkennen
+    if (authState.hasInviteOrRecoveryState) {
+      if (typeof window !== "undefined") {
+        sessionStorage.setItem("civico_auth_flow", "set-password");
+      }
+      setScreen("auth-callback");
+      return;
+    }
+
+    // Passwort-Seite direkt rendern
     if (currentPath.startsWith("/set-password")) {
       setScreen("set-password");
       return;
     }
-              
-    // Flow-Lock NUR während Auth-Flow beachten
-    if (flowLock === "set-password" && currentPath.startsWith("/auth/")) {
+
+    // Wenn Lock aktiv ist, nie normal ins Dashboard
+    if (flowLock === "set-password") {
       setScreen("set-password");
-      if (typeof window !== "undefined") {
+      if (
+        typeof window !== "undefined" &&
+        !currentPath.startsWith("/set-password")
+      ) {
         window.location.replace("/set-password");
       }
       return;
