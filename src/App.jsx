@@ -52,43 +52,43 @@ const getInitialScreenFromPath = () => {
 function AuthCallbackScreen() {
   useEffect(() => {
     const handleAuth = async () => {
-      try {
-        const url = new URL(window.location.href);
-        const code = url.searchParams.get("code");
+  try {
+    const {
+      code,
+      accessToken,
+      refreshToken,
+      hasInviteOrRecoveryState,
+    } = detectAuthRedirectState();
 
-        const hash = window.location.hash.startsWith("#")
-          ? window.location.hash.slice(1)
-          : window.location.hash;
-        const hashParams = new URLSearchParams(hash);
+    if (!hasInviteOrRecoveryState) {
+      window.location.replace("/");
+      return;
+    }
 
-        const accessToken = hashParams.get("access_token");
-        const refreshToken = hashParams.get("refresh_token");
-        const type = url.searchParams.get("type") || hashParams.get("type");
+    if (code) {
+      const { error } = await supabase.auth.exchangeCodeForSession(code);
+      if (error) throw error;
+    }
 
-        if (code) {
-          const { error } = await supabase.auth.exchangeCodeForSession(code);
-          if (error) throw error;
-        }
+    if (accessToken && refreshToken) {
+      const { error } = await supabase.auth.setSession({
+        access_token: accessToken,
+        refresh_token: refreshToken,
+      });
+      if (error) throw error;
+    }
 
-        if (accessToken && refreshToken) {
-          const { error } = await supabase.auth.setSession({
-            access_token: accessToken,
-            refresh_token: refreshToken,
-          });
-          if (error) throw error;
-        }
-
-                        sessionStorage.setItem("civico_auth_flow", "set-password");
-        window.location.replace("/set-password");
-        return;
-      } catch (err) {
-        console.error("Auth callback error:", err);
-        if (typeof window !== "undefined") {
-          window.alert("Link ungültig oder abgelaufen.");
-          window.location.replace("/");
-        }
-      }
-    };
+    sessionStorage.setItem("civico_auth_flow", "set-password");
+    window.location.replace("/set-password");
+    return;
+  } catch (err) {
+    console.error("Auth callback error:", err);
+    if (typeof window !== "undefined") {
+      window.alert("Link ungültig oder abgelaufen.");
+      window.location.replace("/");
+    }
+  }
+};
 
     handleAuth();
   }, []);
