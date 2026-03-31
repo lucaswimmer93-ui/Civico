@@ -1,4 +1,4 @@
-import { supabase } from "../lib/supabase";
+import { supabase } from "../lib/supabaseclient";
 
 /**
  * Hilfsfunktion: Rolle des aktuellen Users bestimmen
