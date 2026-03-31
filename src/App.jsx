@@ -39,9 +39,7 @@ import GemeindeDashboard from './screens/GemeindeDashboard';
 import AdminDashboard from './screens/AdminDashboard';
 import { Chip, SectionLabel, EmptyState, BottomBar, StelleCard, VereineListe } from './components/ui';
 
-
-const getInitialScreenFromPath = () => {
-  const detectAuthRedirectState = () => {
+const detectAuthRedirectState = () => {
   if (typeof window === "undefined") {
     return {
       pathname: "/",
@@ -84,6 +82,8 @@ const getInitialScreenFromPath = () => {
     hasInviteOrRecoveryState,
   };
 };
+
+const getInitialScreenFromPath = () => {
   if (typeof window === "undefined") return "home";
   const path = window.location.pathname || "/";
   if (path === "/auth/callback") return "auth-callback";
