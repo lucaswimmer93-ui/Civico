@@ -64,6 +64,80 @@ export default function GemeindeDashboard({
     0
   );
 
+  const dashboardKpis = useMemo(() => {
+    const now = new Date();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+
+    const einsaetzeDiesenMonat = gemeindeStellen.reduce((sum, stelle) => {
+      const termineImMonat = (stelle.termine || []).filter((termin) => {
+        if (!termin?.datum) return false;
+        const d = new Date(termin.datum);
+        return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+      });
+      return sum + termineImMonat.length;
+    }, 0);
+
+    const helperSet = new Set();
+    gemeindeStellen.forEach((stelle) => {
+      (stelle.termine || []).forEach((termin) => {
+        (termin.bewerbungen || []).forEach((bewerbung) => {
+          const key =
+            bewerbung?.freiwilliger_id ||
+            bewerbung?.freiwilliger_email ||
+            bewerbung?.email;
+          if (key) helperSet.add(key);
+        });
+      });
+    });
+
+    let angemeldetVergangen = 0;
+    let erschienenVergangen = 0;
+
+    gemeindeStellen.forEach((stelle) => {
+      (stelle.termine || []).forEach((termin) => {
+        if (!termin?.datum) return;
+
+        const terminEnde = new Date(
+          `${termin.datum}T${termin.endzeit || termin.startzeit || '23:59'}`
+        );
+
+        if (terminEnde > now) return;
+
+        const bewerbungen = termin.bewerbungen || [];
+        angemeldetVergangen += bewerbungen.length;
+        erschienenVergangen += bewerbungen.filter((bewerbung) => bewerbung?.bestaetigt === true).length;
+      });
+    });
+
+    const verlässlichkeit =
+      angemeldetVergangen > 0
+        ? Math.round((erschienenVergangen / angemeldetVergangen) * 100)
+        : null;
+
+    const vereinsRanking = {};
+    gemeindeStellen.forEach((stelle) => {
+      const vereinName =
+        stelle?.vereine?.name ||
+        stelle?.verein_name ||
+        (stelle?.created_by_type === 'gemeinde' ? 'Gemeinde' : null);
+
+      if (!vereinName) return;
+
+      vereinsRanking[vereinName] = (vereinsRanking[vereinName] || 0) + (stelle.termine?.length || 0);
+    });
+
+    const aktivsterVerein = Object.entries(vereinsRanking).sort((a, b) => b[1] - a[1])[0] || null;
+
+    return {
+      einsaetzeDiesenMonat,
+      engagierteHelfer: helperSet.size,
+      verlässlichkeit,
+      aktivsterVereinName: aktivsterVerein?.[0] || null,
+      aktivsterVereinWert: aktivsterVerein?.[1] || 0,
+    };
+  }, [gemeindeStellen]);
+
   const handleSave = () => {
     const payload = {
       ...form,
@@ -209,18 +283,75 @@ export default function GemeindeDashboard({
 
       {tab === 'dashboard' && (
         <div style={{ padding:'0 16px 24px' }}>
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
-            {[
-              ['Organisationen', organisationen.length],
-              ['Eigene Stellen', gemeindeStellen.length],
-              ['Anmeldungen', totalBewerbungen],
-              ['Support', inbox.length],
-            ].map(([label, value]) => (
-              <div key={label} style={{ background:'#FAF7F2', borderRadius:18, padding:18, border:'1px solid #E6D9C2' }}>
-                <div style={{ color:'#8B7355', fontSize:12, marginBottom:8 }}>{label}</div>
-                <div style={{ fontSize:28, fontWeight:700, color:'#2C2416' }}>{value}</div>
+          <div
+            style={{
+              background:'#FAF7F2',
+              borderRadius:20,
+              padding:18,
+              border:'1px solid #E6D9C2',
+              marginBottom:14
+            }}
+          >
+            <div style={{ fontSize:20, fontWeight:700, color:'#2C2416', marginBottom:6 }}>
+              Wirkung auf einen Blick
+            </div>
+            <div style={{ fontSize:13, color:'#8B7355', lineHeight:1.6 }}>
+              Hier sehen Sie auf einen Blick, wie viel Engagement in Ihrer Gemeinde aktuell zusammenkommt.
+            </div>
+          </div>
+
+          <div
+            style={{
+              display:'grid',
+              gridTemplateColumns:'repeat(auto-fit, minmax(220px, 1fr))',
+              gap:12,
+              marginBottom:14
+            }}
+          >
+            <div style={{ background:'#FAF7F2', borderRadius:18, padding:18, border:'1px solid #E6D9C2' }}>
+              <div style={{ fontSize:34, fontWeight:700, color:'#2C2416', marginBottom:6 }}>
+                {dashboardKpis.einsaetzeDiesenMonat}
               </div>
-            ))}
+              <div style={{ color:'#2C2416', fontSize:15, fontWeight:700, marginBottom:4 }}>Einsätze</div>
+              <div style={{ color:'#8B7355', fontSize:12 }}>diesen Monat</div>
+            </div>
+
+            <div style={{ background:'#FAF7F2', borderRadius:18, padding:18, border:'1px solid #E6D9C2' }}>
+              <div style={{ fontSize:34, fontWeight:700, color:'#2C2416', marginBottom:6 }}>
+                {dashboardKpis.engagierteHelfer}
+              </div>
+              <div style={{ color:'#2C2416', fontSize:15, fontWeight:700, marginBottom:4 }}>Engagierte Helfer</div>
+              <div style={{ color:'#8B7355', fontSize:12 }}>haben sich beteiligt</div>
+            </div>
+
+            <div style={{ background:'#FAF7F2', borderRadius:18, padding:18, border:'1px solid #E6D9C2' }}>
+              <div style={{ fontSize:34, fontWeight:700, color:'#2C2416', marginBottom:6 }}>
+                {dashboardKpis.verlässlichkeit === null ? '–' : `${dashboardKpis.verlässlichkeit} %`}
+              </div>
+              <div style={{ color:'#2C2416', fontSize:15, fontWeight:700, marginBottom:4 }}>Verlässlichkeit</div>
+              <div style={{ color:'#8B7355', fontSize:12 }}>
+                {dashboardKpis.verlässlichkeit === null ? 'noch nicht genug Daten' : 'sind erschienen'}
+              </div>
+            </div>
+
+            <div style={{ background:'#FAF7F2', borderRadius:18, padding:18, border:'1px solid #E6D9C2' }}>
+              <div style={{ fontSize:24, fontWeight:700, color:'#2C2416', marginBottom:6, lineHeight:1.25 }}>
+                {dashboardKpis.aktivsterVereinName || '–'}
+              </div>
+              <div style={{ color:'#2C2416', fontSize:15, fontWeight:700, marginBottom:4 }}>Aktivster Verein</div>
+              <div style={{ color:'#8B7355', fontSize:12 }}>
+                {dashboardKpis.aktivsterVereinName
+                  ? `${dashboardKpis.aktivsterVereinWert} Einsatz${dashboardKpis.aktivsterVereinWert === 1 ? '' : 'e'} im System`
+                  : 'noch keine Auswertung möglich'}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ background:'#FAF7F2', borderRadius:18, padding:18, border:'1px solid #E6D9C2' }}>
+            <div style={{ fontSize:15, fontWeight:700, color:'#2C2416', marginBottom:6 }}>Nächster Schritt</div>
+            <div style={{ color:'#8B7355', fontSize:13, lineHeight:1.6 }}>
+              Für die detaillierte Entwicklung, Teilnahmequoten und Vereinsaktivität steht der CSR-Bereich bereit.
+            </div>
           </div>
         </div>
       )}
