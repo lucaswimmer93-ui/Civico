@@ -1391,6 +1391,17 @@ export default function App() {
   };
   const handleGemeindeStelleSpeichern = async (payload) => {
     try {
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      const { data: userData, error: userError } = await supabase.auth.getUser();
+
+      console.log("DEBUG BUILD MARKER: APP INSERT VERSION 2");
+      console.log("SESSION CHECK:", {
+        sessionError,
+        userError,
+        session: sessionData?.session,
+        user: userData?.user,
+      });
+
       const aufwandFormatted =
         payload.typ === "dauerhaft" && payload.aufwand
           ? `${payload.aufwand}h / Woche`
