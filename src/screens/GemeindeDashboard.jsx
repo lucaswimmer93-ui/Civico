@@ -86,6 +86,10 @@ export default function GemeindeDashboard({
   const [supportThreadId, setSupportThreadId] = useState(null);
   const [supportLoading, setSupportLoading] = useState(false);
   const [supportError, setSupportError] = useState('');
+  const [verschiebeTermin, setVerschiebeTermin] = useState(null);
+  const [neuesDatum, setNeuesDatum] = useState('');
+  const [neueStartzeit, setNeueStartzeit] = useState('');
+  const [neueEndzeit, setNeueEndzeit] = useState('');
 
   useEffect(() => {
     setSettingsForm({
@@ -118,6 +122,10 @@ export default function GemeindeDashboard({
   );
 
   const handleHeaderBack = () => {
+    if (verschiebeTermin) {
+      closeTerminVerschieben();
+      return;
+    }
     if (tab === 'stellen-detail' || tab === 'stellen-bearbeiten') {
       setTab('stellen');
       return;
@@ -308,6 +316,20 @@ export default function GemeindeDashboard({
     }
   };
 
+  const openTerminVerschieben = (termin) => {
+    setVerschiebeTermin(termin);
+    setNeuesDatum(termin?.datum || '');
+    setNeueStartzeit(termin?.startzeit || '');
+    setNeueEndzeit(termin?.endzeit || '');
+  };
+
+  const closeTerminVerschieben = () => {
+    setVerschiebeTermin(null);
+    setNeuesDatum('');
+    setNeueStartzeit('');
+    setNeueEndzeit('');
+  };
+
   const handleTerminAbsagen = async (terminId) => {
     try {
       setDetailActionLoading(true);
@@ -337,6 +359,7 @@ export default function GemeindeDashboard({
       if (error) throw error;
 
       showToast?.('✓ Termin verschoben!');
+      closeTerminVerschieben();
       await refreshStellen();
     } catch (err) {
       console.error(err);
@@ -575,13 +598,7 @@ export default function GemeindeDashboard({
                     <div style={{ display:'flex', gap:8, marginBottom:12 }}>
                       <button
                         disabled={detailActionLoading}
-                        onClick={() => {
-                          const neuesDatum = window.prompt('Neues Datum (YYYY-MM-DD):', termin.datum || '');
-                          if (!neuesDatum) return;
-                          const neueStartzeit = window.prompt('Neue Startzeit (HH:MM):', termin.startzeit || '') || '';
-                          const neueEndzeit = window.prompt('Neue Endzeit (optional HH:MM):', termin.endzeit || '') || '';
-                          handleTerminVerschieben(termin.id, neuesDatum, neueStartzeit, neueEndzeit);
-                        }}
+                        onClick={() => openTerminVerschieben(termin)}
                         style={{ flex:1, padding:'8px 10px', borderRadius:10, border:'1px solid #5B9BD5', background:'transparent', color:'#5B9BD5', fontSize:12, cursor:'pointer', fontFamily:'inherit' }}
                       >
                         📅 Verschieben
@@ -1259,6 +1276,136 @@ export default function GemeindeDashboard({
             <BigButton onClick={handlePasswordSave}>
               {passwordLoading ? 'Speichern...' : 'Passwort ändern'}
             </BigButton>
+          </div>
+        </div>
+      )}
+      {verschiebeTermin && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.5)',
+            display: 'flex',
+            alignItems: 'flex-end',
+            justifyContent: 'center',
+            zIndex: 200,
+          }}
+        >
+          <div
+            style={{
+              background: '#F4F0E8',
+              borderRadius: '20px 20px 0 0',
+              padding: '24px 20px 40px',
+              width: '100%',
+              maxWidth: 520,
+              boxSizing: 'border-box',
+            }}
+          >
+            <div style={{ fontSize: 18, fontWeight: 700, color: '#2C2416', marginBottom: 4 }}>
+              📅 Termin verschieben
+            </div>
+            <div style={{ fontSize: 12, color: '#8B7355', marginBottom: 16 }}>
+              Datum und Uhrzeit anpassen. Angemeldete können danach informiert werden.
+            </div>
+
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 12, color: '#8B7355', marginBottom: 6 }}>NEUES DATUM</div>
+              <input
+                type="date"
+                value={neuesDatum}
+                onChange={(e) => setNeuesDatum(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  borderRadius: 10,
+                  border: '1px solid #E0D8C8',
+                  background: '#FAF7F2',
+                  fontFamily: 'inherit',
+                  fontSize: 14,
+                  color: '#2C2416',
+                  boxSizing: 'border-box',
+                }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 12, color: '#8B7355', marginBottom: 6 }}>STARTZEIT</div>
+                <input
+                  type="time"
+                  value={neueStartzeit}
+                  onChange={(e) => setNeueStartzeit(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: 10,
+                    border: '1px solid #E0D8C8',
+                    background: '#FAF7F2',
+                    fontFamily: 'inherit',
+                    fontSize: 14,
+                    color: '#2C2416',
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 12, color: '#8B7355', marginBottom: 6 }}>ENDZEIT</div>
+                <input
+                  type="time"
+                  value={neueEndzeit}
+                  onChange={(e) => setNeueEndzeit(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: 10,
+                    border: '1px solid #E0D8C8',
+                    background: '#FAF7F2',
+                    fontFamily: 'inherit',
+                    fontSize: 14,
+                    color: '#2C2416',
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                onClick={closeTerminVerschieben}
+                style={{
+                  flex: 1,
+                  padding: '12px',
+                  borderRadius: 12,
+                  border: '1px solid #E0D8C8',
+                  background: 'transparent',
+                  color: '#8B7355',
+                  fontSize: 14,
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                }}
+              >
+                Abbrechen
+              </button>
+              <button
+                disabled={detailActionLoading || !neuesDatum}
+                onClick={() => handleTerminVerschieben(verschiebeTermin.id, neuesDatum, neueStartzeit, neueEndzeit)}
+                style={{
+                  flex: 2,
+                  padding: '12px',
+                  borderRadius: 12,
+                  border: 'none',
+                  background: '#3A7D44',
+                  color: '#fff',
+                  fontSize: 14,
+                  cursor: detailActionLoading || !neuesDatum ? 'default' : 'pointer',
+                  fontFamily: 'inherit',
+                  fontWeight: 'bold',
+                  opacity: detailActionLoading || !neuesDatum ? 0.7 : 1,
+                }}
+              >
+                {detailActionLoading ? 'Speichern...' : '✓ Verschieben'}
+              </button>
+            </div>
           </div>
         </div>
       )}
