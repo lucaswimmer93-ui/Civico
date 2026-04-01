@@ -21,6 +21,84 @@ function StatCard({ label, value, sub }) {
   );
 }
 
+const firstItem = (value) => (Array.isArray(value) ? value[0] : value || null);
+
+const pickFirst = (...values) => {
+  for (const value of values) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+    if (value !== undefined && value !== null && value !== '') return value;
+  }
+  return '';
+};
+
+const normalizeSupportThread = (thread) => {
+  const vereinSource = firstItem(thread?.verein) || firstItem(thread?.vereine);
+  const gemeindeSource = firstItem(thread?.gemeinde) || firstItem(thread?.gemeinden);
+
+  const vereinName = pickFirst(
+    vereinSource?.name,
+    thread?.verein_name,
+    thread?.vereinsname,
+    thread?.organisation_name,
+    thread?.name
+  );
+  const vereinEmail = pickFirst(
+    vereinSource?.kontakt_email,
+    vereinSource?.email,
+    thread?.verein_email,
+    thread?.kontakt_email,
+    thread?.organisation_email,
+    thread?.email
+  );
+
+  const gemeindeName = pickFirst(
+    gemeindeSource?.name,
+    thread?.gemeinde_name,
+    thread?.organisation_name,
+    thread?.name
+  );
+  const gemeindeEmail = pickFirst(
+    gemeindeSource?.email,
+    thread?.gemeinde_email,
+    thread?.kontakt_email,
+    thread?.organisation_email,
+    thread?.email
+  );
+
+  const detectedType = pickFirst(
+    thread?.organisation_type,
+    thread?.sender_type,
+    thread?.thread_type === 'support_verein' ? 'verein' : '',
+    thread?.thread_type === 'support_gemeinde' ? 'gemeinde' : ''
+  );
+
+  const hasVereinData = Boolean(vereinName || vereinEmail || thread?.verein_id || vereinSource);
+  const hasGemeindeData = Boolean(gemeindeName || gemeindeEmail || thread?.gemeinde_id || gemeindeSource);
+
+  let type = 'gemeinde';
+  if (detectedType === 'verein' || hasVereinData) type = 'verein';
+  else if (detectedType === 'gemeinde' || hasGemeindeData) type = 'gemeinde';
+
+  const organisation = type === 'verein'
+    ? {
+        type: 'verein',
+        id: pickFirst(vereinSource?.id, thread?.verein_id, thread?.organisation_id) || null,
+        name: pickFirst(vereinName, 'Verein'),
+        email: pickFirst(vereinEmail, ''),
+      }
+    : {
+        type: 'gemeinde',
+        id: pickFirst(gemeindeSource?.id, thread?.gemeinde_id, thread?.organisation_id) || null,
+        name: pickFirst(gemeindeName, 'Gemeinde'),
+        email: pickFirst(gemeindeEmail, ''),
+      };
+
+  return {
+    ...thread,
+    organisation,
+  }; 
+};
+
 export default function AdminDashboard({ onBack, logout }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -112,10 +190,18 @@ export default function AdminDashboard({ onBack, logout }) {
 
       setSupportThreads(normalized);
 
-      if (normalized.length > 0 && !selectedThread) {
-        const first = normalized[0];
-        setSelectedThread(first);
-        setSelectedOrganisation(first.organisation || null);
+      if (normalized.length > 0) {
+        const currentSelectedId = selectedThread?.id;
+        const selectedMatch = currentSelectedId
+          ? normalized.find((thread) => thread.id === currentSelectedId)
+          : null;
+        const nextThread = selectedMatch || normalized[0];
+
+        setSelectedThread(nextThread);
+        setSelectedOrganisation(nextThread.organisation || null);
+      } else {
+        setSelectedThread(null);
+        setSelectedOrganisation(null);
       }
     } catch (err) {
       console.error('Fehler beim Laden der Support-Threads:', err);
@@ -240,53 +326,6 @@ export default function AdminDashboard({ onBack, logout }) {
     fontFamily: 'inherit',
     fontWeight: 700,
   });
-
-
-  const normalizeSupportThread = (thread) => {
-    const vereinSource = Array.isArray(thread?.verein) ? thread.verein[0] : thread?.verein;
-    const gemeindeSource = Array.isArray(thread?.gemeinde) ? thread.gemeinde[0] : thread?.gemeinde;
-
-    const vereinName = vereinSource?.name || thread?.verein_name || thread?.verein?.name;
-    const vereinEmail = vereinSource?.email || thread?.verein_email || thread?.verein?.email;
-    const gemeindeName = gemeindeSource?.name || thread?.gemeinde_name || thread?.gemeinde?.name;
-    const gemeindeEmail = gemeindeSource?.email || thread?.gemeinde_email || thread?.gemeinde?.email;
-
-    if (vereinName || vereinEmail || thread?.verein_id) {
-      return {
-        ...thread,
-        organisation: {
-          type: 'verein',
-          id: vereinSource?.id || thread?.verein_id || null,
-          name: vereinName || 'Verein',
-          email: vereinEmail || '',
-        },
-      };
-    }
-
-    if (gemeindeName || gemeindeEmail || thread?.gemeinde_id) {
-      return {
-        ...thread,
-        organisation: {
-          type: 'gemeinde',
-          id: gemeindeSource?.id || thread?.gemeinde_id || null,
-          name: gemeindeName || 'Gemeinde',
-          email: gemeindeEmail || '',
-        },
-      };
-    }
-
-    const fallbackType = thread?.organisation_type === 'verein' ? 'verein' : 'gemeinde';
-
-    return {
-      ...thread,
-      organisation: {
-        type: fallbackType,
-        id: thread?.organisation_id || null,
-        name: thread?.organisation_name || (fallbackType === 'verein' ? 'Verein' : 'Gemeinde'),
-        email: thread?.organisation_email || '',
-      },
-    };
-  };
 
   return (
     <div>
