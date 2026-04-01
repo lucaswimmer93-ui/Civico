@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import MeineGemeindePanel from './components/messages/MeineGemeindePanel';
 import {
   supabase,
   T,
@@ -2174,6 +2175,7 @@ export default function App() {
             onNeu={() => navigateTo("stelle-erstellen")}
             onProfil={() => navigateTo("verein-profil-eigen")}
             onAnalyse={() => navigateTo("analyse")}
+            onMeineGemeinde={() => navigateTo("verein-gemeinde")}
             logout={logout}
             showToast={showToast}
             followers={vereinFollowers}
@@ -2505,6 +2507,10 @@ export default function App() {
           logout={logout}
         />
       )}
+
+      {screen === "verein-gemeinde" && user?.type === "verein" && (
+  <MeineGemeindePanel />
+)}
 
 
       {screen === "gemeinde-dashboard" && user?.type === "gemeinde" && (
