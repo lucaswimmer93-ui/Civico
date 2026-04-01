@@ -307,6 +307,12 @@ console.log("set-password updateUser:", { updateData, updateError });
   );
 }
 
+const isBewerbungErschienen = (bewerbung) =>
+  bewerbung?.status === 'erschienen' || Boolean(bewerbung?.bestaetigt);
+
+const isBewerbungNoShow = (bewerbung) =>
+  bewerbung?.status === 'no_show' || Boolean(bewerbung?.nicht_erschienen);
+
 export default function App() {
   const [lang, setLang] = useState("de");
   const t = T[lang];
@@ -1351,7 +1357,12 @@ export default function App() {
       .single();
     await supabase
       .from("bewerbungen")
-      .update({ bestaetigt: erschienen, nicht_erschienen: !erschienen })
+      .update({
+      bestaetigt: erschienen,
+      nicht_erschienen: !erschienen,
+      status: erschienen ? 'erschienen' : 'no_show',
+      attendance_checked_at: new Date().toISOString(),
+    })
       .eq("id", bewId);
     if (bew) {
       const { data: fw } = await supabase
@@ -2294,13 +2305,13 @@ export default function App() {
             );
             const erschienen = (selected.termine || []).reduce(
               (s, t) =>
-                s + (t.bewerbungen || []).filter((b) => b.bestaetigt).length,
+                s + (t.bewerbungen || []).filter((b) => isBewerbungErschienen(b)).length,
               0
             );
             const nichtErschienen = (selected.termine || []).reduce(
               (s, t) =>
                 s +
-                (t.bewerbungen || []).filter((b) => b.nicht_erschienen).length,
+                (t.bewerbungen || []).filter((b) => isBewerbungNoShow(b)).length,
               0
             );
             await supabase
