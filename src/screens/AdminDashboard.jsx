@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../core/shared';
 import { Header, Input, SectionLabel, EmptyState } from '../components/ui';
-import MessageThreadView from '../components/MessageThread';
+import MessageThreadView from '../components/messages/MessageThreadView';
 import { getAdminSupportThreads } from '../services/messages';
 
 const cardStyle = {
