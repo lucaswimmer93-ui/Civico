@@ -1391,74 +1391,36 @@ export default function App() {
   };
   const handleGemeindeStelleSpeichern = async (payload) => {
     try {
-      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-      const { data: userData, error: userError } = await supabase.auth.getUser();
-
-      console.log("DEBUG BUILD MARKER: APP INSERT VERSION 2");
-      console.log("SESSION CHECK:", {
-        sessionError,
-        userError,
-        session: sessionData?.session,
-        user: userData?.user,
-      });
-
-      const aufwandFormatted =
-        payload.typ === "dauerhaft" && payload.aufwand
-          ? `${payload.aufwand}h / Woche`
-          : "";
-
-      const insertPayload = {
-        titel: payload.titel,
-        beschreibung: payload.beschreibung,
-        kategorie: payload.kategorie,
-        typ: payload.typ || "event",
-        aufwand: aufwandFormatted,
-        ort: payload.standort,
-        plz: payload.plz || user?.data?.plz || "",
-        standort: payload.standort,
-        ansprechpartner: payload.ansprechpartner || null,
-        kontakt_email: payload.kontakt_email || null,
-        dringend: Boolean(payload.dringend),
-        verein_id: null,
-        gemeinde_id: payload.gemeinde_id || user?.data?.id || gemeindeId,
-        created_by_type: "gemeinde",
-        archiviert: false,
-      };
-
-      const { data: insertedRows, error: stelleError } = await supabase
+      const { data: stelle } = await supabase
         .from("stellen")
-        .insert(insertPayload)
-        .select("id")
-        .limit(1);
+        .insert({
+          titel: payload.titel,
+          beschreibung: payload.beschreibung,
+          kategorie: payload.kategorie,
+          ort: payload.standort,
+          treffpunkt: payload.standort,
+          verein_id: null,
+          gemeinde_id: gemeindeId || user?.data?.id || payload.gemeinde_id,
+          created_by_type: "gemeinde",
+          archiviert: false,
+        })
+        .select()
+        .single();
 
-      console.log("INSERT OHNE SELECT TEST:", { insertPayload, insertedRows, stelleError });
-
-      if (stelleError) {
-        throw stelleError;
+      if (stelle && payload.termine?.length) {
+        await supabase.from("termine").insert(
+          payload.termine
+            .filter((t) => t.datum)
+            .map((t) => ({
+              stelle_id: stelle.id,
+              datum: t.datum,
+              startzeit: t.startzeit,
+              endzeit: t.endzeit || null,
+              freie_plaetze: t.plaetze || 5,
+              gesamt_plaetze: t.plaetze || 5,
+            }))
+        );
       }
-
-      const neueStelleId = insertedRows?.[0]?.id;
-
-      if (neueStelleId && payload.termine?.length) {
-        const terminPayload = payload.termine
-          .filter((t) => t.datum)
-          .map((t) => ({
-            stelle_id: neueStelleId,
-            datum: t.datum,
-            startzeit: t.startzeit,
-            endzeit: t.endzeit || null,
-            freie_plaetze: t.plaetze || 5,
-            gesamt_plaetze: t.plaetze || 5,
-          }));
-
-        const { error: terminError } = await supabase.from("termine").insert(terminPayload);
-        console.log("TERMINE INSERT TEST:", { neueStelleId, terminPayload, terminError });
-
-        if (terminError) {
-          throw terminError;
-        }
-      }
-
       showToast("✓ Gemeinde-Stelle gespeichert!");
       await loadStellen(gemeindeId || user?.data?.id);
     } catch (err) {
