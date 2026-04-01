@@ -397,6 +397,7 @@ const tabButtonStyle = (isActive) => ({
       </div>
           </>
   )}
+        
         {activeTab === 'support' && (
   <div style={{ display: 'grid', gridTemplateColumns: '360px 1fr', gap: 18 }}>
     
