@@ -1396,71 +1396,47 @@ export default function App() {
           ? `${payload.aufwand}h / Woche`
           : "";
 
-      const insertPayload = {
-        titel: payload.titel,
-        beschreibung: payload.beschreibung,
-        kategorie: payload.kategorie,
-        typ: payload.typ || "event",
-        aufwand: aufwandFormatted,
-        ort: payload.standort || user?.data?.ort || null,
-        plz: payload.plz || user?.data?.plz || "",
-        treffpunkt: payload.standort || null,
-        standort: payload.standort || null,
-        ansprechpartner: payload.ansprechpartner || null,
-        kontakt_email: payload.kontakt_email || null,
-        dringend: Boolean(payload.dringend),
-        verein_id: null,
-        gemeinde_id: payload.gemeinde_id || user?.data?.id || gemeindeId,
-        created_by_type: "gemeinde",
-        archiviert: false,
-      };
-
-      const { data: stelle, error: stelleError } = await supabase
+      const { data: stelle } = await supabase
         .from("stellen")
-        .insert(insertPayload)
+        .insert({
+          titel: payload.titel,
+          beschreibung: payload.beschreibung,
+          kategorie: payload.kategorie,
+          typ: payload.typ || "event",
+          aufwand: aufwandFormatted,
+          ort: payload.standort,
+          plz: payload.plz || user?.data?.plz || "",
+          standort: payload.standort,
+          ansprechpartner: payload.ansprechpartner || null,
+          kontakt_email: payload.kontakt_email || null,
+          dringend: Boolean(payload.dringend),
+          verein_id: null,
+          gemeinde_id: payload.gemeinde_id || user?.data?.id || gemeindeId,
+          created_by_type: "gemeinde",
+          archiviert: false,
+        })
         .select()
         .single();
 
-      console.log("GEMEINDE STELLE INSERT:", { insertPayload, stelle, stelleError });
-
-      if (stelleError) {
-        throw stelleError;
+      if (stelle && payload.termine?.length) {
+        await supabase.from("termine").insert(
+          payload.termine
+            .filter((t) => t.datum)
+            .map((t) => ({
+              stelle_id: stelle.id,
+              datum: t.datum,
+              startzeit: t.startzeit,
+              endzeit: t.endzeit || null,
+              freie_plaetze: t.plaetze || 5,
+              gesamt_plaetze: t.plaetze || 5,
+            }))
+        );
       }
-
-      if (!stelle?.id) {
-        throw new Error("Stelle konnte nicht erstellt werden.");
-      }
-
-      if (payload.termine?.length) {
-        const terminePayload = payload.termine
-          .filter((t) => t.datum)
-          .map((t) => ({
-            stelle_id: stelle.id,
-            datum: t.datum,
-            startzeit: t.startzeit,
-            endzeit: t.endzeit || null,
-            freie_plaetze: t.plaetze || 5,
-            gesamt_plaetze: t.plaetze || 5,
-          }));
-
-        if (terminePayload.length > 0) {
-          const { error: termineError } = await supabase
-            .from("termine")
-            .insert(terminePayload);
-
-          console.log("GEMEINDE TERMINE INSERT:", { terminePayload, termineError });
-
-          if (termineError) {
-            throw termineError;
-          }
-        }
-      }
-
       showToast("✓ Gemeinde-Stelle gespeichert!");
       await loadStellen(gemeindeId || user?.data?.id);
     } catch (err) {
-      console.error("Gemeinde-Stelle speichern fehlgeschlagen:", err);
-      showToast(`Fehler beim Speichern: ${err.message || "Unbekannter Fehler"}`, "#E85C5C");
+      console.error(err);
+      showToast("Fehler beim Speichern.", "#E85C5C");
     }
   };
 
@@ -2357,60 +2333,29 @@ export default function App() {
           verein={user.data}
           onBack={goBack}
           onSave={async (stelleData, termineData) => {
-            try {
-              const insertPayload = {
-                ...stelleData,
-                verein_id: user.data.id,
-                gemeinde_id: user.data.gemeinde_id,
-                archiviert: false,
-                aufrufe: 0,
-              };
-
-              const { data: stelle, error: stelleError } = await supabase
-                .from("stellen")
-                .insert(insertPayload)
-                .select()
-                .single();
-
-              console.log("VEREIN STELLE INSERT:", { insertPayload, stelle, stelleError });
-
-              if (stelleError) {
-                throw stelleError;
-              }
-
-              if (!stelle?.id) {
-                throw new Error("Stelle konnte nicht erstellt werden.");
-              }
-
-              if (termineData.length > 0) {
-                const terminePayload = termineData.map((t) => ({ ...t, stelle_id: stelle.id }));
-                const { error: termineError } = await supabase
-                  .from("termine")
-                  .insert(terminePayload);
-
-                console.log("VEREIN TERMINE INSERT:", { terminePayload, termineError });
-
-                if (termineError) {
-                  throw termineError;
-                }
-              }
-
-              showToast("✓ Stelle veröffentlicht!");
-              await sendVolunteerPush({
-                gemeindeId: user.data.gemeinde_id,
-                notificationType: "neue_stellen",
-                vereinId: user.data.id,
-                kategorie: stelleData.kategorie,
-                title: "Neue Ehrenamtsstelle! 🌱",
-                body: `${user.data.name} sucht Freiwillige`,
-                url: "/",
-              });
-              await loadStellen(gemeindeId);
-              goBack();
-            } catch (err) {
-              console.error("Verein-Stelle speichern fehlgeschlagen:", err);
-              showToast(`Fehler beim Speichern: ${err.message || "Unbekannter Fehler"}`, "#E85C5C");
-            }
+            const { data: stelle } = await supabase
+              .from("stellen")
+              .insert({ ...stelleData, verein_id: user.data.id, aufrufe: 0 })
+              .select()
+              .single();
+            if (stelle && termineData.length > 0)
+              await supabase
+                .from("termine")
+                .insert(
+                  termineData.map((t) => ({ ...t, stelle_id: stelle.id }))
+                );
+            showToast("✓ Stelle veröffentlicht!");
+            await sendVolunteerPush({
+              gemeindeId: user.data.gemeinde_id,
+              notificationType: "neue_stellen",
+              vereinId: user.data.id,
+              kategorie: stelleData.kategorie,
+              title: "Neue Ehrenamtsstelle! 🌱",
+              body: `${user.data.name} sucht Freiwillige`,
+              url: "/",
+            });
+            await loadStellen(gemeindeId);
+            goBack();
           }}
         />
       )}
