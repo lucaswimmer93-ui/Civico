@@ -259,6 +259,22 @@ function VereinDashboard({
           >
             📊 Analyse
           </button>
+          <button
+            onClick={onMeineGemeinde}
+            style={{
+              flex: 1,
+              padding: "12px",
+              borderRadius: 12,
+              border: "1px solid #C8A96E",
+              background: "transparent",
+              color: "#C8A96E",
+              fontSize: 13,
+              fontFamily: "inherit",
+              cursor: "pointer",
+            }}
+          >
+            🏛 Meine Gemeinde
+          </button>
         </div>
         {!user.data.verifiziert && (
           <div
@@ -270,22 +286,6 @@ function VereinDashboard({
               border: "1px solid #E8C84A",
             }}
           >
-            <button
-  onClick={onMeineGemeinde}
-  style={{
-    flex: 1,
-    padding: "12px",
-    borderRadius: 12,
-    border: "1px solid #C8A96E",
-    background: "transparent",
-    color: "#C8A96E",
-    fontSize: 13,
-    fontFamily: "inherit",
-    cursor: "pointer",
-  }}
->
-  🏛 Meine Gemeinde
-</button>
             <div style={{ fontSize: 13, color: "#8B6800", fontWeight: "bold" }}>
               ⏳ Verifizierung ausstehend
             </div>
