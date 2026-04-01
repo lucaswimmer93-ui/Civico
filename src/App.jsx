@@ -2509,7 +2509,10 @@ export default function App() {
       )}
 
       {screen === "verein-gemeinde" && user?.type === "verein" && (
-  <MeineGemeindePanel />
+  <MeineGemeindePanel
+    onBack={goBack}
+    onHome={goHome}
+  />
 )}
 
 
