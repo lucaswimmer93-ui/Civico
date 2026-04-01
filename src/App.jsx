@@ -1391,14 +1391,26 @@ export default function App() {
   };
   const handleGemeindeStelleSpeichern = async (payload) => {
     try {
+      const aufwandFormatted =
+        payload.typ === "dauerhaft" && payload.aufwand
+          ? `${payload.aufwand}h / Woche`
+          : "";
+
       const { data: stelle } = await supabase
         .from("stellen")
         .insert({
           titel: payload.titel,
           beschreibung: payload.beschreibung,
           kategorie: payload.kategorie,
+          typ: payload.typ || "event",
+          aufwand: aufwandFormatted,
           ort: payload.standort,
+          plz: payload.plz || user?.data?.plz || "",
           treffpunkt: payload.standort,
+          standort: payload.standort,
+          ansprechpartner: payload.ansprechpartner || null,
+          kontakt_email: payload.kontakt_email || null,
+          dringend: Boolean(payload.dringend),
           verein_id: null,
           gemeinde_id: payload.gemeinde_id || user?.data?.id || gemeindeId,
           created_by_type: "gemeinde",
