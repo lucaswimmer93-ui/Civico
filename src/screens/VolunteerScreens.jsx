@@ -2,6 +2,16 @@ import React, { useState, useEffect } from 'react';
 import { supabase, T, KATEGORIEN, SKILLS, MEDAILLEN, getSkillLabel, getKat, getMedaille, getNextMedaille, getMedailleName, IMPRESSUM_TEXT, DATENSCHUTZ_TEXT, AGB_TEXT, formatDate, getGemeindeByPlz, isKlarname, isTerminNochNichtGestartet, isTerminAktuell } from '../core/shared';
 import { Header, StelleCard, VereineListe, BottomBar, DatenschutzBox, Input, BigButton, Chip, InfoChip, SectionLabel, RoleCard, EmptyState, ErrorMsg } from '../components/ui';
 
+const bewerbungIstErschienen = (bewerbung) =>
+  bewerbung?.status === "erschienen" || Boolean(bewerbung?.bestaetigt);
+
+const bewerbungIstNoShow = (bewerbung) =>
+  bewerbung?.status === "no_show" || Boolean(bewerbung?.nicht_erschienen);
+
+const bewerbungIstOffen = (bewerbung) =>
+  !bewerbungIstErschienen(bewerbung) && !bewerbungIstNoShow(bewerbung);
+
+
 function DetailScreen({
   stelle,
   verein,
@@ -1780,7 +1790,10 @@ function FreiwilligerProfil({
                       if (meinTermin) {
                         await supabase
                           .from("bewerbungen")
-                          .delete()
+                          .update({
+                            status: "storniert",
+                            cancelled_at: new Date().toISOString(),
+                          })
                           .eq("id", meinTermin.id);
                         await supabase.rpc("increment_plaetze", {
                           termin_id: meinTermin.termin.id,
@@ -2100,7 +2113,10 @@ function FreiwilligerProfil({
                     if (meinAlterTermin) {
                       await supabase
                         .from("bewerbungen")
-                        .delete()
+                        .update({
+                          status: "storniert",
+                          cancelled_at: new Date().toISOString(),
+                        })
                         .eq("id", meinAlterTermin.id);
                       await supabase.rpc("increment_plaetze", {
                         termin_id: meinAlterTermin.termin.id,
@@ -3347,9 +3363,7 @@ function FreiwilligerProfilVerein({
         )}
 
         {/* Anwesenheit bestätigen - NUR bei vergangenem Termin */}
-        {istVergangen &&
-          !selectedFreiwilliger.bestaetigt &&
-          !selectedFreiwilliger.nicht_erschienen && (
+        {istVergangen && bewerbungIstOffen(selectedFreiwilliger) && (
             <div style={{ display: "flex", gap: 8 }}>
               <button
                 onClick={async () => {
@@ -3357,6 +3371,8 @@ function FreiwilligerProfilVerein({
                   setSelectedFreiwilliger((prev) => ({
                     ...prev,
                     bestaetigt: true,
+                    nicht_erschienen: false,
+                    status: "erschienen",
                   }));
                 }}
                 style={{
@@ -3379,7 +3395,9 @@ function FreiwilligerProfilVerein({
                   await handleBestaetigen(selectedFreiwilliger.id, false);
                   setSelectedFreiwilliger((prev) => ({
                     ...prev,
+                    bestaetigt: false,
                     nicht_erschienen: true,
+                    status: "no_show",
                   }));
                 }}
                 style={{
@@ -3399,7 +3417,7 @@ function FreiwilligerProfilVerein({
               </button>
             </div>
           )}
-        {istVergangen && selectedFreiwilliger.bestaetigt && (
+        {istVergangen && bewerbungIstErschienen(selectedFreiwilliger) && (
           <div
             style={{
               textAlign: "center",
@@ -3413,7 +3431,7 @@ function FreiwilligerProfilVerein({
             ✓ Erschienen bestätigt
           </div>
         )}
-        {istVergangen && selectedFreiwilliger.nicht_erschienen && (
+        {istVergangen && bewerbungIstNoShow(selectedFreiwilliger) && (
           <div
             style={{
               textAlign: "center",

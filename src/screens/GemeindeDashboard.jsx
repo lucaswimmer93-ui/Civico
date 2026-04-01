@@ -9,6 +9,18 @@ function defaultTermin() {
   return { datum: '', startzeit: '', endzeit: '', plaetze: 5 };
 }
 
+function isBewerbungErschienen(bewerbung) {
+  return bewerbung?.status === 'erschienen' || Boolean(bewerbung?.bestaetigt);
+}
+
+function isBewerbungNoShow(bewerbung) {
+  return bewerbung?.status === 'no_show' || Boolean(bewerbung?.nicht_erschienen);
+}
+
+function isBewerbungPending(bewerbung) {
+  return !isBewerbungErschienen(bewerbung) && !isBewerbungNoShow(bewerbung);
+}
+
 function buildEditForm(stelle) {
   return {
     titel: stelle?.titel || '',
@@ -284,7 +296,12 @@ export default function GemeindeDashboard({
       setDetailActionLoading(true);
       const { error } = await supabase
         .from('bewerbungen')
-        .update({ bestaetigt: erschienen, nicht_erschienen: !erschienen })
+        .update({
+          bestaetigt: erschienen,
+          nicht_erschienen: !erschienen,
+          status: erschienen ? 'erschienen' : 'no_show',
+          attendance_checked_at: new Date().toISOString(),
+        })
         .eq('id', bewerbungId);
       if (error) throw error;
       showToast?.(erschienen ? '✓ Erschienen bestätigt' : '✗ Nicht erschienen bestätigt');
@@ -632,7 +649,7 @@ export default function GemeindeDashboard({
                           </button>
                         )}
 
-                        {istVergangen && !bewerbung.bestaetigt && !bewerbung.nicht_erschienen && (
+                        {istVergangen && isBewerbungPending(bewerbung) && (
                           <div style={{ display:'flex', gap:8 }}>
                             <button
                               disabled={detailActionLoading}
@@ -651,11 +668,11 @@ export default function GemeindeDashboard({
                           </div>
                         )}
 
-                        {istVergangen && bewerbung.bestaetigt && (
+                        {istVergangen && isBewerbungErschienen(bewerbung) && (
                           <div style={{ fontSize:12, color:'#3A7D44', fontWeight:'bold' }}>✓ Erschienen bestätigt</div>
                         )}
 
-                        {istVergangen && bewerbung.nicht_erschienen && (
+                        {istVergangen && isBewerbungNoShow(bewerbung) && (
                           <div style={{ fontSize:12, color:'#E85C5C', fontWeight:'bold' }}>✗ Nicht erschienen</div>
                         )}
                       </div>

@@ -4,6 +4,16 @@ import MessageThreadView from "../components/messages/MessageThreadView";
 import { supabase, T, KATEGORIEN, SKILLS, getSkillLabel, getKat, getMedaille, getNextMedaille, getMedailleName, IMPRESSUM_TEXT, DATENSCHUTZ_TEXT, AGB_TEXT, formatDate, getGemeindeByPlz, isKlarname, isTerminNochNichtGestartet, isTerminAktuell } from '../core/shared';
 import { Header, StelleCard, VereineListe, BottomBar, DatenschutzBox, Input, BigButton, Chip, InfoChip, SectionLabel, RoleCard, EmptyState, ErrorMsg } from '../components/ui';
 
+const bewerbungIstErschienen = (bewerbung) =>
+  bewerbung?.status === "erschienen" || Boolean(bewerbung?.bestaetigt);
+
+const bewerbungIstNoShow = (bewerbung) =>
+  bewerbung?.status === "no_show" || Boolean(bewerbung?.nicht_erschienen);
+
+const bewerbungIstOffen = (bewerbung) =>
+  !bewerbungIstErschienen(bewerbung) && !bewerbungIstNoShow(bewerbung);
+
+
 function VereinDashboard({
   user,
   stellen,
@@ -893,7 +903,7 @@ function VereinStelleDetail({
                       </button>
                     )}
                     {/* Nach Termin: Erschienen/Nicht erschienen */}
-                    {istVergangen && !b.bestaetigt && !b.nicht_erschienen && (
+                    {istVergangen && bewerbungIstOffen(b) && (
                       <div style={{ display: "flex", gap: 8 }}>
                         <button
                           onClick={() => onBestaetigen(b.id, true)}
@@ -931,7 +941,7 @@ function VereinStelleDetail({
                         </button>
                       </div>
                     )}
-                    {istVergangen && b.bestaetigt && (
+                    {istVergangen && bewerbungIstErschienen(b) && (
                       <div
                         style={{
                           fontSize: 12,
@@ -942,7 +952,7 @@ function VereinStelleDetail({
                         ✓ Erschienen bestätigt
                       </div>
                     )}
-                    {istVergangen && b.nicht_erschienen && (
+                    {istVergangen && bewerbungIstNoShow(b) && (
                       <div
                         style={{
                           fontSize: 12,
@@ -2796,7 +2806,7 @@ function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
         s +
         (x.termine || []).reduce(
           (a, t) =>
-            a + (t.bewerbungen || []).filter((b) => b.bestaetigt).length,
+            a + (t.bewerbungen || []).filter((b) => bewerbungIstErschienen(b)).length,
           0
         ),
       0
@@ -2807,7 +2817,7 @@ function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
         s +
         (x.termine || []).reduce(
           (a, t) =>
-            a + (t.bewerbungen || []).filter((b) => b.nicht_erschienen).length,
+            a + (t.bewerbungen || []).filter((b) => bewerbungIstNoShow(b)).length,
           0
         ),
       0
@@ -3313,7 +3323,7 @@ function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
                 const erschienen = (s.termine || []).reduce(
                   (a, t) =>
                     a +
-                    (t.bewerbungen || []).filter((b) => b.bestaetigt).length,
+                    (t.bewerbungen || []).filter((b) => bewerbungIstErschienen(b)).length,
                   0
                 );
                 const auslastung =
