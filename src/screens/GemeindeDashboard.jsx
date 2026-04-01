@@ -9,18 +9,6 @@ function defaultTermin() {
   return { datum: '', startzeit: '', endzeit: '', plaetze: 5 };
 }
 
-function isBewerbungErschienen(bewerbung) {
-  return bewerbung?.status === 'erschienen' || Boolean(bewerbung?.bestaetigt);
-}
-
-function isBewerbungNoShow(bewerbung) {
-  return bewerbung?.status === 'no_show' || Boolean(bewerbung?.nicht_erschienen);
-}
-
-function isBewerbungPending(bewerbung) {
-  return !isBewerbungErschienen(bewerbung) && !isBewerbungNoShow(bewerbung);
-}
-
 function buildEditForm(stelle) {
   return {
     titel: stelle?.titel || '',
@@ -102,6 +90,7 @@ export default function GemeindeDashboard({
   const [neuesDatum, setNeuesDatum] = useState('');
   const [neueStartzeit, setNeueStartzeit] = useState('');
   const [neueEndzeit, setNeueEndzeit] = useState('');
+  const [csrRange, setCsrRange] = useState('90');
 
   useEffect(() => {
     setSettingsForm({
@@ -132,6 +121,160 @@ export default function GemeindeDashboard({
     (sum, s) => sum + (s.termine || []).reduce((tSum, t) => tSum + ((t.bewerbungen || []).length), 0),
     0
   );
+
+  const isBewerbungErschienen = (bewerbung) =>
+    bewerbung?.status === 'erschienen' || Boolean(bewerbung?.bestaetigt);
+
+  const isBewerbungNoShow = (bewerbung) =>
+    bewerbung?.status === 'no_show' || Boolean(bewerbung?.nicht_erschienen);
+
+  const parseTerminDateTime = (termin, field = 'start') => {
+    if (!termin?.datum) return null;
+    const time = field === 'end'
+      ? (termin?.endzeit || termin?.startzeit || '23:59')
+      : (termin?.startzeit || '00:00');
+    const value = new Date(`${termin.datum}T${time}`);
+    return Number.isNaN(value.getTime()) ? null : value;
+  };
+
+  const getTerminDurationHours = (termin) => {
+    const start = parseTerminDateTime(termin, 'start');
+    const end = parseTerminDateTime(termin, 'end');
+    if (!start || !end) return 0;
+    const diff = (end.getTime() - start.getTime()) / (1000 * 60 * 60);
+    return diff > 0 ? diff : 0;
+  };
+
+  const csrRangeOptions = {
+    '30': 30,
+    '90': 90,
+    '365': 365,
+    'all': null,
+  };
+
+  const csrData = useMemo(() => {
+    const now = new Date();
+    const days = csrRangeOptions[csrRange];
+    const rangeStart = days ? new Date(now.getTime() - days * 24 * 60 * 60 * 1000) : null;
+
+    const termineRows = [];
+    gemeindeStellen.forEach((stelle) => {
+      (stelle.termine || []).forEach((termin) => {
+        const startDate = parseTerminDateTime(termin, 'start');
+        if (rangeStart && startDate && startDate < rangeStart) return;
+        termineRows.push({ stelle, termin, startDate });
+      });
+    });
+
+    const uniqueEinsaetze = new Set(termineRows.map(({ stelle }) => stelle.id));
+    const uniqueHelfer = new Set();
+    let anmeldungen = 0;
+    let erschienene = 0;
+    let noShows = 0;
+    let helferstunden = 0;
+
+    const rankingMap = new Map();
+    const categoryMap = new Map();
+
+    termineRows.forEach(({ stelle, termin }) => {
+      const vereinName = stelle?.vereine?.name || (stelle?.verein_id ? 'Verein' : 'Gemeinde');
+      const duration = getTerminDurationHours(termin);
+      const bewerbungen = termin?.bewerbungen || [];
+
+      const rankingEntry = rankingMap.get(vereinName) || {
+        name: vereinName,
+        termine: 0,
+        helferstunden: 0,
+        erschienene: 0,
+        noShows: 0,
+      };
+      rankingEntry.termine += 1;
+
+      const categoryEntry = categoryMap.get(stelle?.kategorie || 'unbekannt') || 0;
+      categoryMap.set(stelle?.kategorie || 'unbekannt', categoryEntry + 1);
+
+      bewerbungen.forEach((bewerbung) => {
+        anmeldungen += 1;
+        if (bewerbung?.freiwilliger_id) uniqueHelfer.add(bewerbung.freiwilliger_id);
+        if (isBewerbungErschienen(bewerbung)) {
+          erschienene += 1;
+          rankingEntry.erschienene += 1;
+          helferstunden += duration;
+          rankingEntry.helferstunden += duration;
+        }
+        if (isBewerbungNoShow(bewerbung)) {
+          noShows += 1;
+          rankingEntry.noShows += 1;
+        }
+      });
+
+      rankingMap.set(vereinName, rankingEntry);
+    });
+
+    const attendanceTotal = erschienene + noShows;
+    const teilnahmequote = attendanceTotal > 0 ? Math.round((erschienene / attendanceTotal) * 100) : 0;
+    const noShowRate = attendanceTotal > 0 ? Math.round((noShows / attendanceTotal) * 100) : 0;
+
+    const ranking = Array.from(rankingMap.values()).sort((a, b) => {
+      if (b.helferstunden !== a.helferstunden) return b.helferstunden - a.helferstunden;
+      if (b.erschienene !== a.erschienene) return b.erschienene - a.erschienene;
+      return a.name.localeCompare(b.name);
+    });
+
+    const monthLabels = [];
+    for (let offset = 2; offset >= 0; offset -= 1) {
+      const d = new Date(now.getFullYear(), now.getMonth() - offset, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      monthLabels.push({
+        key,
+        label: d.toLocaleDateString('de-DE', { month: 'short' }),
+        termine: 0,
+        helfer: 0,
+        helferstunden: 0,
+      });
+    }
+
+    const monthMap = new Map(monthLabels.map((m) => [m.key, m]));
+    termineRows.forEach(({ termin, startDate }) => {
+      if (!startDate) return;
+      const key = `${startDate.getFullYear()}-${String(startDate.getMonth() + 1).padStart(2, '0')}`;
+      const month = monthMap.get(key);
+      if (!month) return;
+      month.termine += 1;
+      const appearedForTermin = (termin?.bewerbungen || []).filter((b) => isBewerbungErschienen(b));
+      month.helfer += appearedForTermin.length;
+      month.helferstunden += appearedForTermin.length * getTerminDurationHours(termin);
+    });
+
+    const categories = Array.from(categoryMap.entries())
+      .map(([id, count]) => {
+        const category = KATEGORIEN.find((k) => k.id === id);
+        return {
+          id,
+          label: category?.label || id,
+          icon: category?.icon || '•',
+          count,
+          percent: termineRows.length > 0 ? Math.round((count / termineRows.length) * 100) : 0,
+        };
+      })
+      .sort((a, b) => b.count - a.count);
+
+    return {
+      einsaetze: uniqueEinsaetze.size,
+      termine: termineRows.length,
+      helfer: uniqueHelfer.size,
+      anmeldungen,
+      erschienene,
+      noShows,
+      helferstunden: Math.round(helferstunden * 10) / 10,
+      teilnahmequote,
+      noShowRate,
+      ranking,
+      categories,
+      monthly: monthLabels,
+      aktivsterVerein: ranking[0]?.name || '–',
+    };
+  }, [gemeindeStellen, csrRange]);
 
   const handleHeaderBack = () => {
     if (verschiebeTermin) {
@@ -296,12 +439,7 @@ export default function GemeindeDashboard({
       setDetailActionLoading(true);
       const { error } = await supabase
         .from('bewerbungen')
-        .update({
-          bestaetigt: erschienen,
-          nicht_erschienen: !erschienen,
-          status: erschienen ? 'erschienen' : 'no_show',
-          attendance_checked_at: new Date().toISOString(),
-        })
+        .update({ bestaetigt: erschienen, nicht_erschienen: !erschienen })
         .eq('id', bewerbungId);
       if (error) throw error;
       showToast?.(erschienen ? '✓ Erschienen bestätigt' : '✗ Nicht erschienen bestätigt');
@@ -649,7 +787,7 @@ export default function GemeindeDashboard({
                           </button>
                         )}
 
-                        {istVergangen && isBewerbungPending(bewerbung) && (
+                        {istVergangen && !bewerbung.bestaetigt && !bewerbung.nicht_erschienen && (
                           <div style={{ display:'flex', gap:8 }}>
                             <button
                               disabled={detailActionLoading}
@@ -668,11 +806,11 @@ export default function GemeindeDashboard({
                           </div>
                         )}
 
-                        {istVergangen && isBewerbungErschienen(bewerbung) && (
+                        {istVergangen && bewerbung.bestaetigt && (
                           <div style={{ fontSize:12, color:'#3A7D44', fontWeight:'bold' }}>✓ Erschienen bestätigt</div>
                         )}
 
-                        {istVergangen && isBewerbungNoShow(bewerbung) && (
+                        {istVergangen && bewerbung.nicht_erschienen && (
                           <div style={{ fontSize:12, color:'#E85C5C', fontWeight:'bold' }}>✗ Nicht erschienen</div>
                         )}
                       </div>
@@ -1236,11 +1374,121 @@ export default function GemeindeDashboard({
 
       {tab === 'csr' && (
         <div style={{ padding:'0 16px 24px' }}>
-          <div style={{ background:'#FAF7F2', borderRadius:18, padding:18, border:'1px solid #E6D9C2' }}>
-            <SectionLabel>CSR-Report</SectionLabel>
-            <div style={{ color:'#5C4A32', fontSize:14, lineHeight:1.6 }}>
-              Dieser Bereich ist vorbereitet für kommunale Auswertungen, Partner-Nachweise und spätere Reporting-Exports.
+          <div style={{ background:'linear-gradient(135deg, #2C2416, #4A3C28)', borderRadius:22, padding:22, color:'#F4F0E8', marginBottom:14 }}>
+            <div style={{ fontSize:12, letterSpacing:1.6, color:'#C4B89A', textTransform:'uppercase', marginBottom:8 }}>CSR-Report</div>
+            <div style={{ fontSize:24, fontWeight:700, marginBottom:8 }}>Wirkung in Ihrer Gemeinde sichtbar machen</div>
+            <div style={{ fontSize:14, color:'#E7D9C5', lineHeight:1.6, maxWidth:760 }}>
+              Hier sehen Sie belastbare Kennzahlen zu Einsätzen, Teilnahme, Verlässlichkeit und Helferstunden – direkt aus den aktuell erfassten Stellen und Terminen.
             </div>
+          </div>
+
+          <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:14 }}>
+            {[
+              ['30', '30 Tage'],
+              ['90', '90 Tage'],
+              ['365', '12 Monate'],
+              ['all', 'Gesamt'],
+            ].map(([value, label]) => (
+              <button
+                key={value}
+                onClick={() => setCsrRange(value)}
+                style={{
+                  border:'none',
+                  borderRadius:18,
+                  padding:'8px 14px',
+                  cursor:'pointer',
+                  background: csrRange === value ? '#C8A96E' : '#EFE8DB',
+                  color: csrRange === value ? '#1A1208' : '#5C4A32',
+                  fontFamily:'inherit',
+                  fontSize:13,
+                  fontWeight:600,
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(180px, 1fr))', gap:12, marginBottom:14 }}>
+            {[
+              ['Einsätze', csrData.einsaetze, `${csrData.termine} Termine`],
+              ['Helfer gesamt', csrData.helfer, `${csrData.anmeldungen} Anmeldungen`],
+              ['Teilnahmequote', `${csrData.teilnahmequote}%`, `${csrData.erschienene} erschienen`],
+              ['No-Show Rate', `${csrData.noShowRate}%`, `${csrData.noShows} nicht erschienen`],
+              ['Helferstunden', csrData.helferstunden, 'sichtbarer Impact'],
+              ['Aktivster Akteur', csrData.aktivsterVerein, csrData.ranking.length ? 'nach Helferstunden' : 'noch keine Daten'],
+            ].map(([label, value, sub]) => (
+              <div key={label} style={{ background:'#FAF7F2', borderRadius:18, padding:18, border:'1px solid #E6D9C2' }}>
+                <div style={{ fontSize:28, fontWeight:700, color:'#2C2416', marginBottom:8 }}>{value}</div>
+                <div style={{ fontWeight:700, color:'#2C2416' }}>{label}</div>
+                <div style={{ fontSize:12, color:'#8B7355', marginTop:4 }}>{sub}</div>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ display:'grid', gridTemplateColumns:'1.2fr 0.8fr', gap:14, marginBottom:14 }}>
+            <div style={{ background:'#FAF7F2', borderRadius:18, padding:18, border:'1px solid #E6D9C2' }}>
+              <SectionLabel>Trend der letzten 3 Monate</SectionLabel>
+              <div style={{ display:'flex', alignItems:'end', gap:12, minHeight:220, paddingTop:14 }}>
+                {csrData.monthly.map((month) => {
+                  const maxHours = Math.max(...csrData.monthly.map((m) => m.helferstunden), 1);
+                  const height = Math.max((month.helferstunden / maxHours) * 140, month.helferstunden > 0 ? 22 : 10);
+                  return (
+                    <div key={month.key} style={{ flex:1, textAlign:'center' }}>
+                      <div style={{ fontSize:11, color:'#8B7355', marginBottom:8 }}>{month.helferstunden.toFixed(1)}h</div>
+                      <div style={{ height:150, display:'flex', alignItems:'flex-end', justifyContent:'center' }}>
+                        <div style={{ width:'100%', maxWidth:72, height, borderRadius:'14px 14px 6px 6px', background:'linear-gradient(180deg, #C8A96E 0%, #8B7355 100%)', display:'flex', alignItems:'end', justifyContent:'center', color:'#fff', fontSize:11, fontWeight:700, paddingBottom:8 }}>
+                          {month.helfer > 0 ? month.helfer : ''}
+                        </div>
+                      </div>
+                      <div style={{ fontWeight:700, color:'#2C2416', marginTop:10 }}>{month.label}</div>
+                      <div style={{ fontSize:11, color:'#8B7355', marginTop:4 }}>{month.termine} Termin(e)</div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div style={{ background:'#FAF7F2', borderRadius:18, padding:18, border:'1px solid #E6D9C2' }}>
+              <SectionLabel>Kategorien</SectionLabel>
+              {csrData.categories.length === 0 ? (
+                <div style={{ fontSize:13, color:'#8B7355' }}>Noch keine kategorisierten Termine im gewählten Zeitraum.</div>
+              ) : (
+                csrData.categories.map((category) => (
+                  <div key={category.id} style={{ marginBottom:12 }}>
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
+                      <div style={{ fontSize:13, fontWeight:700, color:'#2C2416' }}>{category.icon} {category.label}</div>
+                      <div style={{ fontSize:12, color:'#8B7355' }}>{category.count} · {category.percent}%</div>
+                    </div>
+                    <div style={{ height:10, borderRadius:999, background:'#EFE8DB', overflow:'hidden' }}>
+                      <div style={{ width:`${category.percent}%`, height:'100%', borderRadius:999, background:'#C8A96E' }} />
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div style={{ background:'#FAF7F2', borderRadius:18, padding:18, border:'1px solid #E6D9C2' }}>
+            <SectionLabel>Ranking Organisationen</SectionLabel>
+            {csrData.ranking.length === 0 ? (
+              <div style={{ fontSize:13, color:'#8B7355' }}>Sobald bestätigte Teilnahmen vorliegen, erscheint hier das Ranking Ihrer aktivsten Vereine und Gemeinde-Einsätze.</div>
+            ) : (
+              csrData.ranking.slice(0, 5).map((entry, index) => (
+                <div key={entry.name} style={{ display:'grid', gridTemplateColumns:'56px 1.4fr 0.8fr 0.8fr 0.8fr', gap:10, alignItems:'center', padding:'12px 0', borderBottom:'1px solid #EFE8DB' }}>
+                  <div style={{ width:34, height:34, borderRadius:'50%', background:index === 0 ? '#C8A96E' : '#EFE8DB', color:index === 0 ? '#1A1208' : '#5C4A32', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:700 }}>
+                    {index + 1}
+                  </div>
+                  <div>
+                    <div style={{ fontWeight:700, color:'#2C2416' }}>{entry.name}</div>
+                    <div style={{ fontSize:12, color:'#8B7355' }}>{entry.termine} Termin(e)</div>
+                  </div>
+                  <div style={{ fontSize:13, color:'#2C2416' }}>{entry.erschienene} erschienen</div>
+                  <div style={{ fontSize:13, color:'#8B7355' }}>{entry.noShows} no-show</div>
+                  <div style={{ fontSize:13, fontWeight:700, color:'#2C2416' }}>{entry.helferstunden.toFixed(1)}h</div>
+                </div>
+              ))
+            )}
           </div>
         </div>
       )}
