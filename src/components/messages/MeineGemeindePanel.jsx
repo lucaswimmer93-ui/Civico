@@ -13,56 +13,11 @@ const cardStyle = {
   border: "1px solid #E6D9C2",
 };
 
-export default function MeineGemeindePanel({ onBack }) {
+export default function MeineGemeindePanel({ onBack, onHome }) {
   const [gemeinde, setGemeinde] = useState(null);
   const [thread, setThread] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-
-  const handleBack = () => {
-    // 1. sauberer Weg über Parent
-    if (typeof onBack === "function") {
-      onBack();
-      return;
-    }
-
-    // 2. Browser History nutzen
-    if (window.history.length > 1) {
-      window.history.back();
-      return;
-    }
-
-    // 3. letzter Fallback
-    window.dispatchEvent(
-      new CustomEvent("civico:navigate", {
-        detail: { screen: "verein-dashboard" },
-      })
-    );
-  };
-
-  useEffect(() => {
-    // 👉 eigener History-State, damit Browser-Zurück korrekt funktioniert
-    window.history.pushState({ screen: "meine-gemeinde" }, "");
-
-    const handlePopState = () => {
-      // wenn Browser zurück → IMMER ins Dashboard
-      if (typeof onBack === "function") {
-        onBack();
-      } else {
-        window.dispatchEvent(
-          new CustomEvent("civico:navigate", {
-            detail: { screen: "verein-dashboard" },
-          })
-        );
-      }
-    };
-
-    window.addEventListener("popstate", handlePopState);
-
-    return () => {
-      window.removeEventListener("popstate", handlePopState);
-    };
-  }, [onBack]);
 
   useEffect(() => {
     async function load() {
@@ -90,7 +45,7 @@ export default function MeineGemeindePanel({ onBack }) {
     <div style={{ padding: "0 16px 24px", display: "grid", gap: 14 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
         <button
-          onClick={handleBack}
+          onClick={onBack}
           style={{
             border: "none",
             background: "#EFE8DB",
@@ -105,6 +60,25 @@ export default function MeineGemeindePanel({ onBack }) {
         >
           ← Zurück
         </button>
+
+        {typeof onHome === "function" && (
+          <button
+            onClick={onHome}
+            style={{
+              border: "none",
+              background: "#2C2416",
+              color: "#FAF7F2",
+              borderRadius: 12,
+              padding: "10px 14px",
+              cursor: "pointer",
+              fontFamily: "inherit",
+              fontWeight: 700,
+              fontSize: 13,
+            }}
+          >
+            🏠 Home
+          </button>
+        )}
       </div>
 
       {loading ? (
