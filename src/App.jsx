@@ -1407,42 +1407,58 @@ export default function App() {
           ? `${payload.aufwand}h / Woche`
           : "";
 
-      const { data: stelle } = await supabase
-        .from("stellen")
-        .insert({
-          titel: payload.titel,
-          beschreibung: payload.beschreibung,
-          kategorie: payload.kategorie,
-          typ: payload.typ || "event",
-          aufwand: aufwandFormatted,
-          ort: payload.standort,
-          plz: payload.plz || user?.data?.plz || "",
-          standort: payload.standort,
-          ansprechpartner: payload.ansprechpartner || null,
-          kontakt_email: payload.kontakt_email || null,
-          dringend: Boolean(payload.dringend),
-          verein_id: null,
-          gemeinde_id: payload.gemeinde_id || user?.data?.id || gemeindeId,
-          created_by_type: "gemeinde",
-          archiviert: false,
-        })
-        .select()
-        .single();
+      const insertPayload = {
+        titel: payload.titel,
+        beschreibung: payload.beschreibung,
+        kategorie: payload.kategorie,
+        typ: payload.typ || "event",
+        aufwand: aufwandFormatted,
+        ort: payload.standort,
+        plz: payload.plz || user?.data?.plz || "",
+        standort: payload.standort,
+        ansprechpartner: payload.ansprechpartner || null,
+        kontakt_email: payload.kontakt_email || null,
+        dringend: Boolean(payload.dringend),
+        verein_id: null,
+        gemeinde_id: payload.gemeinde_id || user?.data?.id || gemeindeId,
+        created_by_type: "gemeinde",
+        archiviert: false,
+      };
 
-      if (stelle && payload.termine?.length) {
-        await supabase.from("termine").insert(
-          payload.termine
-            .filter((t) => t.datum)
-            .map((t) => ({
-              stelle_id: stelle.id,
-              datum: t.datum,
-              startzeit: t.startzeit,
-              endzeit: t.endzeit || null,
-              freie_plaetze: t.plaetze || 5,
-              gesamt_plaetze: t.plaetze || 5,
-            }))
-        );
+      const { data: insertedRows, error: stelleError } = await supabase
+        .from("stellen")
+        .insert(insertPayload)
+        .select("id")
+        .limit(1);
+
+      console.log("INSERT OHNE SELECT TEST:", { insertPayload, insertedRows, stelleError });
+
+      if (stelleError) {
+        throw stelleError;
       }
+
+      const neueStelleId = insertedRows?.[0]?.id;
+
+      if (neueStelleId && payload.termine?.length) {
+        const terminPayload = payload.termine
+          .filter((t) => t.datum)
+          .map((t) => ({
+            stelle_id: neueStelleId,
+            datum: t.datum,
+            startzeit: t.startzeit,
+            endzeit: t.endzeit || null,
+            freie_plaetze: t.plaetze || 5,
+            gesamt_plaetze: t.plaetze || 5,
+          }));
+
+        const { error: terminError } = await supabase.from("termine").insert(terminPayload);
+        console.log("TERMINE INSERT TEST:", { neueStelleId, terminPayload, terminError });
+
+        if (terminError) {
+          throw terminError;
+        }
+      }
+
       showToast("✓ Gemeinde-Stelle gespeichert!");
       await loadStellen(gemeindeId || user?.data?.id);
     } catch (err) {
