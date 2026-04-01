@@ -2,11 +2,37 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import MeineVereinePanel from '../components/messages/MeineVereinePanel';
 import MessageThreadView from '../components/messages/MessageThreadView';
-import { supabase, KATEGORIEN } from '../core/shared';
+import { supabase, KATEGORIEN, formatDate, isTerminNochNichtGestartet, isTerminAktuell } from '../core/shared';
 import { Header, Input, BigButton, SectionLabel, EmptyState } from '../components/ui';
 
 function defaultTermin() {
   return { datum: '', startzeit: '', endzeit: '', plaetze: 5 };
+}
+
+function buildEditForm(stelle) {
+  return {
+    titel: stelle?.titel || '',
+    beschreibung: stelle?.beschreibung || '',
+    typ: stelle?.typ || 'event',
+    kategorie: stelle?.kategorie || 'sozial',
+    aufwand:
+      stelle?.typ === 'dauerhaft' && stelle?.aufwand
+        ? String(stelle.aufwand).replace('h / Woche', '').trim()
+        : '',
+    standort: stelle?.standort || '',
+    ansprechpartner: stelle?.ansprechpartner || '',
+    kontakt_email: stelle?.kontakt_email || '',
+    plz: stelle?.plz || '',
+    dringend: Boolean(stelle?.dringend),
+    termine: (stelle?.termine || []).map((t) => ({
+      id: t.id,
+      datum: t.datum || '',
+      startzeit: t.startzeit || '',
+      endzeit: t.endzeit || '',
+      plaetze: t.gesamt_plaetze || t.freie_plaetze || 5,
+      absagen: false,
+    })),
+  };
 }
 
 export default function GemeindeDashboard({
@@ -19,9 +45,12 @@ export default function GemeindeDashboard({
   onCreateStelle,
   onSaveProfile,
   onChangePassword,
+  onReloadStellen,
   showToast,
 }) {
   const [tab, setTab] = useState('dashboard');
+  const [selectedStelle, setSelectedStelle] = useState(null);
+  const [editForm, setEditForm] = useState(null);
   const [settingsForm, setSettingsForm] = useState({
     name: user?.name || '',
     ort: user?.ort || '',
@@ -38,6 +67,8 @@ export default function GemeindeDashboard({
   const [passwordLoading, setPasswordLoading] = useState(false);
   const [settingsError, setSettingsError] = useState('');
   const [passwordError, setPasswordError] = useState('');
+  const [detailActionLoading, setDetailActionLoading] = useState(false);
+  const [editLoading, setEditLoading] = useState(false);
   const [form, setForm] = useState({
     titel: '',
     beschreibung: '',
@@ -56,25 +87,70 @@ export default function GemeindeDashboard({
   const [supportLoading, setSupportLoading] = useState(false);
   const [supportError, setSupportError] = useState('');
 
+  useEffect(() => {
+    setSettingsForm({
+      name: user?.name || '',
+      ort: user?.ort || '',
+      plz: user?.plz || '',
+      kontakt_email: user?.kontakt_email || user?.email || '',
+      telefon: user?.telefon || '',
+      website: user?.website || '',
+    });
+    setForm((prev) => ({ ...prev, plz: user?.plz || '' }));
+  }, [user]);
 
   const gemeindeStellen = useMemo(
     () => stellen.filter((s) => s.gemeinde_id === user?.id),
     [stellen, user]
   );
 
+  useEffect(() => {
+    if (!selectedStelle?.id) return;
+    const fresh = gemeindeStellen.find((s) => s.id === selectedStelle.id);
+    if (fresh) {
+      setSelectedStelle(fresh);
+    }
+  }, [gemeindeStellen, selectedStelle?.id]);
+
   const totalBewerbungen = gemeindeStellen.reduce(
     (sum, s) => sum + (s.termine || []).reduce((tSum, t) => tSum + ((t.bewerbungen || []).length), 0),
     0
   );
 
-  const handleSave = () => {
+  const handleHeaderBack = () => {
+    if (tab === 'stellen-detail' || tab === 'stellen-bearbeiten') {
+      setTab('stellen');
+      return;
+    }
+    if (tab !== 'dashboard') {
+      setTab('dashboard');
+      return;
+    }
+  };
+
+  const refreshStellen = async () => {
+    await onReloadStellen?.();
+  };
+
+  const openStelleDetail = (stelle) => {
+    setSelectedStelle(stelle);
+    setTab('stellen-detail');
+  };
+
+  const openStelleEdit = (stelle) => {
+    setSelectedStelle(stelle);
+    setEditForm(buildEditForm(stelle));
+    setTab('stellen-bearbeiten');
+  };
+
+  const handleSave = async () => {
     const payload = {
       ...form,
       created_by_type: 'gemeinde',
       gemeinde_id: user?.id,
       plz: form.plz || user?.plz || '',
     };
-    onCreateStelle?.(payload);
+    await onCreateStelle?.(payload);
     setForm({
       titel: '',
       beschreibung: '',
@@ -88,9 +164,9 @@ export default function GemeindeDashboard({
       dringend: false,
       termine: [defaultTermin()],
     });
+    await refreshStellen();
     setTab('stellen');
   };
-
 
   const handleSettingsSave = async () => {
     setSettingsError('');
@@ -138,7 +214,6 @@ export default function GemeindeDashboard({
     setPasswordForm({ password: '', confirmPassword: '' });
     showToast?.('✓ Passwort erfolgreich geändert!');
   };
-
 
   const supportOrganisation = {
     type: 'gemeinde',
@@ -196,9 +271,200 @@ export default function GemeindeDashboard({
     }
   }, [tab, supportThreadId, user?.id]);
 
+  const handleBestaetigen = async (bewerbungId, erschienen) => {
+    try {
+      setDetailActionLoading(true);
+      const { error } = await supabase
+        .from('bewerbungen')
+        .update({ bestaetigt: erschienen, nicht_erschienen: !erschienen })
+        .eq('id', bewerbungId);
+      if (error) throw error;
+      showToast?.(erschienen ? '✓ Erschienen bestätigt' : '✗ Nicht erschienen bestätigt');
+      await refreshStellen();
+    } catch (err) {
+      console.error(err);
+      showToast?.('Fehler beim Bestätigen.', '#E85C5C');
+    } finally {
+      setDetailActionLoading(false);
+    }
+  };
+
+  const handleStornieren = async (bewerbungId, terminId) => {
+    try {
+      setDetailActionLoading(true);
+      const { error: deleteError } = await supabase.from('bewerbungen').delete().eq('id', bewerbungId);
+      if (deleteError) throw deleteError;
+
+      const { error: incError } = await supabase.rpc('increment_plaetze', { termin_id: terminId });
+      if (incError) throw incError;
+
+      showToast?.('✓ Anmeldung storniert.', '#E85C5C');
+      await refreshStellen();
+    } catch (err) {
+      console.error(err);
+      showToast?.('Fehler beim Stornieren.', '#E85C5C');
+    } finally {
+      setDetailActionLoading(false);
+    }
+  };
+
+  const handleTerminAbsagen = async (terminId) => {
+    try {
+      setDetailActionLoading(true);
+      const { error: bewerbungenError } = await supabase.from('bewerbungen').delete().eq('termin_id', terminId);
+      if (bewerbungenError) throw bewerbungenError;
+
+      const { error: terminError } = await supabase.from('termine').delete().eq('id', terminId);
+      if (terminError) throw terminError;
+
+      showToast?.('✓ Termin abgesagt.', '#E85C5C');
+      await refreshStellen();
+    } catch (err) {
+      console.error(err);
+      showToast?.('Fehler beim Absagen.', '#E85C5C');
+    } finally {
+      setDetailActionLoading(false);
+    }
+  };
+
+  const handleTerminVerschieben = async (terminId, datum, startzeit, endzeit) => {
+    try {
+      setDetailActionLoading(true);
+      const { error } = await supabase
+        .from('termine')
+        .update({ datum, startzeit, endzeit: endzeit || null })
+        .eq('id', terminId);
+      if (error) throw error;
+
+      showToast?.('✓ Termin verschoben!');
+      await refreshStellen();
+    } catch (err) {
+      console.error(err);
+      showToast?.('Fehler beim Verschieben.', '#E85C5C');
+    } finally {
+      setDetailActionLoading(false);
+    }
+  };
+
+  const handleDeleteStelle = async () => {
+    if (!selectedStelle?.id) return;
+    try {
+      setDetailActionLoading(true);
+      const { error: bewerbungenError } = await supabase.from('bewerbungen').delete().eq('stelle_id', selectedStelle.id);
+      if (bewerbungenError) throw bewerbungenError;
+
+      const { error: termineError } = await supabase.from('termine').delete().eq('stelle_id', selectedStelle.id);
+      if (termineError) throw termineError;
+
+      const { error: stelleError } = await supabase.from('stellen').delete().eq('id', selectedStelle.id);
+      if (stelleError) throw stelleError;
+
+      showToast?.('Stelle gelöscht.', '#E85C5C');
+      setSelectedStelle(null);
+      await refreshStellen();
+      setTab('stellen');
+    } catch (err) {
+      console.error(err);
+      showToast?.('Fehler beim Löschen.', '#E85C5C');
+    } finally {
+      setDetailActionLoading(false);
+    }
+  };
+
+  const handleEditSave = async () => {
+    if (!selectedStelle?.id || !editForm) return;
+
+    if (!editForm.titel || !editForm.beschreibung) {
+      showToast?.('Titel und Beschreibung ausfüllen.', '#E85C5C');
+      return;
+    }
+
+    try {
+      setEditLoading(true);
+
+      const aufwandFormatted =
+        editForm.typ === 'dauerhaft' && editForm.aufwand
+          ? `${editForm.aufwand}h / Woche`
+          : '';
+
+      const { error: stelleError } = await supabase
+        .from('stellen')
+        .update({
+          titel: editForm.titel,
+          beschreibung: editForm.beschreibung,
+          kategorie: editForm.kategorie,
+          typ: editForm.typ,
+          aufwand: aufwandFormatted,
+          standort: editForm.standort,
+          plz: editForm.plz,
+          ansprechpartner: editForm.ansprechpartner || null,
+          kontakt_email: editForm.kontakt_email || null,
+          dringend: Boolean(editForm.dringend),
+          ort: user?.ort || user?.name || '',
+        })
+        .eq('id', selectedStelle.id);
+
+      if (stelleError) throw stelleError;
+
+      const abgesagteTermine = editForm.termine.filter((t) => t.id && t.absagen);
+      for (const termin of abgesagteTermine) {
+        const { error: bewerbungenError } = await supabase.from('bewerbungen').delete().eq('termin_id', termin.id);
+        if (bewerbungenError) throw bewerbungenError;
+
+        const { error: terminDeleteError } = await supabase.from('termine').delete().eq('id', termin.id);
+        if (terminDeleteError) throw terminDeleteError;
+      }
+
+      const bestehendeTermine = editForm.termine.filter((t) => t.id && !t.absagen);
+      for (const termin of bestehendeTermine) {
+        const { error: terminUpdateError } = await supabase
+          .from('termine')
+          .update({
+            datum: termin.datum,
+            startzeit: termin.startzeit,
+            endzeit: termin.endzeit || null,
+            freie_plaetze: termin.plaetze,
+            gesamt_plaetze: termin.plaetze,
+          })
+          .eq('id', termin.id);
+        if (terminUpdateError) throw terminUpdateError;
+      }
+
+      const neueTermine = editForm.termine.filter((t) => !t.id && !t.absagen && t.datum);
+      if (neueTermine.length) {
+        const { error: neueTermineError } = await supabase.from('termine').insert(
+          neueTermine.map((termin) => ({
+            stelle_id: selectedStelle.id,
+            datum: termin.datum,
+            startzeit: termin.startzeit,
+            endzeit: termin.endzeit || null,
+            freie_plaetze: termin.plaetze,
+            gesamt_plaetze: termin.plaetze,
+          }))
+        );
+        if (neueTermineError) throw neueTermineError;
+      }
+
+      showToast?.('✓ Stelle aktualisiert!');
+      await refreshStellen();
+      setTab('stellen');
+    } catch (err) {
+      console.error(err);
+      showToast?.('Fehler beim Speichern.', '#E85C5C');
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
   return (
     <div>
-      <Header title="Gemeinde-Dashboard" subtitle={user?.name || user?.ort || 'Gemeinde'} onBack={onBack} onLogout={logout} />
+      <Header
+        title="Gemeinde-Dashboard"
+        subtitle={user?.name || user?.ort || 'Gemeinde'}
+        onBack={handleHeaderBack}
+        onLogout={logout}
+      />
+
       <div style={{ display:'flex', gap:8, padding:'0 16px 16px', flexWrap:'wrap' }}>
         {[
           ['dashboard','Übersicht'],
@@ -224,7 +490,7 @@ export default function GemeindeDashboard({
 
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(220px, 1fr))', gap:12 }}>
             {[
-              ['Einsätze', gemeindeStellen.length, 'diesen Monat'],
+              ['Einsätze', gemeindeStellen.length, 'aktuell aktiv'],
               ['Engagierte Helfer', totalBewerbungen, 'haben sich beteiligt'],
               ['Verlässlichkeit', '–', 'noch nicht genug Daten'],
               ['Aktivster Verein', '–', 'noch keine Auswertung möglich'],
@@ -243,13 +509,307 @@ export default function GemeindeDashboard({
         <div style={{ padding:'0 16px 24px' }}>
           {gemeindeStellen.length === 0 ? (
             <EmptyState icon="📍" text="Noch keine eigenen Stellen" sub="Gemeinden können hier selbst Aktionen und Ehrenamtsangebote veröffentlichen." />
-          ) : gemeindeStellen.map((s) => (
-            <div key={s.id || s.titel} style={{ background:'#FAF7F2', borderRadius:18, padding:18, marginBottom:12, border:'1px solid #E6D9C2' }}>
-              <div style={{ fontWeight:700, color:'#2C2416' }}>{s.titel}</div>
-              <div style={{ fontSize:13, color:'#8B7355', marginTop:6 }}>{s.beschreibung}</div>
-              <div style={{ fontSize:12, color:'#8B7355', marginTop:8 }}>{s.plz || user?.plz || ''} · {(s.termine || []).length} Termin(e)</div>
+          ) : gemeindeStellen.map((s) => {
+            const gesamtAnmeldungen = (s.termine || []).reduce(
+              (sum, t) => sum + (t.bewerbungen?.length || 0),
+              0
+            );
+            return (
+              <div key={s.id || s.titel} style={{ background:'#FAF7F2', borderRadius:18, padding:18, marginBottom:12, border:'1px solid #E6D9C2' }}>
+                <div style={{ fontWeight:700, color:'#2C2416', fontSize:22 }}>{s.titel}</div>
+                <div style={{ fontSize:13, color:'#8B7355', marginTop:6 }}>{s.beschreibung}</div>
+                <div style={{ fontSize:12, color:'#8B7355', marginTop:8 }}>
+                  📍 {s.ort || s.standort || user?.ort || ''} · 👥 {gesamtAnmeldungen} Anmeldungen · 📅 {(s.termine || []).length} Termin(e)
+                </div>
+                <div style={{ display:'flex', gap:8, marginTop:12 }}>
+                  <button
+                    onClick={() => openStelleDetail(s)}
+                    style={{ flex:1, padding:'8px 10px', borderRadius:10, border:'1px solid #E0D8C8', background:'transparent', color:'#2C2416', fontSize:12, cursor:'pointer', fontFamily:'inherit' }}
+                  >
+                    👥 Anmeldungen
+                  </button>
+                  <button
+                    onClick={() => openStelleEdit(s)}
+                    style={{ flex:1, padding:'8px 10px', borderRadius:10, border:'1px solid #5B9BD5', background:'transparent', color:'#5B9BD5', fontSize:12, cursor:'pointer', fontFamily:'inherit' }}
+                  >
+                    ✏️ Bearbeiten
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {tab === 'stellen-detail' && selectedStelle && (
+        <div style={{ padding:'0 16px 24px' }}>
+          <div style={{ background:'#FAF7F2', borderRadius:18, padding:18, marginBottom:12, border:'1px solid #E6D9C2' }}>
+            <div style={{ fontSize:22, fontWeight:700, color:'#2C2416' }}>{selectedStelle.titel}</div>
+            <div style={{ fontSize:13, color:'#8B7355', marginTop:6 }}>
+              📍 {selectedStelle.ort || selectedStelle.standort || user?.ort || ''} · 👁️ {selectedStelle.aufrufe || 0} Aufrufe
             </div>
-          ))}
+          </div>
+
+          {(selectedStelle.termine || []).length === 0 ? (
+            <EmptyState icon="📅" text="Keine Termine vorhanden" sub="Lege in der Bearbeitung neue Termine an." />
+          ) : (
+            selectedStelle.termine.map((termin) => {
+              const istVergangen = !isTerminAktuell(termin);
+              const nochNichtGestartet = isTerminNochNichtGestartet(termin);
+              return (
+                <div key={termin.id} style={{ background:'#FAF7F2', borderRadius:14, padding:14, marginBottom:12, border:'1px solid #E0D8C8' }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:6 }}>
+                    <div style={{ fontWeight:'bold', color:'#2C2416' }}>
+                      📅 {formatDate(termin.datum)} · 🕐 {termin.startzeit}{termin.endzeit ? ` – ${termin.endzeit}` : ''}
+                    </div>
+                    <div style={{ fontSize:11, color:istVergangen ? '#8B7355' : '#5B9BD5', fontWeight:'bold' }}>
+                      {istVergangen ? 'Vergangen' : 'Bevorstehend'}
+                    </div>
+                  </div>
+
+                  <div style={{ fontSize:12, color:'#3A7D44', marginBottom:10 }}>
+                    {termin.freie_plaetze} Plätze frei
+                  </div>
+
+                  {nochNichtGestartet && (
+                    <div style={{ display:'flex', gap:8, marginBottom:12 }}>
+                      <button
+                        disabled={detailActionLoading}
+                        onClick={() => {
+                          const neuesDatum = window.prompt('Neues Datum (YYYY-MM-DD):', termin.datum || '');
+                          if (!neuesDatum) return;
+                          const neueStartzeit = window.prompt('Neue Startzeit (HH:MM):', termin.startzeit || '') || '';
+                          const neueEndzeit = window.prompt('Neue Endzeit (optional HH:MM):', termin.endzeit || '') || '';
+                          handleTerminVerschieben(termin.id, neuesDatum, neueStartzeit, neueEndzeit);
+                        }}
+                        style={{ flex:1, padding:'8px 10px', borderRadius:10, border:'1px solid #5B9BD5', background:'transparent', color:'#5B9BD5', fontSize:12, cursor:'pointer', fontFamily:'inherit' }}
+                      >
+                        📅 Verschieben
+                      </button>
+                      <button
+                        disabled={detailActionLoading}
+                        onClick={() => handleTerminAbsagen(termin.id)}
+                        style={{ flex:1, padding:'8px 10px', borderRadius:10, border:'1px solid #E85C5C', background:'transparent', color:'#E85C5C', fontSize:12, cursor:'pointer', fontFamily:'inherit' }}
+                      >
+                        ✗ Absagen
+                      </button>
+                    </div>
+                  )}
+
+                  <SectionLabel>Angemeldete ({(termin.bewerbungen || []).length})</SectionLabel>
+                  {(termin.bewerbungen || []).length === 0 ? (
+                    <div style={{ fontSize:12, color:'#8B7355' }}>Noch niemand angemeldet.</div>
+                  ) : (
+                    (termin.bewerbungen || []).map((bewerbung) => (
+                      <div key={bewerbung.id} style={{ background:'#F4F0E8', borderRadius:10, padding:12, marginBottom:8 }}>
+                        <div style={{ fontWeight:'bold', fontSize:13 }}>👤 {bewerbung.freiwilliger_name}</div>
+                        <div style={{ fontSize:12, color:'#8B7355', margin:'4px 0 8px' }}>📧 {bewerbung.freiwilliger_email}</div>
+
+                        {nochNichtGestartet && (
+                          <button
+                            disabled={detailActionLoading}
+                            onClick={() => handleStornieren(bewerbung.id, termin.id)}
+                            style={{ width:'100%', padding:'7px', borderRadius:8, border:'1px solid #E85C5C', background:'transparent', color:'#E85C5C', fontSize:12, cursor:'pointer', fontFamily:'inherit' }}
+                          >
+                            🗑 Anmeldung stornieren
+                          </button>
+                        )}
+
+                        {istVergangen && !bewerbung.bestaetigt && !bewerbung.nicht_erschienen && (
+                          <div style={{ display:'flex', gap:8 }}>
+                            <button
+                              disabled={detailActionLoading}
+                              onClick={() => handleBestaetigen(bewerbung.id, true)}
+                              style={{ flex:1, padding:'8px', borderRadius:8, border:'none', background:'#3A7D44', color:'#fff', fontSize:12, fontFamily:'inherit', cursor:'pointer', fontWeight:'bold' }}
+                            >
+                              ✓ Erschienen
+                            </button>
+                            <button
+                              disabled={detailActionLoading}
+                              onClick={() => handleBestaetigen(bewerbung.id, false)}
+                              style={{ flex:1, padding:'8px', borderRadius:8, border:'none', background:'#E85C5C', color:'#fff', fontSize:12, fontFamily:'inherit', cursor:'pointer', fontWeight:'bold' }}
+                            >
+                              ✗ Nicht erschienen
+                            </button>
+                          </div>
+                        )}
+
+                        {istVergangen && bewerbung.bestaetigt && (
+                          <div style={{ fontSize:12, color:'#3A7D44', fontWeight:'bold' }}>✓ Erschienen bestätigt</div>
+                        )}
+
+                        {istVergangen && bewerbung.nicht_erschienen && (
+                          <div style={{ fontSize:12, color:'#E85C5C', fontWeight:'bold' }}>✗ Nicht erschienen</div>
+                        )}
+                      </div>
+                    ))
+                  )}
+                </div>
+              );
+            })
+          )}
+
+          <button
+            disabled={detailActionLoading}
+            onClick={handleDeleteStelle}
+            style={{ width:'100%', padding:'12px', borderRadius:12, border:'1px solid #E85C5C', background:'transparent', color:'#E85C5C', fontSize:13, cursor:'pointer', fontFamily:'inherit', marginTop:8 }}
+          >
+            Stelle löschen
+          </button>
+        </div>
+      )}
+
+      {tab === 'stellen-bearbeiten' && selectedStelle && editForm && (
+        <div style={{ padding:'0 16px 24px' }}>
+          <div style={{ background:'#FAF7F2', borderRadius:22, padding:22, border:'1px solid #E6D9C2' }}>
+            <div style={{ marginBottom:18 }}>
+              <div style={{ fontSize:24, fontWeight:700, color:'#2C2416', marginBottom:6 }}>Gemeinde-Stelle bearbeiten</div>
+              <div style={{ fontSize:14, color:'#8B7355', lineHeight:1.6 }}>
+                Termine, Inhalte und Plätze können hier ähnlich wie im Vereinsbereich verwaltet werden.
+              </div>
+            </div>
+
+            <Input label="Titel" value={editForm.titel} onChange={(e) => setEditForm((f) => ({ ...f, titel: e.target ? e.target.value : e }))} />
+            <div style={{ marginBottom:14 }}>
+              <div style={{ fontSize:12, color:'#8B7355', marginBottom:6, letterSpacing:0.5 }}>BESCHREIBUNG</div>
+              <textarea
+                value={editForm.beschreibung}
+                onChange={(e) => setEditForm((f) => ({ ...f, beschreibung: e.target.value }))}
+                rows={4}
+                style={{ width:'100%', padding:'10px 12px', borderRadius:10, border:'1px solid #E0D8C8', background:'#FAF7F2', fontFamily:'inherit', fontSize:14, color:'#2C2416', resize:'none', boxSizing:'border-box' }}
+              />
+            </div>
+
+            <div style={{ marginBottom:14 }}>
+              <div style={{ fontSize:12, color:'#8B7355', marginBottom:8 }}>KATEGORIE</div>
+              <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+                {KATEGORIEN.map((k) => (
+                  <button
+                    key={k.id}
+                    onClick={() => setEditForm((f) => ({ ...f, kategorie: k.id }))}
+                    style={{
+                      padding:'6px 12px',
+                      borderRadius:20,
+                      border:'none',
+                      cursor:'pointer',
+                      background: editForm.kategorie === k.id ? k.color : '#EDE8DE',
+                      color: editForm.kategorie === k.id ? '#fff' : '#8B7355',
+                      fontSize:12,
+                      fontFamily:'inherit',
+                    }}
+                  >
+                    {k.icon} {k.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {editForm.typ === 'dauerhaft' && (
+              <Input
+                label="Zeitaufwand pro Woche"
+                value={editForm.aufwand}
+                onChange={(e) => setEditForm((f) => ({ ...f, aufwand: e.target ? e.target.value : e }))}
+                placeholder="z. B. 2"
+              />
+            )}
+
+            <Input label="Standort / Treffpunkt" value={editForm.standort} onChange={(e) => setEditForm((f) => ({ ...f, standort: e.target ? e.target.value : e }))} />
+            <Input label="Ansprechpartner" value={editForm.ansprechpartner} onChange={(e) => setEditForm((f) => ({ ...f, ansprechpartner: e.target ? e.target.value : e }))} />
+            <Input label="Kontakt-E-Mail" value={editForm.kontakt_email} onChange={(e) => setEditForm((f) => ({ ...f, kontakt_email: e.target ? e.target.value : e }))} />
+            <Input label="PLZ" value={editForm.plz} onChange={(e) => setEditForm((f) => ({ ...f, plz: e.target ? e.target.value : e }))} />
+
+            <div style={{ display:'flex', alignItems:'center', gap:12, marginBottom:20, padding:'12px 14px', background:'#FAF7F2', borderRadius:10, border:'1px solid #E0D8C8' }}>
+              <input
+                type="checkbox"
+                checked={editForm.dringend}
+                onChange={(e) => setEditForm((f) => ({ ...f, dringend: e.target.checked }))}
+                id="gemeinde-dringend-edit"
+                style={{ width:18, height:18 }}
+              />
+              <label htmlFor="gemeinde-dringend-edit" style={{ fontSize:14, color:'#2C2416', cursor:'pointer' }}>
+                🔴 Als dringend markieren
+              </label>
+            </div>
+
+            <div style={{ marginBottom:20 }}>
+              <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12 }}>
+                <div style={{ fontSize:12, color:'#8B7355', letterSpacing:0.5 }}>TERMINE</div>
+                <button
+                  onClick={() => setEditForm((f) => ({ ...f, termine: [...f.termine, { id:null, datum:'', startzeit:'', endzeit:'', plaetze:5, absagen:false }] }))}
+                  style={{ padding:'4px 12px', borderRadius:8, border:'1px solid #2C2416', background:'transparent', color:'#2C2416', fontSize:12, cursor:'pointer', fontFamily:'inherit' }}
+                >
+                  + Termin hinzufügen
+                </button>
+              </div>
+
+              {editForm.termine.map((t, idx) => (
+                <div key={idx} style={{ background:t.absagen ? '#FFF0F0' : '#FAF7F2', borderRadius:12, padding:12, marginBottom:10, border:`1px solid ${t.absagen ? '#E85C5C' : '#E0D8C8'}`, opacity:t.absagen ? 0.65 : 1 }}>
+                  <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:8 }}>
+                    <div style={{ fontSize:12, fontWeight:'bold', color:t.absagen ? '#E85C5C' : '#2C2416' }}>
+                      {t.datum ? `📅 ${t.datum}` : 'Neuer Termin'} {t.absagen ? '– WIRD ABGESAGT' : ''}
+                    </div>
+                    <div style={{ display:'flex', gap:8 }}>
+                      {t.id ? (
+                        <button
+                          onClick={() => setEditForm((f) => ({ ...f, termine: f.termine.map((x, i) => i === idx ? { ...x, absagen: !x.absagen } : x) }))}
+                          style={{ padding:'4px 10px', borderRadius:8, border:`1px solid ${t.absagen ? '#3A7D44' : '#E85C5C'}`, background:'transparent', color:t.absagen ? '#3A7D44' : '#E85C5C', fontSize:11, cursor:'pointer', fontFamily:'inherit' }}
+                        >
+                          {t.absagen ? '↩ Rückgängig' : '✗ Absagen'}
+                        </button>
+                      ) : (
+                        <button
+                          onClick={() => setEditForm((f) => ({ ...f, termine: f.termine.filter((_, i) => i !== idx) }))}
+                          style={{ padding:'4px 10px', borderRadius:8, border:'1px solid #E85C5C', background:'transparent', color:'#E85C5C', fontSize:11, cursor:'pointer', fontFamily:'inherit' }}
+                        >
+                          Entfernen
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {!t.absagen && (
+                    <>
+                      <div style={{ display:'flex', gap:8, marginBottom:8 }}>
+                        <input
+                          type="date"
+                          value={t.datum}
+                          onChange={(e) => setEditForm((f) => ({ ...f, termine: f.termine.map((x, i) => i === idx ? { ...x, datum: e.target.value } : x) }))}
+                          style={{ flex:1, padding:'8px 10px', borderRadius:8, border:'1px solid #E0D8C8', background:'#fff', fontFamily:'inherit', fontSize:13, color:'#2C2416', boxSizing:'border-box' }}
+                        />
+                        <input
+                          type="time"
+                          value={t.startzeit}
+                          onChange={(e) => setEditForm((f) => ({ ...f, termine: f.termine.map((x, i) => i === idx ? { ...x, startzeit: e.target.value } : x) }))}
+                          style={{ flex:1, padding:'8px 10px', borderRadius:8, border:'1px solid #E0D8C8', background:'#fff', fontFamily:'inherit', fontSize:13, color:'#2C2416', boxSizing:'border-box' }}
+                        />
+                        <input
+                          type="time"
+                          value={t.endzeit}
+                          onChange={(e) => setEditForm((f) => ({ ...f, termine: f.termine.map((x, i) => i === idx ? { ...x, endzeit: e.target.value } : x) }))}
+                          style={{ flex:1, padding:'8px 10px', borderRadius:8, border:'1px solid #E0D8C8', background:'#fff', fontFamily:'inherit', fontSize:13, color:'#2C2416', boxSizing:'border-box' }}
+                        />
+                      </div>
+
+                      <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                        <div style={{ fontSize:12, color:'#8B7355' }}>Freie Plätze:</div>
+                        <input
+                          type="number"
+                          min="1"
+                          value={t.plaetze}
+                          onChange={(e) => setEditForm((f) => ({ ...f, termine: f.termine.map((x, i) => i === idx ? { ...x, plaetze: parseInt(e.target.value, 10) || 1 } : x) }))}
+                          style={{ width:70, padding:'6px 10px', borderRadius:8, border:'1px solid #E0D8C8', background:'#fff', fontFamily:'inherit', fontSize:13, color:'#2C2416' }}
+                        />
+                      </div>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            <BigButton onClick={handleEditSave} green>
+              {editLoading ? 'Speichern...' : 'Änderungen speichern ✓'}
+            </BigButton>
+          </div>
         </div>
       )}
 
@@ -361,7 +921,7 @@ export default function GemeindeDashboard({
             {form.typ === 'dauerhaft' && (
               <div style={{ marginBottom:14 }}>
                 <div style={{ fontSize:12, color:'#8B7355', marginBottom:6, letterSpacing:0.5 }}>
-                  ZEITAUFWAND PRO WOCHE (PFLICHT)
+                  ZEAITAUFWAND PRO WOCHE (PFLICHT)
                 </div>
                 <div style={{ display:'flex', alignItems:'center', gap:8 }}>
                   <input
@@ -582,11 +1142,11 @@ export default function GemeindeDashboard({
         </div>
       )}
 
-     {tab === 'organisationen' && (
-  <div style={{ padding:'0 16px 24px' }}>
-    <MeineVereinePanel />
-  </div>
-)}
+      {tab === 'organisationen' && (
+        <div style={{ padding:'0 16px 24px' }}>
+          <MeineVereinePanel />
+        </div>
+      )}
 
       {tab === 'support' && (
         <div style={{ padding:'0 16px 24px' }}>
@@ -650,7 +1210,6 @@ export default function GemeindeDashboard({
           </div>
         </div>
       )}
-
 
       {tab === 'settings' && (
         <div style={{ padding:'0 16px 24px' }}>
