@@ -5,6 +5,13 @@ import {
 } from "../../services/messages";
 import MessageThreadView from "./MessageThreadView";
 
+const cardStyle = {
+  background: "#FAF7F2",
+  borderRadius: 18,
+  padding: 18,
+  border: "1px solid #E6D9C2",
+};
+
 export default function MeineVereinePanel() {
   const [vereine, setVereine] = useState([]);
   const [filteredVereine, setFilteredVereine] = useState([]);
@@ -15,7 +22,6 @@ export default function MeineVereinePanel() {
   const [loadingThread, setLoadingThread] = useState(false);
   const [error, setError] = useState("");
 
-  // Vereine laden
   useEffect(() => {
     async function load() {
       setLoading(true);
@@ -23,8 +29,8 @@ export default function MeineVereinePanel() {
 
       try {
         const data = await getGemeindeVereine();
-        setVereine(data);
-        setFilteredVereine(data);
+        setVereine(data || []);
+        setFilteredVereine(data || []);
       } catch (err) {
         console.error(err);
         setError(err?.message || "Vereine konnten nicht geladen werden.");
@@ -36,21 +42,21 @@ export default function MeineVereinePanel() {
     load();
   }, []);
 
-  // Suche
   useEffect(() => {
     const lower = search.toLowerCase();
 
     const filtered = vereine.filter((v) =>
-      v.name?.toLowerCase().includes(lower)
+      v.name?.toLowerCase().includes(lower) ||
+      v.email?.toLowerCase().includes(lower)
     );
 
     setFilteredVereine(filtered);
   }, [search, vereine]);
 
-  // Thread öffnen
   async function openThread(verein) {
     setSelectedVerein(verein);
     setLoadingThread(true);
+    setError("");
 
     try {
       const threadData = await getOrCreateVereinGemeindeThread(verein.id);
@@ -64,73 +70,132 @@ export default function MeineVereinePanel() {
   }
 
   if (loading) {
-    return <div className="text-sm text-gray-500">Vereine werden geladen …</div>;
+    return <div style={{ color: "#8B7355", fontSize: 14 }}>Vereine werden geladen …</div>;
   }
 
-  if (error) {
-    return <div className="text-sm text-red-600">{error}</div>;
+  if (error && !selectedVerein) {
+    return <div style={{ color: "#B53A2D", fontSize: 14, fontWeight: 700 }}>{error}</div>;
   }
 
   return (
-    <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-      
-      {/* LINK: Vereinsliste */}
-      <div className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-        <h2 className="mb-3 text-xl font-semibold">Meine Vereine</h2>
+    <div style={{ display: "grid", gridTemplateColumns: "360px 1fr", gap: 18 }}>
+      <div style={cardStyle}>
+        <div style={{ fontSize: 12, color: "#8B7355", letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 8 }}>
+          Organisationen
+        </div>
+        <div style={{ fontSize: 24, fontWeight: 700, color: "#2C2416", marginBottom: 14 }}>
+          Meine Vereine
+        </div>
 
-        {/* Suche */}
         <input
           type="text"
           placeholder="Verein suchen …"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="mb-4 w-full rounded-xl border border-gray-300 px-3 py-2 text-sm outline-none focus:border-gray-500"
+          style={{
+            width: "100%",
+            borderRadius: 14,
+            border: "1px solid #D8CBB6",
+            padding: 12,
+            fontFamily: "inherit",
+            fontSize: 14,
+            boxSizing: "border-box",
+            marginBottom: 14,
+          }}
         />
 
-        <div className="space-y-2 max-h-[400px] overflow-y-auto">
+        <div style={{ display: "grid", gap: 10, maxHeight: 520, overflowY: "auto" }}>
           {filteredVereine.length === 0 ? (
-            <div className="text-sm text-gray-500">
+            <div style={{ color: "#8B7355", fontSize: 14 }}>
               Keine Vereine gefunden.
             </div>
           ) : (
-            filteredVereine.map((verein) => (
-              <div
-                key={verein.id}
-                className="flex items-center justify-between rounded-xl border border-gray-100 px-3 py-2"
-              >
-                <div>
-                  <p className="text-sm font-medium text-gray-900">
-                    {verein.name}
-                  </p>
-                  <p className="text-xs text-gray-500">{verein.email}</p>
-                </div>
+            filteredVereine.map((verein) => {
+              const isActive = selectedVerein?.id === verein.id;
 
+              return (
                 <button
+                  key={verein.id}
                   onClick={() => openThread(verein)}
-                  className="rounded-lg bg-gray-900 px-3 py-1.5 text-xs text-white hover:bg-black"
+                  style={{
+                    width: "100%",
+                    textAlign: "left",
+                    border: isActive ? "2px solid #2C2416" : "1px solid #E6D9C2",
+                    background: isActive ? "#F3EBDD" : "#FFFDF8",
+                    borderRadius: 14,
+                    padding: 14,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                  }}
                 >
-                  Nachrichten
+                  <div style={{ fontWeight: 700, fontSize: 16, color: "#2C2416", marginBottom: 4 }}>
+                    {verein.name}
+                  </div>
+                  <div style={{ fontSize: 13, color: "#8B7355", marginBottom: 10 }}>
+                    {verein.email || "Keine E-Mail hinterlegt"}
+                  </div>
+                  <div
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      borderRadius: 999,
+                      padding: "6px 10px",
+                      background: isActive ? "#2C2416" : "#EFE8DB",
+                      color: isActive ? "#fff" : "#5C4A32",
+                      fontSize: 12,
+                      fontWeight: 700,
+                    }}
+                  >
+                    Nachrichten öffnen
+                  </div>
                 </button>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       </div>
 
-      {/* RECHTS: Nachrichten */}
-      <div>
+      <div style={cardStyle}>
+        {error && selectedVerein ? (
+          <div style={{ color: "#B53A2D", fontSize: 14, fontWeight: 700, marginBottom: 12 }}>{error}</div>
+        ) : null}
+
         {loadingThread ? (
-          <div className="text-sm text-gray-500">
+          <div style={{ color: "#8B7355", fontSize: 14 }}>
             Nachrichten werden geladen …
           </div>
         ) : selectedVerein && thread ? (
-          <MessageThreadView
-            threadId={thread.id}
-            title={`Nachrichten mit ${selectedVerein.name}`}
-          />
+          <>
+            <div style={{ fontSize: 12, color: "#8B7355", letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 8 }}>
+              Nachrichtenverlauf
+            </div>
+            <div style={{ fontSize: 24, fontWeight: 700, color: "#2C2416", marginBottom: 6 }}>
+              {selectedVerein.name}
+            </div>
+            <div style={{ fontSize: 13, color: "#8B7355", marginBottom: 14 }}>
+              {selectedVerein.email || "Keine E-Mail hinterlegt"}
+            </div>
+
+            <MessageThreadView
+              threadId={thread.id}
+              title=""
+              emptyText={`Noch keine Nachrichten mit ${selectedVerein.name} vorhanden.`}
+            />
+          </>
         ) : (
-          <div className="rounded-2xl border border-gray-200 bg-white p-4 text-sm text-gray-500 shadow-sm">
-            Wähle einen Verein aus, um Nachrichten zu sehen.
+          <div
+            style={{
+              minHeight: 280,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              textAlign: "center",
+              color: "#8B7355",
+              fontSize: 14,
+            }}
+          >
+            Wähle links einen Verein aus, um den Nachrichtenverlauf zu öffnen.
           </div>
         )}
       </div>
