@@ -2,7 +2,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import MeineVereinePanel from '../components/messages/MeineVereinePanel';
 import MessageThreadView from '../components/messages/MessageThreadView';
-import { supabase } from '../core/shared';
+import { supabase, KATEGORIEN } from '../core/shared';
 import { Header, Input, BigButton, SectionLabel, EmptyState } from '../components/ui';
 
 function defaultTermin() {
@@ -41,11 +41,14 @@ export default function GemeindeDashboard({
   const [form, setForm] = useState({
     titel: '',
     beschreibung: '',
-    typ: 'einmalig',
+    typ: 'event',
     kategorie: 'sozial',
+    aufwand: '',
     standort: '',
     ansprechpartner: '',
+    kontakt_email: '',
     plz: user?.plz || '',
+    dringend: false,
     termine: [defaultTermin()],
   });
 
@@ -75,11 +78,14 @@ export default function GemeindeDashboard({
     setForm({
       titel: '',
       beschreibung: '',
-      typ: 'einmalig',
+      typ: 'event',
       kategorie: 'sozial',
+      aufwand: '',
       standort: '',
       ansprechpartner: '',
+      kontakt_email: '',
       plz: user?.plz || '',
+      dringend: false,
       termine: [defaultTermin()],
     });
     setTab('stellen');
@@ -209,16 +215,24 @@ export default function GemeindeDashboard({
 
       {tab === 'dashboard' && (
         <div style={{ padding:'0 16px 24px' }}>
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+          <div style={{ background:'#FAF7F2', borderRadius:18, padding:18, border:'1px solid #E6D9C2', marginBottom:12 }}>
+            <div style={{ fontSize:20, fontWeight:700, color:'#2C2416', marginBottom:6 }}>Wirkung in Ihrer Gemeinde</div>
+            <div style={{ fontSize:13, color:'#8B7355', lineHeight:1.6 }}>
+              Hier sehen Sie kompakt, wie viel Engagement aktuell über Civico in Ihrer Gemeinde sichtbar wird.
+            </div>
+          </div>
+
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(220px, 1fr))', gap:12 }}>
             {[
-              ['Organisationen', organisationen.length],
-              ['Eigene Stellen', gemeindeStellen.length],
-              ['Anmeldungen', totalBewerbungen],
-              ['Support', inbox.length],
-            ].map(([label, value]) => (
+              ['Einsätze', gemeindeStellen.length, 'diesen Monat'],
+              ['Engagierte Helfer', totalBewerbungen, 'haben sich beteiligt'],
+              ['Verlässlichkeit', '–', 'noch nicht genug Daten'],
+              ['Aktivster Verein', '–', 'noch keine Auswertung möglich'],
+            ].map(([label, value, sub]) => (
               <div key={label} style={{ background:'#FAF7F2', borderRadius:18, padding:18, border:'1px solid #E6D9C2' }}>
-                <div style={{ color:'#8B7355', fontSize:12, marginBottom:8 }}>{label}</div>
-                <div style={{ fontSize:28, fontWeight:700, color:'#2C2416' }}>{value}</div>
+                <div style={{ fontSize:28, fontWeight:700, color:'#2C2416', marginBottom:8 }}>{value}</div>
+                <div style={{ fontWeight:700, color:'#2C2416' }}>{label}</div>
+                <div style={{ fontSize:12, color:'#8B7355', marginTop:4 }}>{sub}</div>
               </div>
             ))}
           </div>
@@ -243,124 +257,327 @@ export default function GemeindeDashboard({
         <div style={{ padding:'0 16px 24px' }}>
           <div style={{ background:'#FAF7F2', borderRadius:22, padding:22, border:'1px solid #E6D9C2' }}>
             <div style={{ marginBottom:18, padding:'0 2px' }}>
-              <div style={{ fontSize:24, fontWeight:700, color:'#2C2416', marginBottom:6 }}>Gemeinde-Stelle erstellen</div>
+              <div style={{ fontSize:24, fontWeight:700, color:'#2C2416', marginBottom:6 }}>
+                Neue Gemeinde-Stelle
+              </div>
               <div style={{ fontSize:14, color:'#8B7355', lineHeight:1.6 }}>
-                Erstellen Sie hier eigene Aktionen, Projekte oder Helfereinsätze Ihrer Gemeinde.
+                Erstellen Sie hier einmalige Einsätze oder dauerhafte Unterstützungsmöglichkeiten für Ihre Gemeinde.
               </div>
             </div>
 
-            <div style={{ display:'grid', gap:14 }}>
-              <Input label="Titel" value={form.titel} onChange={(e) => setForm((f) => ({...f, titel:e.target ? e.target.value : e}))} />
+            <Input
+              label="Titel"
+              value={form.titel}
+              onChange={(e) => setForm((f) => ({ ...f, titel: e.target ? e.target.value : e }))}
+              placeholder="z. B. Unterstützung beim Bürgerfest"
+            />
 
-              <div>
-                <div style={{ fontSize:12, fontWeight:700, color:'#8B7355', marginBottom:8, letterSpacing:0.4 }}>BESCHREIBUNG</div>
-                <textarea
-                  value={form.beschreibung}
-                  onChange={(e) => setForm((f) => ({...f, beschreibung:e.target.value}))}
-                  rows={5}
-                  placeholder="Beschreibe kurz, worum es bei der Aktion geht und wobei Hilfe gebraucht wird."
+            <div style={{ marginBottom:14 }}>
+              <div style={{ fontSize:12, color:'#8B7355', marginBottom:6, letterSpacing:0.5 }}>BESCHREIBUNG</div>
+              <textarea
+                value={form.beschreibung}
+                onChange={(e) => setForm((f) => ({ ...f, beschreibung: e.target.value }))}
+                placeholder="Was erwartet die Helferinnen und Helfer?"
+                rows={4}
+                style={{
+                  width:'100%',
+                  padding:'10px 12px',
+                  borderRadius:10,
+                  border:'1px solid #E0D8C8',
+                  background:'#FAF7F2',
+                  fontFamily:'inherit',
+                  fontSize:14,
+                  color:'#2C2416',
+                  resize:'none',
+                  boxSizing:'border-box',
+                }}
+              />
+            </div>
+
+            <div style={{ marginBottom:14 }}>
+              <div style={{ fontSize:12, color:'#8B7355', marginBottom:8 }}>TYP</div>
+              <div style={{ display:'flex', gap:8 }}>
+                <button
+                  onClick={() => setForm((f) => ({ ...f, typ: 'event', aufwand: '' }))}
                   style={{
-                    width:'100%',
-                    borderRadius:16,
-                    border:'1px solid #D8CBB6',
-                    padding:'14px 16px',
+                    flex:1,
+                    padding:'10px',
+                    borderRadius:10,
+                    border:'none',
+                    cursor:'pointer',
+                    background: form.typ === 'event' ? '#2C2416' : '#EDE8DE',
+                    color: form.typ === 'event' ? '#FAF7F2' : '#8B7355',
                     fontFamily:'inherit',
-                    fontSize:14,
-                    color:'#2C2416',
-                    background:'#FFFDFC',
-                    boxSizing:'border-box',
-                    resize:'vertical',
-                    outline:'none'
+                    fontSize:13,
+                    fontWeight:'bold',
                   }}
-                />
+                >
+                  📅 Einmaliger Einsatz
+                </button>
+                <button
+                  onClick={() => setForm((f) => ({ ...f, typ: 'dauerhaft' }))}
+                  style={{
+                    flex:1,
+                    padding:'10px',
+                    borderRadius:10,
+                    border:'none',
+                    cursor:'pointer',
+                    background: form.typ === 'dauerhaft' ? '#2C2416' : '#EDE8DE',
+                    color: form.typ === 'dauerhaft' ? '#FAF7F2' : '#8B7355',
+                    fontFamily:'inherit',
+                    fontSize:13,
+                    fontWeight:'bold',
+                  }}
+                >
+                  🔄 Dauerhafte Unterstützung
+                </button>
               </div>
+            </div>
 
-              <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(220px, 1fr))', gap:12 }}>
-                <div>
-                  <div style={{ fontSize:12, fontWeight:700, color:'#8B7355', marginBottom:8, letterSpacing:0.4 }}>KATEGORIE</div>
-                  <select
-                    value={form.kategorie}
-                    onChange={(e) => setForm((f)=>({...f, kategorie:e.target.value}))}
+            <div style={{ marginBottom:14 }}>
+              <div style={{ fontSize:12, color:'#8B7355', marginBottom:8 }}>KATEGORIE</div>
+              <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+                {KATEGORIEN.map((k) => (
+                  <button
+                    key={k.id}
+                    onClick={() => setForm((f) => ({ ...f, kategorie: k.id }))}
                     style={{
-                      width:'100%',
-                      borderRadius:14,
-                      border:'1px solid #D8CBB6',
-                      padding:'12px 14px',
+                      padding:'6px 12px',
+                      borderRadius:20,
+                      border:'none',
+                      cursor:'pointer',
+                      background: form.kategorie === k.id ? k.color : '#EDE8DE',
+                      color: form.kategorie === k.id ? '#fff' : '#8B7355',
+                      fontSize:12,
+                      fontFamily:'inherit',
+                    }}
+                  >
+                    {k.icon} {k.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {form.typ === 'dauerhaft' && (
+              <div style={{ marginBottom:14 }}>
+                <div style={{ fontSize:12, color:'#8B7355', marginBottom:6, letterSpacing:0.5 }}>
+                  ZEITAUFWAND PRO WOCHE (PFLICHT)
+                </div>
+                <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+                  <input
+                    type="number"
+                    min="0.5"
+                    step="0.5"
+                    value={form.aufwand}
+                    onChange={(e) => setForm((f) => ({ ...f, aufwand: e.target.value }))}
+                    placeholder="z. B. 2"
+                    style={{
+                      width:100,
+                      padding:'11px 14px',
+                      borderRadius:10,
+                      border:'1px solid #E0D8C8',
+                      background:'#FAF7F2',
                       fontFamily:'inherit',
                       fontSize:14,
                       color:'#2C2416',
-                      background:'#FFFDFC',
                       boxSizing:'border-box',
-                      outline:'none'
+                      outline:'none',
                     }}
-                  >
-                    <option value="sozial">Soziales</option>
-                    <option value="umwelt">Umwelt</option>
-                    <option value="sport">Sport</option>
-                    <option value="kultur">Kultur</option>
-                    <option value="bildung">Bildung</option>
-                    <option value="feuerwehr">Feuerwehr</option>
-                  </select>
+                  />
+                  <div style={{ fontSize:14, color:'#8B7355', fontWeight:'bold' }}>Stunden / Woche</div>
                 </div>
-
-                <Input label="PLZ" value={form.plz} onChange={(e) => setForm((f)=>({...f, plz:e.target ? e.target.value : e}))} />
-                <Input label="Standort" value={form.standort} onChange={(e) => setForm((f)=>({...f, standort:e.target ? e.target.value : e}))} />
-                <Input label="Ansprechpartner" value={form.ansprechpartner} onChange={(e) => setForm((f)=>({...f, ansprechpartner:e.target ? e.target.value : e}))} />
               </div>
+            )}
+
+            <Input
+              label="Standort / Treffpunkt"
+              value={form.standort}
+              onChange={(e) => setForm((f) => ({ ...f, standort: e.target ? e.target.value : e }))}
+              placeholder="z. B. Bürgerhaus Einhausen"
+            />
+            <Input
+              label="Ansprechpartner (optional)"
+              value={form.ansprechpartner}
+              onChange={(e) => setForm((f) => ({ ...f, ansprechpartner: e.target ? e.target.value : e }))}
+              placeholder="z. B. Max Mustermann"
+            />
+            <Input
+              label="Kontakt-E-Mail (optional)"
+              value={form.kontakt_email}
+              onChange={(e) => setForm((f) => ({ ...f, kontakt_email: e.target ? e.target.value : e }))}
+              placeholder="z. B. ordnungsamt@gemeinde.de"
+            />
+            <Input
+              label="PLZ"
+              value={form.plz}
+              onChange={(e) => setForm((f) => ({ ...f, plz: e.target ? e.target.value : e }))}
+              placeholder="z. B. 64683"
+            />
+
+            <div
+              style={{
+                display:'flex',
+                alignItems:'center',
+                gap:12,
+                marginBottom:20,
+                padding:'12px 14px',
+                background:'#FAF7F2',
+                borderRadius:10,
+                border:'1px solid #E0D8C8',
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={form.dringend}
+                onChange={(e) => setForm((f) => ({ ...f, dringend: e.target.checked }))}
+                id="gemeinde-dringend"
+                style={{ width:18, height:18 }}
+              />
+              <label htmlFor="gemeinde-dringend" style={{ fontSize:14, color:'#2C2416', cursor:'pointer' }}>
+                🔴 Als dringend markieren
+              </label>
             </div>
 
-            <div style={{ marginTop:22 }}>
-              <div style={{ fontSize:12, fontWeight:700, color:'#8B7355', marginBottom:10, letterSpacing:1 }}>TERMINE</div>
-              <div style={{ fontSize:13, color:'#8B7355', marginBottom:12 }}>
-                Legen Sie mindestens einen Termin mit Uhrzeit und benötigten Plätzen fest.
-              </div>
-
-              <div style={{ display:'grid', gap:10 }}>
-                {form.termine.map((t, idx) => (
-                  <div key={idx} style={{ background:'#F7F1E6', border:'1px solid #E6D9C2', borderRadius:18, padding:14 }}>
-                    <div style={{ fontSize:13, fontWeight:700, color:'#5C4A32', marginBottom:10 }}>Termin {idx + 1}</div>
-                    <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(140px, 1fr))', gap:10 }}>
-                      <div>
-                        <div style={{ fontSize:11, fontWeight:700, color:'#8B7355', marginBottom:6, letterSpacing:0.4 }}>DATUM</div>
-                        <input type="date" value={t.datum} onChange={(e)=>setForm((f)=>({...f, termine:f.termine.map((x,i)=>i===idx?{...x, datum:e.target.value}:x)}))} style={{ width:'100%', borderRadius:12, border:'1px solid #D8CBB6', padding:'10px 12px', background:'#FFFDFC', boxSizing:'border-box', fontFamily:'inherit' }} />
-                      </div>
-                      <div>
-                        <div style={{ fontSize:11, fontWeight:700, color:'#8B7355', marginBottom:6, letterSpacing:0.4 }}>START</div>
-                        <input type="time" value={t.startzeit} onChange={(e)=>setForm((f)=>({...f, termine:f.termine.map((x,i)=>i===idx?{...x, startzeit:e.target.value}:x)}))} style={{ width:'100%', borderRadius:12, border:'1px solid #D8CBB6', padding:'10px 12px', background:'#FFFDFC', boxSizing:'border-box', fontFamily:'inherit' }} />
-                      </div>
-                      <div>
-                        <div style={{ fontSize:11, fontWeight:700, color:'#8B7355', marginBottom:6, letterSpacing:0.4 }}>ENDE</div>
-                        <input type="time" value={t.endzeit} onChange={(e)=>setForm((f)=>({...f, termine:f.termine.map((x,i)=>i===idx?{...x, endzeit:e.target.value}:x)}))} style={{ width:'100%', borderRadius:12, border:'1px solid #D8CBB6', padding:'10px 12px', background:'#FFFDFC', boxSizing:'border-box', fontFamily:'inherit' }} />
-                      </div>
-                      <div>
-                        <div style={{ fontSize:11, fontWeight:700, color:'#8B7355', marginBottom:6, letterSpacing:0.4 }}>PLÄTZE</div>
-                        <input type="number" min="1" value={t.plaetze} onChange={(e)=>setForm((f)=>({...f, termine:f.termine.map((x,i)=>i===idx?{...x, plaetze:Number(e.target.value)}:x)}))} style={{ width:'100%', borderRadius:12, border:'1px solid #D8CBB6', padding:'10px 12px', background:'#FFFDFC', boxSizing:'border-box', fontFamily:'inherit' }} />
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <button
-                onClick={()=>setForm((f)=>({...f, termine:[...f.termine, defaultTermin()]}))}
+            <div style={{ marginBottom:20 }}>
+              <div
                 style={{
-                  border:'none',
-                  background:'#EFE8DB',
-                  color:'#2C2416',
-                  borderRadius:14,
-                  padding:'11px 16px',
-                  cursor:'pointer',
-                  fontFamily:'inherit',
-                  fontWeight:700,
-                  marginTop:12,
-                  marginBottom:18
+                  display:'flex',
+                  justifyContent:'space-between',
+                  alignItems:'center',
+                  marginBottom:8,
                 }}
               >
-                + Termin hinzufügen
-              </button>
+                <div style={{ fontSize:12, color:'#8B7355', letterSpacing:0.5 }}>
+                  {form.typ === 'dauerhaft' ? 'TERMIN ZUM ERST- / EINFÜHRUNGSGESPRÄCH' : 'TERMINE'}
+                </div>
+                <button
+                  onClick={() => setForm((f) => ({ ...f, termine: [...f.termine, defaultTermin()] }))}
+                  style={{
+                    padding:'4px 12px',
+                    borderRadius:8,
+                    border:'1px solid #2C2416',
+                    background:'transparent',
+                    color:'#2C2416',
+                    fontSize:12,
+                    cursor:'pointer',
+                    fontFamily:'inherit',
+                  }}
+                >
+                  + {form.typ === 'dauerhaft' ? 'Einführungsgespräch' : 'Termin'}
+                </button>
+              </div>
 
-              <BigButton onClick={handleSave} green>Als Gemeinde-Stelle speichern</BigButton>
+              {form.termine.map((t, idx) => (
+                <div
+                  key={idx}
+                  style={{
+                    background:'#FAF7F2',
+                    borderRadius:12,
+                    padding:'12px',
+                    marginBottom:10,
+                    border:'1px solid #E0D8C8',
+                  }}
+                >
+                  <div style={{ display:'flex', gap:8, marginBottom:8 }}>
+                    <input
+                      type="date"
+                      value={t.datum}
+                      onChange={(e)=>setForm((f)=>({...f, termine:f.termine.map((x,i)=>i===idx?{...x, datum:e.target.value}:x)}))}
+                      style={{
+                        flex:2,
+                        padding:'8px 10px',
+                        borderRadius:8,
+                        border:'1px solid #E0D8C8',
+                        background:'#fff',
+                        fontFamily:'inherit',
+                        fontSize:13,
+                        color:'#2C2416',
+                        boxSizing:'border-box',
+                      }}
+                    />
+                    {form.termine.length > 1 && (
+                      <button
+                        onClick={() => setForm((f) => ({ ...f, termine: f.termine.filter((_, i) => i !== idx) }))}
+                        style={{
+                          padding:'6px 10px',
+                          borderRadius:8,
+                          border:'none',
+                          background:'#FFF0F0',
+                          color:'#E85C5C',
+                          fontSize:12,
+                          cursor:'pointer',
+                        }}
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                  <div style={{ display:'flex', gap:8, marginBottom:8 }}>
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontSize:10, color:'#8B7355', marginBottom:3 }}>STARTZEIT</div>
+                      <input
+                        type="time"
+                        value={t.startzeit}
+                        onChange={(e)=>setForm((f)=>({...f, termine:f.termine.map((x,i)=>i===idx?{...x, startzeit:e.target.value}:x)}))}
+                        style={{
+                          width:'100%',
+                          padding:'8px 10px',
+                          borderRadius:8,
+                          border:'1px solid #E0D8C8',
+                          background:'#fff',
+                          fontFamily:'inherit',
+                          fontSize:13,
+                          color:'#2C2416',
+                          boxSizing:'border-box',
+                        }}
+                      />
+                    </div>
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontSize:10, color:'#8B7355', marginBottom:3 }}>ENDZEIT (optional)</div>
+                      <input
+                        type="time"
+                        value={t.endzeit}
+                        onChange={(e)=>setForm((f)=>({...f, termine:f.termine.map((x,i)=>i===idx?{...x, endzeit:e.target.value}:x)}))}
+                        style={{
+                          width:'100%',
+                          padding:'8px 10px',
+                          borderRadius:8,
+                          border:'1px solid #E0D8C8',
+                          background:'#fff',
+                          fontFamily:'inherit',
+                          fontSize:13,
+                          color:'#2C2416',
+                          boxSizing:'border-box',
+                        }}
+                      />
+                    </div>
+                  </div>
+                  <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                    <div style={{ fontSize:12, color:'#8B7355' }}>Freie Plätze:</div>
+                    <input
+                      type="number"
+                      min="1"
+                      value={t.plaetze}
+                      onChange={(e)=>setForm((f)=>({...f, termine:f.termine.map((x,i)=>i===idx?{...x, plaetze:parseInt(e.target.value) || 1}:x)}))}
+                      style={{
+                        width:70,
+                        padding:'6px 10px',
+                        borderRadius:8,
+                        border:'1px solid #E0D8C8',
+                        background:'#fff',
+                        fontFamily:'inherit',
+                        fontSize:13,
+                        color:'#2C2416',
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
             </div>
+
+            <BigButton onClick={handleSave} green>
+              Stelle veröffentlichen ✓
+            </BigButton>
           </div>
         </div>
       )}
