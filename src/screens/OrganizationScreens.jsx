@@ -3,6 +3,7 @@ import MeineGemeindePanel from "../components/messages/MeineGemeindePanel";
 import { supabase, T, KATEGORIEN, SKILLS, getSkillLabel, getKat, getMedaille, getNextMedaille, getMedailleName, IMPRESSUM_TEXT, DATENSCHUTZ_TEXT, AGB_TEXT, formatDate, getGemeindeByPlz, isKlarname, isTerminNochNichtGestartet, isTerminAktuell } from '../core/shared';
 import { Header, StelleCard, VereineListe, BottomBar, DatenschutzBox, Input, BigButton, Chip, InfoChip, SectionLabel, RoleCard, EmptyState, ErrorMsg } from '../components/ui';
 
+
 function VereinDashboard({
   user,
   stellen,
@@ -29,6 +30,24 @@ function VereinDashboard({
     (s) => s.verein_id === user.data.id && s.archiviert
   );
   const [zeigeArchiv, setZeigeArchiv] = useState(false);
+
+  const offeneStellen = meineStellen.length;
+  const offeneTermine = meineStellen.reduce(
+    (sum, s) => sum + (s.termine || []).length,
+    0
+  );
+  const unreadNotifications = notifications.filter((n) => !n.gelesen).length;
+
+  const actionButton = (styles = {}) => ({
+    flex: 1,
+    padding: "12px",
+    borderRadius: 12,
+    fontSize: 13,
+    fontFamily: "inherit",
+    cursor: "pointer",
+    ...styles,
+  });
+
   return (
     <div>
       <div
@@ -78,7 +97,7 @@ function VereinDashboard({
               }}
             >
               🔔
-              {notifications.filter((n) => !n.gelesen).length > 0 && (
+              {unreadNotifications > 0 && (
                 <span
                   style={{
                     position: "absolute",
@@ -96,9 +115,7 @@ function VereinDashboard({
                     fontWeight: "bold",
                   }}
                 >
-                  {notifications.filter((n) => !n.gelesen).length > 9
-                    ? "9+"
-                    : notifications.filter((n) => !n.gelesen).length}
+                  {unreadNotifications > 9 ? "9+" : unreadNotifications}
                 </span>
               )}
             </button>
@@ -120,7 +137,7 @@ function VereinDashboard({
           </button>
         </div>
       </div>
-      {/* Notification Dropdown */}
+
       {showNotif && (
         <div
           style={{
@@ -190,7 +207,56 @@ function VereinDashboard({
           )}
         </div>
       )}
+
       <div style={{ padding: "16px 16px 100px" }}>
+        <div
+          style={{
+            background: "linear-gradient(135deg,#2C2416,#4A3C28)",
+            borderRadius: 18,
+            padding: "18px 18px 16px",
+            marginBottom: 16,
+            color: "#F4F0E8",
+            boxShadow: "0 10px 28px rgba(44,36,22,0.14)",
+          }}
+        >
+          <div style={{ fontSize: 20, fontWeight: "bold", marginBottom: 6 }}>
+            {user.data.name}
+          </div>
+          <div style={{ fontSize: 13, color: "#CDBA97", lineHeight: 1.6 }}>
+            Verwalte deine Stellen, behalte Rückmeldungen im Blick und kommuniziere direkt mit deiner Gemeinde.
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1fr 1fr 1fr",
+              gap: 10,
+              marginTop: 16,
+            }}
+          >
+            {[
+              ["Aktive Stellen", offeneStellen],
+              ["Termine", offeneTermine],
+              ["Benachrichtigungen", unreadNotifications],
+            ].map(([label, value]) => (
+              <div
+                key={label}
+                style={{
+                  background: "rgba(255,255,255,0.08)",
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  borderRadius: 14,
+                  padding: "12px 14px",
+                }}
+              >
+                <div style={{ fontSize: 11, color: "#CDBA97", marginBottom: 6 }}>
+                  {label}
+                </div>
+                <div style={{ fontSize: 24, fontWeight: "bold" }}>{value}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
         <div
           style={{
             display: "flex",
@@ -210,72 +276,50 @@ function VereinDashboard({
               }
               onNeu();
             }}
-            style={{
+            style={actionButton({
               flex: 2,
-              padding: "12px",
-              borderRadius: 12,
               border: "none",
               background: user.data.verifiziert
                 ? "linear-gradient(135deg, #2C2416, #4A3C28)"
                 : "#C4B89A",
               color: "#F4F0E8",
-              fontSize: 14,
-              fontFamily: "inherit",
               fontWeight: "bold",
-              cursor: "pointer",
-            }}
+            })}
           >
             + Neue Stelle
           </button>
           <button
             onClick={onProfil}
-            style={{
-              flex: 1,
-              padding: "12px",
-              borderRadius: 12,
+            style={actionButton({
               border: "1px solid #8B7355",
               background: "transparent",
               color: "#8B7355",
-              fontSize: 13,
-              fontFamily: "inherit",
-              cursor: "pointer",
-            }}
+            })}
           >
             👤 Profil
           </button>
           <button
             onClick={onAnalyse}
-            style={{
-              flex: 1,
-              padding: "12px",
-              borderRadius: 12,
+            style={actionButton({
               border: "1px solid #5B9BD5",
               background: "transparent",
               color: "#5B9BD5",
-              fontSize: 13,
-              fontFamily: "inherit",
-              cursor: "pointer",
-            }}
+            })}
           >
             📊 Analyse
           </button>
           <button
             onClick={onMeineGemeinde}
-            style={{
-              flex: 1,
-              padding: "12px",
-              borderRadius: 12,
+            style={actionButton({
               border: "1px solid #C8A96E",
               background: "transparent",
               color: "#C8A96E",
-              fontSize: 13,
-              fontFamily: "inherit",
-              cursor: "pointer",
-            }}
+            })}
           >
-            🏛 Meine Gemeinde
+            🏛 Gemeinde & Support
           </button>
         </div>
+
         {!user.data.verifiziert && (
           <div
             style={{
@@ -289,13 +333,12 @@ function VereinDashboard({
             <div style={{ fontSize: 13, color: "#8B6800", fontWeight: "bold" }}>
               ⏳ Verifizierung ausstehend
             </div>
-            <div style={{ fontSize: 12, color: "#8B6800", marginTop: 4 }}>
-              Dein Verein wird geprüft. Wir melden uns per Email sobald du
-              freigeschaltet wirst.
+            <div style={{ fontSize: 12, color: "#8B6800", marginTop: 4, lineHeight: 1.6 }}>
+              Dein Verein wird geprüft. Du kannst die Gemeinde-Kommunikation bereits öffnen, neue Stellen aber erst nach Freischaltung veröffentlichen.
             </div>
           </div>
         )}
-        {/* Follower Übersicht */}
+
         {followers?.length > 0 && (
           <div
             style={{
@@ -361,7 +404,36 @@ function VereinDashboard({
             </div>
           </div>
         )}
-        <SectionLabel>Deine Stellen ({meineStellen.length})</SectionLabel>
+
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            marginBottom: 10,
+          }}
+        >
+          <SectionLabel>Deine Stellen ({meineStellen.length})</SectionLabel>
+          {archivierteStellen.length > 0 && (
+            <button
+              onClick={() => setZeigeArchiv((p) => !p)}
+              style={{
+                border: "none",
+                background: "#EFE8DB",
+                color: "#5C4A32",
+                borderRadius: 12,
+                padding: "8px 12px",
+                cursor: "pointer",
+                fontFamily: "inherit",
+                fontSize: 12,
+                fontWeight: "bold",
+              }}
+            >
+              {zeigeArchiv ? "Archiv ausblenden" : `Archiv (${archivierteStellen.length})`}
+            </button>
+          )}
+        </div>
+
         {meineStellen.length === 0 ? (
           <EmptyState
             icon="📋"
@@ -437,6 +509,32 @@ function VereinDashboard({
               </div>
             );
           })
+        )}
+
+        {zeigeArchiv && archivierteStellen.length > 0 && (
+          <div style={{ marginTop: 20 }}>
+            <SectionLabel>Archivierte Stellen</SectionLabel>
+            {archivierteStellen.map((s) => (
+              <div
+                key={s.id}
+                style={{
+                  background: "#F4F0E8",
+                  borderRadius: 14,
+                  padding: "14px",
+                  marginBottom: 10,
+                  border: "1px solid #E0D8C8",
+                  opacity: 0.85,
+                }}
+              >
+                <div style={{ fontWeight: "bold", fontSize: 14, color: "#5C4A32" }}>
+                  {s.titel}
+                </div>
+                <div style={{ fontSize: 12, color: "#8B7355", marginTop: 4 }}>
+                  📍 {s.ort} · archiviert
+                </div>
+              </div>
+            ))}
+          </div>
         )}
       </div>
     </div>
