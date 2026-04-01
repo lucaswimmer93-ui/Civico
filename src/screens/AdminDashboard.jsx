@@ -21,79 +21,6 @@ function StatCard({ label, value, sub }) {
   );
 }
 
-function normalizeJoinedEntity(entity) {
-  if (!entity) return null;
-  if (Array.isArray(entity)) return entity[0] || null;
-  return entity;
-}
-
-function getOrganisationFromThread(thread) {
-  const verein = normalizeJoinedEntity(thread?.verein);
-  const gemeinde = normalizeJoinedEntity(thread?.gemeinde);
-
-  if (verein && (verein.id || verein.name || verein.email)) {
-    return {
-      type: 'verein',
-      id: verein.id || thread?.verein_id || null,
-      name: verein.name || thread?.verein_name || thread?.organisation_name || 'Verein',
-      email: verein.email || thread?.verein_email || thread?.organisation_email || '',
-    };
-  }
-
-  if (gemeinde && (gemeinde.id || gemeinde.name || gemeinde.email)) {
-    return {
-      type: 'gemeinde',
-      id: gemeinde.id || thread?.gemeinde_id || null,
-      name: gemeinde.name || thread?.gemeinde_name || thread?.organisation_name || 'Gemeinde',
-      email: gemeinde.email || thread?.gemeinde_email || thread?.organisation_email || '',
-    };
-  }
-
-  if (thread?.verein_id && !thread?.gemeinde_id) {
-    return {
-      type: 'verein',
-      id: thread.verein_id,
-      name: thread?.verein_name || thread?.organisation_name || 'Verein',
-      email: thread?.verein_email || thread?.organisation_email || '',
-    };
-  }
-
-  if (thread?.gemeinde_id && !thread?.verein_id) {
-    return {
-      type: 'gemeinde',
-      id: thread.gemeinde_id,
-      name: thread?.gemeinde_name || thread?.organisation_name || 'Gemeinde',
-      email: thread?.gemeinde_email || thread?.organisation_email || '',
-    };
-  }
-
-  if (thread?.organisation_type || thread?.owner_type || thread?.sender_type) {
-    return {
-      type: thread.organisation_type || thread.owner_type || thread.sender_type,
-      id: thread?.organisation_id || thread?.owner_id || null,
-      name: thread?.organisation_name || thread?.name || 'Unbekannt',
-      email: thread?.organisation_email || thread?.email || '',
-    };
-  }
-
-  return {
-    type: 'unbekannt',
-    id: null,
-    name: thread?.organisation_name || thread?.name || 'Unbekannt',
-    email: thread?.organisation_email || thread?.email || '',
-  };
-}
-
-function getSupportPreview(thread) {
-  return (
-    thread?.last_message_preview ||
-    thread?.last_message_text ||
-    thread?.last_message?.content ||
-    thread?.latest_message?.content ||
-    'Keine Vorschau verfügbar'
-  );
-}
-
 export default function AdminDashboard({ onBack, logout }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -180,20 +107,15 @@ export default function AdminDashboard({ onBack, logout }) {
       setSupportLoading(true);
       setSupportError('');
 
-      const data = await getAdminSupportThreads();
-      setSupportThreads(data || []);
+      const data = (await getAdminSupportThreads()) || [];
+      const normalized = data.map(normalizeSupportThread);
 
-      if (data?.length > 0) {
-        const nextSelectedThread =
-          selectedThread && data.find((item) => item.id === selectedThread.id)
-            ? data.find((item) => item.id === selectedThread.id)
-            : data[0];
+      setSupportThreads(normalized);
 
-        setSelectedThread(nextSelectedThread);
-        setSelectedOrganisation(getOrganisationFromThread(nextSelectedThread));
-      } else {
-        setSelectedThread(null);
-        setSelectedOrganisation(null);
+      if (normalized.length > 0 && !selectedThread) {
+        const first = normalized[0];
+        setSelectedThread(first);
+        setSelectedOrganisation(first.organisation || null);
       }
     } catch (err) {
       console.error('Fehler beim Laden der Support-Threads:', err);
@@ -318,6 +240,53 @@ export default function AdminDashboard({ onBack, logout }) {
     fontFamily: 'inherit',
     fontWeight: 700,
   });
+
+
+  const normalizeSupportThread = (thread) => {
+    const vereinSource = Array.isArray(thread?.verein) ? thread.verein[0] : thread?.verein;
+    const gemeindeSource = Array.isArray(thread?.gemeinde) ? thread.gemeinde[0] : thread?.gemeinde;
+
+    const vereinName = vereinSource?.name || thread?.verein_name || thread?.verein?.name;
+    const vereinEmail = vereinSource?.email || thread?.verein_email || thread?.verein?.email;
+    const gemeindeName = gemeindeSource?.name || thread?.gemeinde_name || thread?.gemeinde?.name;
+    const gemeindeEmail = gemeindeSource?.email || thread?.gemeinde_email || thread?.gemeinde?.email;
+
+    if (vereinName || vereinEmail || thread?.verein_id) {
+      return {
+        ...thread,
+        organisation: {
+          type: 'verein',
+          id: vereinSource?.id || thread?.verein_id || null,
+          name: vereinName || 'Verein',
+          email: vereinEmail || '',
+        },
+      };
+    }
+
+    if (gemeindeName || gemeindeEmail || thread?.gemeinde_id) {
+      return {
+        ...thread,
+        organisation: {
+          type: 'gemeinde',
+          id: gemeindeSource?.id || thread?.gemeinde_id || null,
+          name: gemeindeName || 'Gemeinde',
+          email: gemeindeEmail || '',
+        },
+      };
+    }
+
+    const fallbackType = thread?.organisation_type === 'verein' ? 'verein' : 'gemeinde';
+
+    return {
+      ...thread,
+      organisation: {
+        type: fallbackType,
+        id: thread?.organisation_id || null,
+        name: thread?.organisation_name || (fallbackType === 'verein' ? 'Verein' : 'Gemeinde'),
+        email: thread?.organisation_email || '',
+      },
+    };
+  };
 
   return (
     <div>
@@ -495,12 +464,8 @@ export default function AdminDashboard({ onBack, logout }) {
                 />
               ) : (
                 supportThreads.map((thread) => {
-                  const organisation = getOrganisationFromThread(thread);
-                  const organisationType = organisation.type === 'verein'
-                    ? 'Verein'
-                    : organisation.type === 'gemeinde'
-                      ? 'Gemeinde'
-                      : 'Organisation';
+                  const organisation = thread.organisation || normalizeSupportThread(thread).organisation;
+                  const organisationType = organisation?.type === 'verein' ? 'Verein' : 'Gemeinde';
                   const isSelected = selectedThread?.id === thread.id;
 
                   return (
@@ -508,7 +473,7 @@ export default function AdminDashboard({ onBack, logout }) {
                       key={thread.id}
                       onClick={() => {
                         setSelectedThread(thread);
-                        setSelectedOrganisation(organisation);
+                        setSelectedOrganisation(organisation || null);
                       }}
                       style={{
                         width: '100%',
@@ -523,16 +488,16 @@ export default function AdminDashboard({ onBack, logout }) {
                       }}
                     >
                       <div style={{ fontWeight: 700 }}>
-                        {organisation.name || 'Unbekannt'}
+                        {organisation?.name || 'Unbekannt'}
                       </div>
 
                       <div style={{ fontSize: 12, color: '#8B7355', marginTop: 4 }}>
                         {organisationType}
-                        {organisation.email ? ` • ${organisation.email}` : ''}
+                        {organisation?.email ? ` • ${organisation.email}` : ''}
                       </div>
 
                       <div style={{ fontSize: 12, color: '#5C4A32', marginTop: 6 }}>
-                        {getSupportPreview(thread)}
+                        {thread.last_message_preview || 'Keine Vorschau verfügbar'}
                       </div>
 
                       <div style={{ fontSize: 11, color: '#8B7355', marginTop: 8 }}>
@@ -555,11 +520,7 @@ export default function AdminDashboard({ onBack, logout }) {
                     </div>
 
                     <div style={{ fontSize: 12, color: '#8B7355', marginTop: 4 }}>
-                      {selectedOrganisation?.type === 'verein'
-                        ? 'Verein'
-                        : selectedOrganisation?.type === 'gemeinde'
-                          ? 'Gemeinde'
-                          : 'Organisation'}
+                      {selectedOrganisation?.type === 'verein' ? 'Verein' : 'Gemeinde'}
                       {selectedOrganisation?.email ? ` • ${selectedOrganisation.email}` : ''}
                     </div>
                   </div>
