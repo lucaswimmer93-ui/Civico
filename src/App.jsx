@@ -1391,79 +1391,73 @@ export default function App() {
   };
   const handleGemeindeStelleSpeichern = async (payload) => {
     try {
-      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-      const { data: userData, error: userError } = await supabase.auth.getUser();
-
-      console.log("DEBUG BUILD MARKER: GEMEINDE INSERT FIX V1");
-      console.log("SESSION CHECK:", {
-        sessionError,
-        userError,
-        session: sessionData?.session,
-        user: userData?.user,
-      });
-
-      const aufwandFormatted =
-        payload.typ === "dauerhaft" && payload.aufwand
-          ? `${payload.aufwand}h / Woche`
-          : "";
-
-      const insertPayload = {
-        titel: payload.titel,
-        beschreibung: payload.beschreibung,
-        kategorie: payload.kategorie,
-        typ: payload.typ || "event",
-        aufwand: aufwandFormatted,
-        ort: payload.ort || user?.data?.ort || user?.data?.name || "",
-        plz: payload.plz || user?.data?.plz || "",
-        standort: payload.standort || null,
-        ansprechpartner: payload.ansprechpartner || null,
-        kontakt_email: payload.kontakt_email || user?.data?.email || null,
-        dringend: Boolean(payload.dringend),
-        verein_id: null,
-        gemeinde_id: gemeindeId || payload.gemeinde_id || user?.data?.id,
-        created_by_type: "gemeinde",
-        archiviert: false,
-      };
-
-      console.log("GEMEINDE INSERT PAYLOAD:", insertPayload);
-
-      const { data: stelle, error: stelleError } = await supabase
+      const { data: stelle } = await supabase
         .from("stellen")
-        .insert(insertPayload)
-        .select("id")
+        .insert({
+          titel: payload.titel,
+          beschreibung: payload.beschreibung,
+          kategorie: payload.kategorie,
+          ort: payload.standort,
+          treffpunkt: payload.standort,
+          verein_id: null,
+          gemeinde_id: gemeindeId || user?.data?.id || payload.gemeinde_id,
+          created_by_type: "gemeinde",
+          archiviert: false,
+        })
+        .select()
         .single();
 
-      console.log("GEMEINDE INSERT RESULT:", { stelle, stelleError });
-
-      if (stelleError) {
-        throw stelleError;
+      if (stelle && payload.termine?.length) {
+        await supabase.from("termine").insert(
+          payload.termine
+            .filter((t) => t.datum)
+            .map((t) => ({
+              stelle_id: stelle.id,
+              datum: t.datum,
+              startzeit: t.startzeit,
+              endzeit: t.endzeit || null,
+              freie_plaetze: t.plaetze || 5,
+              gesamt_plaetze: t.plaetze || 5,
+            }))
+        );
       }
-
-      if (stelle?.id && payload.termine?.length) {
-        const terminPayload = payload.termine
-          .filter((t) => t.datum)
-          .map((t) => ({
-            stelle_id: stelle.id,
-            datum: t.datum,
-            startzeit: t.startzeit,
-            endzeit: t.endzeit || null,
-            freie_plaetze: t.plaetze || 5,
-            gesamt_plaetze: t.plaetze || 5,
-          }));
-
-        const { error: terminError } = await supabase.from("termine").insert(terminPayload);
-        console.log("GEMEINDE TERMINE INSERT:", { terminPayload, terminError });
-
-        if (terminError) {
-          throw terminError;
-        }
-      }
-
       showToast("✓ Gemeinde-Stelle gespeichert!");
       await loadStellen(gemeindeId || user?.data?.id);
     } catch (err) {
-      console.error("GEMEINDE STELLE SPEICHERN FEHLGESCHLAGEN:", err);
+      console.error(err);
       showToast("Fehler beim Speichern.", "#E85C5C");
+    }
+  };
+
+  const handleGemeindeProfilSpeichern = async (updated) => {
+    try {
+      const { error } = await supabase
+        .from("gemeinden")
+        .update(updated)
+        .eq("id", user?.data?.id);
+
+      if (error) throw error;
+
+      setUser((prev) => ({
+        ...prev,
+        data: { ...prev.data, ...updated },
+      }));
+
+      return { success: true };
+    } catch (err) {
+      console.error("Gemeinde-Profil speichern fehlgeschlagen:", err);
+      return { success: false, message: err.message || "Profil konnte nicht gespeichert werden." };
+    }
+  };
+
+  const handleGemeindePasswortAendern = async (password) => {
+    try {
+      const { error } = await supabase.auth.updateUser({ password });
+      if (error) throw error;
+      return { success: true };
+    } catch (err) {
+      console.error("Gemeinde-Passwort ändern fehlgeschlagen:", err);
+      return { success: false, message: err.message || "Passwort konnte nicht geändert werden." };
     }
   };
 
@@ -2563,6 +2557,10 @@ export default function App() {
           onBack={goBack}
           logout={logout}
           onCreateStelle={handleGemeindeStelleSpeichern}
+          onReloadStellen={() => loadStellen(gemeindeId || user?.data?.id)}
+          onSaveProfile={handleGemeindeProfilSpeichern}
+          onChangePassword={handleGemeindePasswortAendern}
+          showToast={showToast}
         />
       )}
 
