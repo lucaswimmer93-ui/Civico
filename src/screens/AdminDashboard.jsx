@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../core/shared';
 import { Header, Input, SectionLabel, EmptyState } from '../components/ui';
+import MessageThreadView from '../components/MessageThreadView';
+import { getAdminSupportThreads } from '../services/messages';
 
 const cardStyle = {
   background: '#FAF7F2',
@@ -43,7 +45,13 @@ export default function AdminDashboard({ onBack, logout }) {
   const [regionStats, setRegionStats] = useState([]);
   const [csrStats, setCsrStats] = useState([]);
   const [plzFilter, setPlzFilter] = useState('');
-
+  const [activeTab, setActiveTab] = useState('overview');
+  const [supportThreads, setSupportThreads] = useState([]);
+  const [supportLoading, setSupportLoading] = useState(false);
+  const [supportError, setSupportError] = useState('');
+  const [selectedThread, setSelectedThread] = useState(null);
+  const [selectedOrganisation, setSelectedOrganisation] = useState(null);
+  
   useEffect(() => {
     console.log('ADMIN DASHBOARD DEBUG VISIBLE AKTIV');
   }, []);
@@ -94,9 +102,37 @@ export default function AdminDashboard({ onBack, logout }) {
     setLoading(false);
   };
 
-  useEffect(() => {
-    loadAdminData();
-  }, []);
+  const loadSupportThreads = async () => {
+    try {
+      setSupportLoading(true);
+      setSupportError('');
+
+      const data = await getAdminSupportThreads();
+      setSupportThreads(data || []);
+
+      if (data?.length > 0 && !selectedThread) {
+        const first = data[0];
+        setSelectedThread(first);
+        setSelectedOrganisation(
+          first.verein
+            ? { type: 'verein', ...first.verein }
+            : first.gemeinde
+            ? { type: 'gemeinde', ...first.gemeinde }
+            : null
+        );
+      }
+    } catch (err) {
+      console.error('Fehler beim Laden der Support-Threads:', err);
+      setSupportError(err.message || 'Support-Threads konnten nicht geladen werden.');
+    } finally {
+      setSupportLoading(false);
+    }
+  };
+  
+useEffect(() => {
+  loadAdminData();
+  loadSupportThreads();
+}, []);
 
   const handleCreateGemeinde = async () => {
     const cleanName = String(gemeindeName || '').trim();
@@ -197,11 +233,31 @@ export default function AdminDashboard({ onBack, logout }) {
       setError('Link konnte nicht automatisch kopiert werden.');
     }
   };
-
+const tabButtonStyle = (isActive) => ({
+  background: isActive ? '#2C2416' : '#FAF7F2',
+  color: isActive ? '#fff' : '#2C2416',
+  border: '1px solid #E6D9C2',
+  borderRadius: 12,
+  padding: '10px 14px',
+  cursor: 'pointer',
+  fontFamily: 'inherit',
+  fontWeight: 700,
+});
+  
   return (
     <div>
       <Header title="Admin-Dashboard DEBUG VISIBLE" subtitle="CSR, Gemeinden, Vereine und Demografie" onBack={onBack} onLogout={logout} />
+            <div style={{ padding: '0 16px 16px', display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        <button style={tabButtonStyle(activeTab === 'overview')} onClick={() => setActiveTab('overview')}>
+          Übersicht
+        </button>
+        <button style={tabButtonStyle(activeTab === 'support')} onClick={() => setActiveTab('support')}>
+          Support
+        </button>
+      </div>
       <div style={{ padding: '0 16px 24px' }}>
+        {activeTab === 'overview' && (
+  <>
         <div style={{ ...cardStyle, marginBottom: 18, border: '2px solid #C8A96E' }}>
           <div style={{ fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Debug-Status</div>
           <div style={{ fontSize: 13, color: '#5C4A32', marginBottom: 6 }}>{debugInfo}</div>
@@ -339,6 +395,118 @@ export default function AdminDashboard({ onBack, logout }) {
           ))}
         </div>
       </div>
+          </>
+  )}
+        {activeTab === 'support' && (
+  <div style={{ display: 'grid', gridTemplateColumns: '360px 1fr', gap: 18 }}>
+    
+    {/* LINK: Thread-Liste */}
+    <div style={{ ...cardStyle }}>
+      <SectionLabel>Support-Anfragen</SectionLabel>
+
+      {supportLoading ? (
+        <div style={{ color: '#8B7355', fontSize: 13 }}>
+          Lade Support-Anfragen...
+        </div>
+      ) : supportError ? (
+        <div style={{ color: '#B53A2D', fontSize: 13, fontWeight: 700 }}>
+          {supportError}
+        </div>
+      ) : supportThreads.length === 0 ? (
+        <EmptyState
+          icon="💬"
+          text="Noch keine Support-Anfragen"
+          sub="Sobald Vereine oder Gemeinden schreiben, erscheinen die Threads hier."
+        />
+      ) : (
+        supportThreads.map((thread) => {
+          const organisation = thread.verein || thread.gemeinde;
+          const organisationType = thread.verein ? 'Verein' : 'Gemeinde';
+          const isSelected = selectedThread?.id === thread.id;
+
+          return (
+            <button
+              key={thread.id}
+              onClick={() => {
+                setSelectedThread(thread);
+                setSelectedOrganisation(
+                  thread.verein
+                    ? { type: 'verein', ...thread.verein }
+                    : { type: 'gemeinde', ...thread.gemeinde }
+                );
+              }}
+              style={{
+                width: '100%',
+                textAlign: 'left',
+                border: isSelected ? '2px solid #2C2416' : '1px solid #E6D9C2',
+                background: isSelected ? '#F3EBDD' : '#FAF7F2',
+                borderRadius: 14,
+                padding: 12,
+                marginBottom: 10,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+              }}
+            >
+              <div style={{ fontWeight: 700 }}>
+                {organisation?.name || 'Unbekannt'}
+              </div>
+
+              <div style={{ fontSize: 12, color: '#8B7355', marginTop: 4 }}>
+                {organisationType}
+                {organisation?.email ? ` • ${organisation.email}` : ''}
+              </div>
+
+              <div style={{ fontSize: 12, color: '#5C4A32', marginTop: 6 }}>
+                {thread.last_message_preview || 'Keine Vorschau verfügbar'}
+              </div>
+
+              <div style={{ fontSize: 11, color: '#8B7355', marginTop: 8 }}>
+                {thread.last_message_at
+                  ? new Date(thread.last_message_at).toLocaleString('de-DE')
+                  : 'Keine Aktivität'}
+              </div>
+            </button>
+          );
+        })
+      )}
+    </div>
+
+    {/* RECHTS: Thread */}
+    <div style={{ ...cardStyle, minHeight: 520 }}>
+      {selectedThread ? (
+        <>
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: 18, fontWeight: 700 }}>
+              {selectedOrganisation?.name || 'Support-Verlauf'}
+            </div>
+
+            <div style={{ fontSize: 12, color: '#8B7355', marginTop: 4 }}>
+              {selectedOrganisation?.type === 'verein' ? 'Verein' : 'Gemeinde'}
+              {selectedOrganisation?.email
+                ? ` • ${selectedOrganisation.email}`
+                : ''}
+            </div>
+          </div>
+
+          <MessageThreadView
+            threadId={selectedThread.id}
+            currentUserRole="admin"
+            contextType="support"
+            organisation={selectedOrganisation}
+            onMessageSent={loadSupportThreads}
+          />
+        </>
+      ) : (
+        <EmptyState
+          icon="📨"
+          text="Kein Thread ausgewählt"
+          sub="Wähle links eine Support-Anfrage aus."
+        />
+      )}
+    </div>
+
+  </div>
+)}
     </div>
   );
 }
