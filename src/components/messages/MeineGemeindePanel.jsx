@@ -20,18 +20,49 @@ export default function MeineGemeindePanel({ onBack }) {
   const [error, setError] = useState("");
 
   const handleBack = () => {
+    // 1. sauberer Weg über Parent
     if (typeof onBack === "function") {
       onBack();
       return;
     }
 
-    // Optionaler Fallback für den Parent, falls Navigation über ein zentrales Event gelöst wird
+    // 2. Browser History nutzen
+    if (window.history.length > 1) {
+      window.history.back();
+      return;
+    }
+
+    // 3. letzter Fallback
     window.dispatchEvent(
       new CustomEvent("civico:navigate", {
         detail: { screen: "verein-dashboard" },
       })
     );
   };
+
+  useEffect(() => {
+    // 👉 eigener History-State, damit Browser-Zurück korrekt funktioniert
+    window.history.pushState({ screen: "meine-gemeinde" }, "");
+
+    const handlePopState = () => {
+      // wenn Browser zurück → IMMER ins Dashboard
+      if (typeof onBack === "function") {
+        onBack();
+      } else {
+        window.dispatchEvent(
+          new CustomEvent("civico:navigate", {
+            detail: { screen: "verein-dashboard" },
+          })
+        );
+      }
+    };
+
+    window.addEventListener("popstate", handlePopState);
+
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+    };
+  }, [onBack]);
 
   useEffect(() => {
     async function load() {
