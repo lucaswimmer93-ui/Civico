@@ -373,7 +373,6 @@ export default function App() {
 
   const [user, setUser] = useState(null);
   const [stellen, setStellen] = useState([]);
-  const [vereine, setVereine] = useState([]);
   const [screen, setScreen] = useState(getInitialScreenFromPath);
   const [history, setHistory] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -769,24 +768,6 @@ export default function App() {
     setTimeout(() => setToast(null), 3000);
   };
 
-  const loadVereine = async (gemeinde_id = null) => {
-    try {
-      let query = supabase
-        .from("vereine")
-        .select("*")
-        .order("name", { ascending: true });
-
-      if (gemeinde_id) query = query.eq("gemeinde_id", gemeinde_id);
-
-      const { data, error } = await query;
-      if (error) throw error;
-      setVereine(data || []);
-    } catch (err) {
-      console.error("VEREINE LADEN FEHLER:", err);
-      setVereine([]);
-    }
-  };
-
   const loadStellen = async (
     gemeinde_id = null,
     plz = null,
@@ -929,7 +910,6 @@ export default function App() {
     }
 
     loadStellen();
-    loadVereine();
 
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       const activeFlowLock =
@@ -954,7 +934,6 @@ export default function App() {
           setUser({ type: "freiwilliger", data: profil });
           setGemeindeId(profil.gemeinde_id);
           loadStellen(profil.gemeinde_id, profil.plz, profil.umkreis);
-          loadVereine(profil.gemeinde_id);
           loadFollows(profil.id);
           loadNotifications(profil.id);
           setScreen("home");
@@ -971,7 +950,6 @@ export default function App() {
           setUser({ type: "verein", data: verein });
           setGemeindeId(verein.gemeinde_id);
           loadStellen(verein.gemeinde_id);
-          loadVereine(verein.gemeinde_id);
           setScreen("dashboard");
           autoArchivieren(verein.id);
           supabase
@@ -995,7 +973,6 @@ export default function App() {
           setUser({ type: "gemeinde", data: gemeinde });
           setGemeindeId(gemeinde.id);
           loadStellen(gemeinde.id);
-          loadVereine(gemeinde.id);
           setScreen("gemeinde-dashboard");
           return;
         }
@@ -1009,7 +986,6 @@ export default function App() {
         if (admin) {
           setUser({ type: "admin", data: admin });
           loadStellen();
-          loadVereine();
           setScreen("admin-dashboard");
           return;
         }
@@ -1041,7 +1017,6 @@ export default function App() {
         { event: "*", schema: "public", table: "bewerbungen" },
         () => {
           loadStellen();
-          loadVereine(gemeindeId);
           reloadSelectedRealtime();
         }
       )
@@ -1050,7 +1025,6 @@ export default function App() {
         { event: "*", schema: "public", table: "termine" },
         () => {
           loadStellen();
-          loadVereine(gemeindeId);
           reloadSelectedRealtime();
         }
       )
@@ -1417,21 +1391,35 @@ export default function App() {
   };
   const handleGemeindeStelleSpeichern = async (payload) => {
     try {
-      const { data: stelle } = await supabase
+      const insertPayload = {
+        titel: payload.titel,
+        beschreibung: payload.beschreibung,
+        kategorie: payload.kategorie,
+        typ: payload.typ || "event",
+        aufwand: payload.aufwand || "",
+        ort: payload.ort || user?.data?.ort || user?.data?.name || payload.standort || "",
+        plz: payload.plz || user?.data?.plz || "",
+        standort: payload.standort || null,
+        ansprechpartner: payload.ansprechpartner || null,
+        kontakt_email: payload.kontakt_email || null,
+        dringend: Boolean(payload.dringend),
+        verein_id: null,
+        gemeinde_id: gemeindeId || user?.data?.id || payload.gemeinde_id,
+        created_by_type: "gemeinde",
+        archiviert: false,
+        aufrufe: 0,
+      };
+
+      const { data: stelle, error: stelleError } = await supabase
         .from("stellen")
-        .insert({
-          titel: payload.titel,
-          beschreibung: payload.beschreibung,
-          kategorie: payload.kategorie,
-          ort: payload.standort,
-          treffpunkt: payload.standort,
-          verein_id: null,
-          gemeinde_id: gemeindeId || user?.data?.id || payload.gemeinde_id,
-          created_by_type: "gemeinde",
-          archiviert: false,
-        })
+        .insert(insertPayload)
         .select()
         .single();
+
+      if (stelleError) {
+        console.error("GEMEINDE STELLE INSERT ERROR:", stelleError, insertPayload);
+        throw stelleError;
+      }
 
       if (stelle && payload.termine?.length) {
         await supabase.from("termine").insert(
@@ -1487,26 +1475,11 @@ export default function App() {
     }
   };
 
-  const derivedOrganisationen = vereine;
-
-  const vereineListeDaten = vereine.map((verein) => {
-    const ersteStelle = stellen.find((s) => s.verein_id === verein.id && !s.archiviert);
-    return ersteStelle
-      ? { ...ersteStelle, vereine: ersteStelle.vereine || verein }
-      : {
-          id: `verein-${verein.id}`,
-          titel: '',
-          beschreibung: '',
-          kategorie: null,
-          ort: verein.ort || '',
-          plz: verein.plz || '',
-          archiviert: false,
-          verein_id: verein.id,
-          gemeinde_id: verein.gemeinde_id || null,
-          vereine: verein,
-          termine: [],
-        };
-  });
+  const derivedOrganisationen = Array.from(
+    new Map(
+      stellen.filter((s) => s.vereine).map((s) => [s.vereine.id, s.vereine])
+    ).values()
+  );
 
   const openGemeindeDashboard = () => {
     const demoGemeinde = {
@@ -1965,7 +1938,7 @@ export default function App() {
             {/* VEREINE TAB */}
             {homeTab === "vereine" && (
               <VereineListe
-                stellen={vereineListeDaten}
+                stellen={stellen}
                 user={user}
                 follows={follows}
                 onToggleFollow={toggleFollowVerein}
@@ -2039,7 +2012,6 @@ export default function App() {
             setUser({ type, data });
             setGemeindeId(gid);
             loadStellen(gid);
-            loadVereine(gid);
             setHistory([]);
             if (type === "verein" || type === "organisation") {
               setScreen("dashboard");
@@ -2268,52 +2240,6 @@ export default function App() {
           onBack={goBack}
           onHome={goHome}
           onBestaetigen={handleBestaetigen}
-          onTerminAbsagen={async (termin) => {
-            try {
-              const { error: bewerbungenError } = await supabase
-                .from("bewerbungen")
-                .delete()
-                .eq("termin_id", termin.id);
-              if (bewerbungenError) throw bewerbungenError;
-
-              const { error: terminError } = await supabase
-                .from("termine")
-                .delete()
-                .eq("id", termin.id);
-              if (terminError) throw terminError;
-
-              showToast("✓ Termin abgesagt.", "#E85C5C");
-              await loadStellen(gemeindeId);
-              await loadVereine(gemeindeId);
-              if (selected?.id) await reloadSelected(selected.id);
-            } catch (err) {
-              console.error("VEREIN TERMIN ABSAGEN FEHLER:", err);
-              showToast("Fehler beim Absagen.", "#E85C5C");
-            }
-          }}
-          onTerminVerschieben={async (termin, datum, startzeit, endzeit) => {
-            try {
-              const { error } = await supabase
-                .from("termine")
-                .update({
-                  datum,
-                  startzeit,
-                  endzeit: endzeit || null,
-                  status: "verschoben",
-                })
-                .eq("id", termin.id);
-
-              if (error) throw error;
-
-              showToast("✓ Termin verschoben!");
-              await loadStellen(gemeindeId);
-              await loadVereine(gemeindeId);
-              if (selected?.id) await reloadSelected(selected.id);
-            } catch (err) {
-              console.error("VEREIN TERMIN VERSCHIEBEN FEHLER:", err);
-              showToast("Fehler beim Verschieben.", "#E85C5C");
-            }
-          }}
           onStornieren={async (bewId, terminId) => {
             await supabase.from("bewerbungen").delete().eq("id", bewId);
             await supabase.rpc("increment_plaetze", { termin_id: terminId });
@@ -2382,13 +2308,13 @@ export default function App() {
             );
             const erschienen = (selected.termine || []).reduce(
               (s, t) =>
-                s + (t.bewerbungen || []).filter((b) => isBewerbungErschienen(b)).length,
+                s + (t.bewerbungen || []).filter((b) => b.bestaetigt).length,
               0
             );
             const nichtErschienen = (selected.termine || []).reduce(
               (s, t) =>
                 s +
-                (t.bewerbungen || []).filter((b) => isBewerbungNoShow(b)).length,
+                (t.bewerbungen || []).filter((b) => b.nicht_erschienen).length,
               0
             );
             await supabase
