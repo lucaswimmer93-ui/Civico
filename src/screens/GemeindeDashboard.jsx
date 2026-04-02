@@ -103,15 +103,17 @@ export default function GemeindeDashboard({
     setForm((prev) => ({ ...prev, plz: user?.plz || '' }));
   }, [user]);
 
+  const alleGemeindeStellen = useMemo(
+    () => stellen.filter((s) => s.gemeinde_id === user?.id),
+    [stellen, user]
+  );
+
   const gemeindeStellen = useMemo(
     () =>
-      stellen.filter(
-        (s) =>
-          s.gemeinde_id === user?.id &&
-          s.created_by_type === 'gemeinde' &&
-          !s.verein_id
+      alleGemeindeStellen.filter(
+        (s) => s.created_by_type === 'gemeinde' && !s.verein_id
       ),
-    [stellen, user]
+    [alleGemeindeStellen]
   );
 
   useEffect(() => {
@@ -122,7 +124,7 @@ export default function GemeindeDashboard({
     }
   }, [gemeindeStellen, selectedStelle?.id]);
 
-  const totalBewerbungen = gemeindeStellen.reduce(
+  const totalBewerbungen = alleGemeindeStellen.reduce(
     (sum, s) => sum + (s.termine || []).reduce((tSum, t) => tSum + ((t.bewerbungen || []).length), 0),
     0
   );
@@ -290,12 +292,7 @@ export default function GemeindeDashboard({
       setDetailActionLoading(true);
       const { error } = await supabase
         .from('bewerbungen')
-        .update({
-          bestaetigt: erschienen,
-          nicht_erschienen: !erschienen,
-          status: erschienen ? 'erschienen' : 'no_show',
-          attendance_checked_at: new Date().toISOString(),
-        })
+        .update({ bestaetigt: erschienen, nicht_erschienen: !erschienen })
         .eq('id', bewerbungId);
       if (error) throw error;
       showToast?.(erschienen ? '✓ Erschienen bestätigt' : '✗ Nicht erschienen bestätigt');
@@ -365,7 +362,7 @@ export default function GemeindeDashboard({
       setDetailActionLoading(true);
       const { error } = await supabase
         .from('termine')
-        .update({ datum, startzeit, endzeit: endzeit || null, status: 'verschoben' })
+        .update({ datum, startzeit, endzeit: endzeit || null })
         .eq('id', terminId);
       if (error) throw error;
 
@@ -524,7 +521,7 @@ export default function GemeindeDashboard({
 
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(220px, 1fr))', gap:12 }}>
             {[
-              ['Einsätze', gemeindeStellen.length, 'aktuell aktiv'],
+              ['Einsätze', alleGemeindeStellen.length, 'aktuell aktiv'],
               ['Engagierte Helfer', totalBewerbungen, 'haben sich beteiligt'],
               ['Verlässlichkeit', '–', 'noch nicht genug Daten'],
               ['Aktivster Verein', '–', 'noch keine Auswertung möglich'],

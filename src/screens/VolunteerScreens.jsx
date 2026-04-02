@@ -80,18 +80,30 @@ function DetailScreen({
         <div style={{ fontSize: 22, fontWeight: "bold", lineHeight: 1.3 }}>
           {stelle.titel}
         </div>
-        <div
-          onClick={() => onVereinProfil && onVereinProfil(verein)}
-          style={{
-            color: "#8B7355",
-            fontSize: 14,
-            marginTop: 4,
-            cursor: "pointer",
-            textDecoration: "underline",
-          }}
-        >
-          {verein?.name} →
-        </div>
+        {verein ? (
+          <div
+            onClick={() => onVereinProfil && onVereinProfil(verein)}
+            style={{
+              color: "#8B7355",
+              fontSize: 14,
+              marginTop: 4,
+              cursor: "pointer",
+              textDecoration: "underline",
+            }}
+          >
+            {verein?.name} →
+          </div>
+        ) : (
+          <div
+            style={{
+              color: "#8B7355",
+              fontSize: 14,
+              marginTop: 4,
+            }}
+          >
+            {`Gemeinde ${stelle.ort || ""}`.trim()}
+          </div>
+        )}
         <div style={{ fontSize: 12, color: "#6B5840", marginTop: 4 }}>
           👁️ {stelle.aufrufe || 0} Aufrufe
         </div>
@@ -251,7 +263,7 @@ function DetailScreen({
                   (b) => b.freiwilliger_id === user?.data?.id
                 )
               : null;
-            const gesamtPlaetze = t.gesamt_plaetze || 0;
+            const gesamtPlaetze = t.gesamt_plaetze || t.freie_plaetze || 0;
             const freiBis = t.freie_plaetze || 0;
             const angemeldet = Math.max(0, gesamtPlaetze - freiBis);
             const belegt = freiBis <= 0;
@@ -296,8 +308,8 @@ function DetailScreen({
                       style={{
                         fontSize: 12,
                         color: "#8B7355",
-                        marginBottom: 2,
                         fontWeight: "bold",
+                        marginBottom: 2,
                       }}
                     >
                       {angemeldet} Helfer kommen schon
