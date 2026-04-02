@@ -1110,6 +1110,33 @@ export default function App() {
   );
 
   // Handlers
+  const istAktiveBewerbung = (bewerbung) => {
+    if (!bewerbung) return false;
+    const status = String(bewerbung.status || "").toLowerCase();
+    return !["storniert", "abgesagt", "cancelled", "canceled"].includes(status);
+  };
+
+  const getTerminStatus = (termin) => {
+    const gesamtPlaetze = Number(
+      termin?.gesamt_plaetze ?? termin?.max_helfer ?? termin?.plaetze ?? 0
+    );
+    const aktiveBewerbungen = (termin?.bewerbungen || []).filter(istAktiveBewerbung).length;
+    const freiePlaetzeAusDb = termin?.freie_plaetze;
+
+    const freiePlaetze = Number.isFinite(Number(freiePlaetzeAusDb))
+      ? Math.max(0, Number(freiePlaetzeAusDb))
+      : Math.max(0, gesamtPlaetze - aktiveBewerbungen);
+
+    return {
+      gesamtPlaetze,
+      freiePlaetze,
+      angemeldet: gesamtPlaetze > 0
+        ? Math.min(gesamtPlaetze, aktiveBewerbungen)
+        : aktiveBewerbungen,
+      istAusgebucht: freiePlaetze <= 0,
+    };
+  };
+
   const handleBuchen = async (stelleId, terminId, isNew) => {
     if (!user) {
       navigateTo("login");
@@ -1153,7 +1180,7 @@ export default function App() {
             return;
           }
         }
-        const { data: erfolg, error } = await supabase.rpc("book_slot", {
+        const { error } = await supabase.rpc("book_slot", {
           p_stelle_id: stelleId,
           p_termin_id: terminId,
           p_freiwilliger_id: user.data.id,
@@ -1161,8 +1188,33 @@ export default function App() {
           p_email: user.data.email,
         });
         if (error) throw error;
-        if (!erfolg) {
-          showToast("Leider ausgebucht!", "#E85C5C");
+
+        const { data: aktuelleStelle, error: reloadError } = await supabase
+          .from("stellen")
+          .select("*, vereine(*), termine(*, bewerbungen(*))")
+          .eq("id", stelleId)
+          .single();
+
+        if (reloadError) throw reloadError;
+
+        const aktuellerTermin = (aktuelleStelle?.termine || []).find(
+          (t) => t.id === terminId
+        );
+        const meineAktiveBewerbung = (aktuellerTermin?.bewerbungen || []).find(
+          (b) =>
+            b.freiwilliger_id === user.data.id &&
+            istAktiveBewerbung(b)
+        );
+        const terminStatus = getTerminStatus(aktuellerTermin);
+
+        if (!meineAktiveBewerbung) {
+          if (terminStatus.istAusgebucht) {
+            showToast("Leider ausgebucht!", "#E85C5C");
+          } else {
+            showToast("Anmeldung konnte nicht gespeichert werden.", "#E85C5C");
+          }
+          await loadStellen(gemeindeId, user?.data?.plz, user?.data?.umkreis);
+          await reloadSelected(stelleId);
           return;
         }
         if (isEchteNeuanmeldung) {
