@@ -676,10 +676,10 @@ export default function GemeindeDashboard({
 
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(220px, 1fr))', gap:12 }}>
             {[
-              ['Einsätze', alleGemeindeStellen.length, 'aktuell aktiv'],
-              ['Engagierte Helfer', totalBewerbungen, 'haben sich beteiligt'],
-              ['Verlässlichkeit', '–', 'noch nicht genug Daten'],
-              ['Aktivster Verein', '–', 'noch keine Auswertung möglich'],
+              ['Einsätze', csrData.einsaetze, `${csrData.termine} Termin(e)`],
+              ['Engagierte Helfer', csrData.helfer, `${csrData.anmeldungen} Anmeldungen`],
+              ['Verlässlichkeit', `${csrData.teilnahmequote}%`, `${csrData.erschienene} erschienen · ${csrData.noShows} no-show`],
+              ['Aktivster Akteur', csrData.aktivsterVerein || '–', 'nach Helferstunden'],
             ].map(([label, value, sub]) => (
               <div key={label} style={{ background:'#FAF7F2', borderRadius:18, padding:18, border:'1px solid #E6D9C2' }}>
                 <div style={{ fontSize:28, fontWeight:700, color:'#2C2416', marginBottom:8 }}>{value}</div>
