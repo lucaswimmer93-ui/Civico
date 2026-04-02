@@ -251,7 +251,9 @@ function DetailScreen({
                   (b) => b.freiwilliger_id === user?.data?.id
                 )
               : null;
+            const gesamtPlaetze = t.gesamt_plaetze || 0;
             const freiBis = t.freie_plaetze || 0;
+            const angemeldet = Math.max(0, gesamtPlaetze - freiBis);
             const belegt = freiBis <= 0;
             return (
               <div
@@ -289,16 +291,28 @@ function DetailScreen({
                       {t.endzeit ? ` – ${t.endzeit}` : ""}
                     </div>
                   </div>
-                  <div
-                    style={{
-                      fontSize: 12,
-                      color: belegt ? "#E85C5C" : "#3A7D44",
-                      fontWeight: "bold",
-                    }}
-                  >
-                    {belegt
-                      ? "Ausgebucht"
-                      : `Noch ${freiBis} Helfer gesucht`}
+                  <div style={{ textAlign: "right" }}>
+                    <div
+                      style={{
+                        fontSize: 12,
+                        color: "#8B7355",
+                        marginBottom: 2,
+                        fontWeight: "bold",
+                      }}
+                    >
+                      {angemeldet} Helfer kommen schon
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 12,
+                        color: belegt ? "#E85C5C" : "#3A7D44",
+                        fontWeight: "bold",
+                      }}
+                    >
+                      {belegt
+                        ? "Ausgebucht"
+                        : `Noch ${freiBis} Helfer gesucht`}
+                    </div>
                   </div>
                 </div>
                 {meineBew ? (

@@ -795,6 +795,9 @@ function VereinStelleDetail({
                   {istVergangen ? "Vergangen" : "Bevorstehend"}
                 </div>
               </div>
+              <div style={{ fontSize: 12, color: "#8B7355", marginBottom: 4, fontWeight: "bold" }}>
+                {Math.max(0, (t.gesamt_plaetze || 0) - (t.freie_plaetze || 0))} Helfer kommen schon
+              </div>
               <div style={{ fontSize: 12, color: "#3A7D44", marginBottom: 10 }}>
                 {t.freie_plaetze} Plätze frei
               </div>
