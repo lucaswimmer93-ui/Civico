@@ -1097,6 +1097,32 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (user?.type !== "verein" || !user?.data?.id) return;
+
+    loadVereinNotifications(user.data.id);
+
+    const channel = supabase
+      .channel(`verein-notifications-${user.data.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "verein_notifications",
+          filter: `verein_id=eq.${user.data.id}`,
+        },
+        () => {
+          loadVereinNotifications(user.data.id);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user?.type, user?.data?.id]);
+
   // Filter
   const plzMatch = (s) => {
     if (!filterPlz || filterPlz.length < 2) return true;
@@ -2273,9 +2299,10 @@ export default function App() {
             logout={logout}
             showToast={showToast}
             followers={vereinFollowers}
-            onNotifications={() =>
-              setShowVereinNotifications(!showVereinNotifications)
-            }
+            onNotifications={() => {
+              if (user?.data?.id) loadVereinNotifications(user.data.id);
+              setShowVereinNotifications(!showVereinNotifications);
+            }}
             unreadCount={vereinNotifications.length}
           />
         </div>
