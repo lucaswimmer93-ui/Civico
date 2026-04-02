@@ -397,34 +397,76 @@ export default function App() {
   const [showNotifications, setShowNotifications] = useState(false);
 
   // ── Notifications ─────────────────────────────────────────────────────────
-  const loadNotifications = async (userId) => {
-    const { data } = await supabase
+  const getNotificationUserId = (profile = user?.data) => {
+    if (!profile) return null;
+    return profile.auth_id || profile.user_id || null;
+  };
+
+  const isNotificationUnread = (notification) =>
+    !notification?.read_at && notification?.gelesen !== true;
+
+  const unreadNotificationCount = notifications.filter(isNotificationUnread).length;
+
+  const loadNotifications = async (authUserId) => {
+    if (!authUserId) {
+      setNotifications([]);
+      return;
+    }
+
+    const { data, error } = await supabase
       .from("notifications")
       .select("*")
-      .eq("user_id", userId)
+      .eq("user_id", authUserId)
       .order("created_at", { ascending: false })
       .limit(30);
+
+    if (error) {
+      console.error("NOTIFICATIONS LADEN FEHLER:", error);
+      return;
+    }
+
     if (data) setNotifications(data);
   };
 
   const markAllRead = async () => {
-    if (!user?.data?.id) return;
-    await supabase
+    const authUserId = getNotificationUserId();
+    if (!authUserId) return;
+
+    const now = new Date().toISOString();
+
+    const { error } = await supabase
       .from("notifications")
-      .update({ gelesen: true })
-      .eq("user_id", user.data.id)
-      .eq("gelesen", false);
-    setNotifications((prev) => prev.map((n) => ({ ...n, gelesen: true })));
+      .update({ gelesen: true, read_at: now })
+      .eq("user_id", authUserId)
+      .is("read_at", null);
+
+    if (error) {
+      console.error("NOTIFICATIONS READ FEHLER:", error);
+      return;
+    }
+
+    setNotifications((prev) =>
+      prev.map((n) => ({ ...n, gelesen: true, read_at: n.read_at || now }))
+    );
   };
 
   const addNotification = async (userId, titel, text, typ) => {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("notifications")
-      .insert({ user_id: userId, titel, text, typ, gelesen: false })
+      .insert({ user_id: userId, titel, text, typ, gelesen: false, read_at: null })
       .select()
       .single();
-    if (data && user?.data?.id === userId) {
-      setNotifications((prev) => [data, ...prev]);
+
+    if (error) {
+      console.error("NOTIFICATION INSERT FEHLER:", error);
+      return;
+    }
+
+    if (data && getNotificationUserId() === userId) {
+      setNotifications((prev) => {
+        const exists = prev.some((item) => item.id === data.id);
+        return exists ? prev : [data, ...prev];
+      });
     }
   };
 
@@ -1001,7 +1043,7 @@ export default function App() {
           loadStellen(profil.gemeinde_id, profil.plz, profil.umkreis);
           loadVereine(profil.gemeinde_id);
           loadFollows(profil.id);
-          loadNotifications(profil.id);
+          loadNotifications(profil.auth_id);
           setScreen("home");
           return;
         }
@@ -1122,6 +1164,35 @@ export default function App() {
       supabase.removeChannel(channel);
     };
   }, [user?.type, user?.data?.id]);
+
+  useEffect(() => {
+    if (user?.type !== "freiwilliger") return;
+
+    const authUserId = getNotificationUserId(user?.data);
+    if (!authUserId) return;
+
+    loadNotifications(authUserId);
+
+    const channel = supabase
+      .channel(`notifications-${authUserId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "notifications",
+          filter: `user_id=eq.${authUserId}`,
+        },
+        () => {
+          loadNotifications(authUserId);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user?.type, user?.data?.auth_id]);
 
   // Filter
   const plzMatch = (s) => {
@@ -1658,7 +1729,13 @@ export default function App() {
                 {user.type === "freiwilliger" && (
                   <div style={{ position: "relative" }}>
                     <button
-                      onClick={() => setShowNotifications(!showNotifications)}
+                      onClick={() => {
+                        const nextOpen = !showNotifications;
+                        setShowNotifications(nextOpen);
+                        if (nextOpen && unreadNotificationCount > 0) {
+                          markAllRead();
+                        }
+                      }}
                       style={{
                         background: "none",
                         border: "none",
@@ -1669,7 +1746,7 @@ export default function App() {
                       }}
                     >
                       🔔
-                      {notifications.filter((n) => !n.gelesen).length > 0 && (
+                      {unreadNotificationCount > 0 && (
                         <span
                           style={{
                             position: "absolute",
@@ -1687,9 +1764,7 @@ export default function App() {
                             fontWeight: "bold",
                           }}
                         >
-                          {notifications.filter((n) => !n.gelesen).length > 9
-                            ? "9+"
-                            : notifications.filter((n) => !n.gelesen).length}
+                          {unreadNotificationCount > 9 ? "9+" : unreadNotificationCount}
                         </span>
                       )}
                     </button>
@@ -1795,7 +1870,7 @@ export default function App() {
                     style={{
                       padding: "10px 14px",
                       borderBottom: "1px solid #F0EBE0",
-                      background: n.gelesen ? "#FAF7F2" : "#EDE8DE",
+                      background: isNotificationUnread(n) ? "#EDE8DE" : "#FAF7F2",
                     }}
                   >
                     <div
@@ -2104,7 +2179,7 @@ export default function App() {
             }
             if (type === "freiwilliger") {
               loadFollows(data.id);
-              loadNotifications(data.id);
+              loadNotifications(data.auth_id);
             }
             if (type === "verein") {
               autoArchivieren(data.id);
