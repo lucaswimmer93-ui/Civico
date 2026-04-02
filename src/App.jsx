@@ -307,12 +307,6 @@ console.log("set-password updateUser:", { updateData, updateError });
   );
 }
 
-const isBewerbungErschienen = (bewerbung) =>
-  bewerbung?.status === 'erschienen' || Boolean(bewerbung?.bestaetigt);
-
-const isBewerbungNoShow = (bewerbung) =>
-  bewerbung?.status === 'no_show' || Boolean(bewerbung?.nicht_erschienen);
-
 export default function App() {
   const [lang, setLang] = useState("de");
   const t = T[lang];
@@ -379,6 +373,7 @@ export default function App() {
 
   const [user, setUser] = useState(null);
   const [stellen, setStellen] = useState([]);
+  const [vereine, setVereine] = useState([]);
   const [screen, setScreen] = useState(getInitialScreenFromPath);
   const [history, setHistory] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -774,6 +769,24 @@ export default function App() {
     setTimeout(() => setToast(null), 3000);
   };
 
+  const loadVereine = async (gemeinde_id = null) => {
+    try {
+      let query = supabase
+        .from("vereine")
+        .select("*")
+        .order("name", { ascending: true });
+
+      if (gemeinde_id) query = query.eq("gemeinde_id", gemeinde_id);
+
+      const { data, error } = await query;
+      if (error) throw error;
+      setVereine(data || []);
+    } catch (err) {
+      console.error("VEREINE LADEN FEHLER:", err);
+      setVereine([]);
+    }
+  };
+
   const loadStellen = async (
     gemeinde_id = null,
     plz = null,
@@ -916,6 +929,7 @@ export default function App() {
     }
 
     loadStellen();
+    loadVereine();
 
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       const activeFlowLock =
@@ -940,6 +954,7 @@ export default function App() {
           setUser({ type: "freiwilliger", data: profil });
           setGemeindeId(profil.gemeinde_id);
           loadStellen(profil.gemeinde_id, profil.plz, profil.umkreis);
+          loadVereine(profil.gemeinde_id);
           loadFollows(profil.id);
           loadNotifications(profil.id);
           setScreen("home");
@@ -956,6 +971,7 @@ export default function App() {
           setUser({ type: "verein", data: verein });
           setGemeindeId(verein.gemeinde_id);
           loadStellen(verein.gemeinde_id);
+          loadVereine(verein.gemeinde_id);
           setScreen("dashboard");
           autoArchivieren(verein.id);
           supabase
@@ -979,6 +995,7 @@ export default function App() {
           setUser({ type: "gemeinde", data: gemeinde });
           setGemeindeId(gemeinde.id);
           loadStellen(gemeinde.id);
+          loadVereine(gemeinde.id);
           setScreen("gemeinde-dashboard");
           return;
         }
@@ -992,6 +1009,7 @@ export default function App() {
         if (admin) {
           setUser({ type: "admin", data: admin });
           loadStellen();
+          loadVereine();
           setScreen("admin-dashboard");
           return;
         }
@@ -1023,6 +1041,7 @@ export default function App() {
         { event: "*", schema: "public", table: "bewerbungen" },
         () => {
           loadStellen();
+          loadVereine(gemeindeId);
           reloadSelectedRealtime();
         }
       )
@@ -1031,6 +1050,7 @@ export default function App() {
         { event: "*", schema: "public", table: "termine" },
         () => {
           loadStellen();
+          loadVereine(gemeindeId);
           reloadSelectedRealtime();
         }
       )
@@ -1357,12 +1377,7 @@ export default function App() {
       .single();
     await supabase
       .from("bewerbungen")
-      .update({
-      bestaetigt: erschienen,
-      nicht_erschienen: !erschienen,
-      status: erschienen ? 'erschienen' : 'no_show',
-      attendance_checked_at: new Date().toISOString(),
-    })
+      .update({ bestaetigt: erschienen, nicht_erschienen: !erschienen })
       .eq("id", bewId);
     if (bew) {
       const { data: fw } = await supabase
@@ -1472,11 +1487,26 @@ export default function App() {
     }
   };
 
-  const derivedOrganisationen = Array.from(
-    new Map(
-      stellen.filter((s) => s.vereine).map((s) => [s.vereine.id, s.vereine])
-    ).values()
-  );
+  const derivedOrganisationen = vereine;
+
+  const vereineListeDaten = vereine.map((verein) => {
+    const ersteStelle = stellen.find((s) => s.verein_id === verein.id && !s.archiviert);
+    return ersteStelle
+      ? { ...ersteStelle, vereine: ersteStelle.vereine || verein }
+      : {
+          id: `verein-${verein.id}`,
+          titel: '',
+          beschreibung: '',
+          kategorie: null,
+          ort: verein.ort || '',
+          plz: verein.plz || '',
+          archiviert: false,
+          verein_id: verein.id,
+          gemeinde_id: verein.gemeinde_id || null,
+          vereine: verein,
+          termine: [],
+        };
+  });
 
   const openGemeindeDashboard = () => {
     const demoGemeinde = {
@@ -1935,7 +1965,7 @@ export default function App() {
             {/* VEREINE TAB */}
             {homeTab === "vereine" && (
               <VereineListe
-                stellen={stellen}
+                stellen={vereineListeDaten}
                 user={user}
                 follows={follows}
                 onToggleFollow={toggleFollowVerein}
@@ -2009,6 +2039,7 @@ export default function App() {
             setUser({ type, data });
             setGemeindeId(gid);
             loadStellen(gid);
+            loadVereine(gid);
             setHistory([]);
             if (type === "verein" || type === "organisation") {
               setScreen("dashboard");
@@ -2237,6 +2268,52 @@ export default function App() {
           onBack={goBack}
           onHome={goHome}
           onBestaetigen={handleBestaetigen}
+          onTerminAbsagen={async (termin) => {
+            try {
+              const { error: bewerbungenError } = await supabase
+                .from("bewerbungen")
+                .delete()
+                .eq("termin_id", termin.id);
+              if (bewerbungenError) throw bewerbungenError;
+
+              const { error: terminError } = await supabase
+                .from("termine")
+                .delete()
+                .eq("id", termin.id);
+              if (terminError) throw terminError;
+
+              showToast("✓ Termin abgesagt.", "#E85C5C");
+              await loadStellen(gemeindeId);
+              await loadVereine(gemeindeId);
+              if (selected?.id) await reloadSelected(selected.id);
+            } catch (err) {
+              console.error("VEREIN TERMIN ABSAGEN FEHLER:", err);
+              showToast("Fehler beim Absagen.", "#E85C5C");
+            }
+          }}
+          onTerminVerschieben={async (termin, datum, startzeit, endzeit) => {
+            try {
+              const { error } = await supabase
+                .from("termine")
+                .update({
+                  datum,
+                  startzeit,
+                  endzeit: endzeit || null,
+                  status: "verschoben",
+                })
+                .eq("id", termin.id);
+
+              if (error) throw error;
+
+              showToast("✓ Termin verschoben!");
+              await loadStellen(gemeindeId);
+              await loadVereine(gemeindeId);
+              if (selected?.id) await reloadSelected(selected.id);
+            } catch (err) {
+              console.error("VEREIN TERMIN VERSCHIEBEN FEHLER:", err);
+              showToast("Fehler beim Verschieben.", "#E85C5C");
+            }
+          }}
           onStornieren={async (bewId, terminId) => {
             await supabase.from("bewerbungen").delete().eq("id", bewId);
             await supabase.rpc("increment_plaetze", { termin_id: terminId });
@@ -2365,74 +2442,29 @@ export default function App() {
           verein={user.data}
           onBack={goBack}
           onSave={async (stelleData, termineData) => {
-            try {
-              const insertPayload = {
-                titel: stelleData.titel,
-                beschreibung: stelleData.beschreibung,
-                kategorie: stelleData.kategorie,
-                typ: stelleData.typ || "event",
-                aufwand: stelleData.aufwand || "",
-                ort: stelleData.ort || user.data.ort || "",
-                plz: stelleData.plz || user.data.plz || "",
-                standort: stelleData.standort || null,
-                ansprechpartner: stelleData.ansprechpartner || null,
-                kontakt_email: stelleData.kontakt_email || null,
-                dringend: Boolean(stelleData.dringend),
-                verein_id: user.data.id,
-                gemeinde_id: user.data.gemeinde_id,
-                created_by_type: "verein",
-                archiviert: false,
-                aufrufe: 0,
-              };
-
-              const { data: stelle, error: stelleError } = await supabase
-                .from("stellen")
-                .insert(insertPayload)
-                .select()
-                .single();
-
-              if (stelleError) {
-                console.error("VEREIN STELLE INSERT ERROR:", stelleError, insertPayload);
-                throw stelleError;
-              }
-
-              if (stelle && termineData.length > 0) {
-                const terminePayload = termineData.map((t) => ({
-                  stelle_id: stelle.id,
-                  datum: t.datum,
-                  startzeit: t.startzeit,
-                  endzeit: t.endzeit || null,
-                  freie_plaetze: t.freie_plaetze ?? t.plaetze ?? 5,
-                  gesamt_plaetze: t.gesamt_plaetze ?? t.plaetze ?? 5,
-                  status: "geplant",
-                }));
-
-                const { error: termineError } = await supabase
-                  .from("termine")
-                  .insert(terminePayload);
-
-                if (termineError) {
-                  console.error("VEREIN TERMINE INSERT ERROR:", termineError, terminePayload);
-                  throw termineError;
-                }
-              }
-
-              showToast("✓ Stelle veröffentlicht!");
-              await sendVolunteerPush({
-                gemeindeId: user.data.gemeinde_id,
-                notificationType: "neue_stellen",
-                vereinId: user.data.id,
-                kategorie: stelleData.kategorie,
-                title: "Neue Ehrenamtsstelle! 🌱",
-                body: `${user.data.name} sucht Freiwillige`,
-                url: "/",
-              });
-              await loadStellen(gemeindeId);
-              goBack();
-            } catch (err) {
-              console.error("VEREIN STELLE SPEICHERN FEHLER:", err);
-              showToast(`Fehler beim Speichern: ${err.message || "Unbekannter Fehler"}`, "#E85C5C");
-            }
+            const { data: stelle } = await supabase
+              .from("stellen")
+              .insert({ ...stelleData, verein_id: user.data.id, aufrufe: 0 })
+              .select()
+              .single();
+            if (stelle && termineData.length > 0)
+              await supabase
+                .from("termine")
+                .insert(
+                  termineData.map((t) => ({ ...t, stelle_id: stelle.id }))
+                );
+            showToast("✓ Stelle veröffentlicht!");
+            await sendVolunteerPush({
+              gemeindeId: user.data.gemeinde_id,
+              notificationType: "neue_stellen",
+              vereinId: user.data.id,
+              kategorie: stelleData.kategorie,
+              title: "Neue Ehrenamtsstelle! 🌱",
+              body: `${user.data.name} sucht Freiwillige`,
+              url: "/",
+            });
+            await loadStellen(gemeindeId);
+            goBack();
           }}
         />
       )}
