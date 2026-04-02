@@ -498,6 +498,29 @@ export default function App() {
     }
   };
 
+  const loadVereinNotifications = async (vereinId) => {
+    if (!vereinId) {
+      setVereinNotifications([]);
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from("verein_notifications")
+        .select("*")
+        .eq("verein_id", vereinId)
+        .order("created_at", { ascending: false })
+        .limit(30);
+
+      if (error) throw error;
+
+      setVereinNotifications(data || []);
+    } catch (error) {
+      console.error("VEREIN NOTIFICATIONS LADEN FEHLER:", error);
+      setVereinNotifications([]);
+    }
+  };
+
   const toggleFollowVerein = async (vereinId) => {
     if (!user?.data?.id) return;
     const isFollowing = follows.vereine.includes(vereinId);
@@ -997,6 +1020,7 @@ export default function App() {
           setScreen("dashboard");
           autoArchivieren(verein.id);
           loadVereinFollowers(verein.id);
+          loadVereinNotifications(verein.id);
           return;
         }
 
@@ -1205,6 +1229,7 @@ export default function App() {
                 gelesen: false,
               });
             if (vereinNotifError) console.log("verein_notifications termin_wechsel failed:", vereinNotifError);
+            await loadVereinNotifications(stelle.verein_id);
             await sendVereinPush({
               vereinId: stelle.verein_id,
               notificationType: "termin_wechsel",
@@ -1266,6 +1291,7 @@ export default function App() {
             gelesen: false,
           });
         if (vereinNotifError) console.log("verein_notifications abmeldung failed:", vereinNotifError);
+        await loadVereinNotifications(abmeldeStelle.verein_id);
         await sendVereinPush({
           vereinId: abmeldeStelle.verein_id,
           notificationType: "abmeldung",
@@ -1338,6 +1364,7 @@ export default function App() {
                 gelesen: false,
               })
               .catch(() => {});
+            await loadVereinNotifications(selected.verein_id);
             await sendVereinPush({
               vereinId: selected.verein_id,
               notificationType: "warteliste",
@@ -2056,6 +2083,7 @@ export default function App() {
             if (type === "verein") {
               autoArchivieren(data.id);
               loadVereinFollowers(data.id);
+              loadVereinNotifications(data.id);
             }
           }}
           onBack={goBack}
