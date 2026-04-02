@@ -830,7 +830,7 @@ function VereinStelleDetail({
                     📅 Verschieben
                   </button>
                   <button
-                    onClick={() => onTerminAbsagen && onTerminAbsagen(t)}
+                    onClick={() => onTerminAbsagen && onTerminAbsagen(t.id)}
                     style={{
                       flex: 1,
                       padding: "7px",
@@ -1185,7 +1185,7 @@ function VereinStelleDetail({
                   if (!neuesDatum) return;
                   onTerminVerschieben &&
                     onTerminVerschieben(
-                      verschiebeTermin,
+                      verschiebeTermin.id,
                       neuesDatum,
                       neueStartzeit,
                       neueEndzeit
