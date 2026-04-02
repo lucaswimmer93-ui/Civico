@@ -373,6 +373,7 @@ export default function App() {
 
   const [user, setUser] = useState(null);
   const [stellen, setStellen] = useState([]);
+  const [vereine, setVereine] = useState([]);
   const [screen, setScreen] = useState(getInitialScreenFromPath);
   const [history, setHistory] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -440,6 +441,60 @@ export default function App() {
           .filter((f) => f.typ === "kategorie")
           .map((f) => f.ziel_wert),
       });
+    }
+  };
+
+  const loadVereine = async (gemeinde_id = null) => {
+    try {
+      let query = supabase
+        .from("vereine")
+        .select("*")
+        .order("name", { ascending: true });
+
+      if (gemeinde_id) query = query.eq("gemeinde_id", gemeinde_id);
+
+      const { data, error } = await query;
+      if (error) throw error;
+      setVereine(data || []);
+    } catch (error) {
+      console.error("VEREINE LADEN FEHLER:", error);
+      setVereine([]);
+    }
+  };
+
+  const loadVereinFollowers = async (vereinId) => {
+    if (!vereinId) {
+      setVereinFollowers([]);
+      return;
+    }
+    try {
+      const { data: followRows, error: followError } = await supabase
+        .from("follows")
+        .select("freiwilliger_id")
+        .eq("typ", "verein")
+        .eq("ziel_id", vereinId);
+
+      if (followError) throw followError;
+
+      const ids = [...new Set((followRows || []).map((row) => row.freiwilliger_id).filter(Boolean))];
+
+      if (!ids.length) {
+        setVereinFollowers([]);
+        return;
+      }
+
+      const { data: freiwilligeRows, error: freiwilligeError } = await supabase
+        .from("freiwillige")
+        .select("id, name")
+        .in("id", ids);
+
+      if (freiwilligeError) throw freiwilligeError;
+
+      const freiwilligeMap = new Map((freiwilligeRows || []).map((row) => [row.id, row]));
+      setVereinFollowers(ids.map((id) => ({ freiwilliger_id: id, freiwillige: freiwilligeMap.get(id) || null })));
+    } catch (error) {
+      console.error("VEREIN FOLLOWER LADEN FEHLER:", error);
+      setVereinFollowers([]);
     }
   };
 
@@ -910,6 +965,7 @@ export default function App() {
     }
 
     loadStellen();
+    loadVereine();
 
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       const activeFlowLock =
@@ -928,12 +984,13 @@ export default function App() {
           .from("freiwillige")
           .select("*")
           .eq("auth_id", session.user.id)
-          .single();
+          .maybeSingle();
 
         if (profil) {
           setUser({ type: "freiwilliger", data: profil });
           setGemeindeId(profil.gemeinde_id);
           loadStellen(profil.gemeinde_id, profil.plz, profil.umkreis);
+          loadVereine(profil.gemeinde_id);
           loadFollows(profil.id);
           loadNotifications(profil.id);
           setScreen("home");
@@ -944,22 +1001,16 @@ export default function App() {
           .from("vereine")
           .select("*")
           .eq("auth_id", session.user.id)
-          .single();
+          .maybeSingle();
 
         if (verein) {
           setUser({ type: "verein", data: verein });
           setGemeindeId(verein.gemeinde_id);
           loadStellen(verein.gemeinde_id);
+          loadVereine(verein.gemeinde_id);
           setScreen("dashboard");
           autoArchivieren(verein.id);
-          supabase
-            .from("follows")
-            .select("freiwilliger_id, freiwillige(name)")
-            .eq("typ", "verein")
-            .eq("ziel_id", verein.id)
-            .then(({ data }) => {
-              if (data) setVereinFollowers(data);
-            });
+          loadVereinFollowers(verein.id);
           return;
         }
 
@@ -967,12 +1018,13 @@ export default function App() {
           .from("gemeinden")
           .select("*")
           .eq("auth_id", session.user.id)
-          .single();
+          .maybeSingle();
 
         if (gemeinde) {
           setUser({ type: "gemeinde", data: gemeinde });
           setGemeindeId(gemeinde.id);
           loadStellen(gemeinde.id);
+          loadVereine(gemeinde.id);
           setScreen("gemeinde-dashboard");
           return;
         }
@@ -981,11 +1033,12 @@ export default function App() {
           .from("admins")
           .select("*")
           .eq("auth_id", session.user.id)
-          .single();
+          .maybeSingle();
 
         if (admin) {
           setUser({ type: "admin", data: admin });
           loadStellen();
+          loadVereine();
           setScreen("admin-dashboard");
           return;
         }
@@ -1391,35 +1444,21 @@ export default function App() {
   };
   const handleGemeindeStelleSpeichern = async (payload) => {
     try {
-      const insertPayload = {
-        titel: payload.titel,
-        beschreibung: payload.beschreibung,
-        kategorie: payload.kategorie,
-        typ: payload.typ || "event",
-        aufwand: payload.aufwand || "",
-        ort: payload.ort || user?.data?.ort || user?.data?.name || payload.standort || "",
-        plz: payload.plz || user?.data?.plz || "",
-        standort: payload.standort || null,
-        ansprechpartner: payload.ansprechpartner || null,
-        kontakt_email: payload.kontakt_email || null,
-        dringend: Boolean(payload.dringend),
-        verein_id: null,
-        gemeinde_id: gemeindeId || user?.data?.id || payload.gemeinde_id,
-        created_by_type: "gemeinde",
-        archiviert: false,
-        aufrufe: 0,
-      };
-
-      const { data: stelle, error: stelleError } = await supabase
+      const { data: stelle } = await supabase
         .from("stellen")
-        .insert(insertPayload)
+        .insert({
+          titel: payload.titel,
+          beschreibung: payload.beschreibung,
+          kategorie: payload.kategorie,
+          ort: payload.standort,
+          treffpunkt: payload.standort,
+          verein_id: null,
+          gemeinde_id: gemeindeId || user?.data?.id || payload.gemeinde_id,
+          created_by_type: "gemeinde",
+          archiviert: false,
+        })
         .select()
         .single();
-
-      if (stelleError) {
-        console.error("GEMEINDE STELLE INSERT ERROR:", stelleError, insertPayload);
-        throw stelleError;
-      }
 
       if (stelle && payload.termine?.length) {
         await supabase.from("termine").insert(
@@ -1938,6 +1977,7 @@ export default function App() {
             {/* VEREINE TAB */}
             {homeTab === "vereine" && (
               <VereineListe
+                vereine={vereine}
                 stellen={stellen}
                 user={user}
                 follows={follows}
@@ -2012,6 +2052,7 @@ export default function App() {
             setUser({ type, data });
             setGemeindeId(gid);
             loadStellen(gid);
+            loadVereine(gid);
             setHistory([]);
             if (type === "verein" || type === "organisation") {
               setScreen("dashboard");
@@ -2028,14 +2069,7 @@ export default function App() {
             }
             if (type === "verein") {
               autoArchivieren(data.id);
-              supabase
-                .from("follows")
-                .select("freiwilliger_id, freiwillige(name)")
-                .eq("typ", "verein")
-                .eq("ziel_id", data.id)
-                .then(({ data: f }) => {
-                  if (f) setVereinFollowers(f);
-                });
+              loadVereinFollowers(data.id);
             }
           }}
           onBack={goBack}
