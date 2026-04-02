@@ -2299,11 +2299,16 @@ export default function App() {
             logout={logout}
             showToast={showToast}
             followers={vereinFollowers}
-            onNotifications={() => {
-              if (user?.data?.id) loadVereinNotifications(user.data.id);
-              setShowVereinNotifications(!showVereinNotifications);
+            notifications={vereinNotifications}
+            onMarkNotifRead={async () => {
+              if (!user?.data?.id) return;
+              await supabase
+                .from("verein_notifications")
+                .update({ gelesen: true })
+                .eq("verein_id", user.data.id)
+                .eq("gelesen", false);
+              await loadVereinNotifications(user.data.id);
             }}
-            unreadCount={vereinNotifications.length}
           />
         </div>
       )}
