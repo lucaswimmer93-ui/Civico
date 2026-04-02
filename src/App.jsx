@@ -2365,29 +2365,74 @@ export default function App() {
           verein={user.data}
           onBack={goBack}
           onSave={async (stelleData, termineData) => {
-            const { data: stelle } = await supabase
-              .from("stellen")
-              .insert({ ...stelleData, verein_id: user.data.id, aufrufe: 0 })
-              .select()
-              .single();
-            if (stelle && termineData.length > 0)
-              await supabase
-                .from("termine")
-                .insert(
-                  termineData.map((t) => ({ ...t, stelle_id: stelle.id }))
-                );
-            showToast("✓ Stelle veröffentlicht!");
-            await sendVolunteerPush({
-              gemeindeId: user.data.gemeinde_id,
-              notificationType: "neue_stellen",
-              vereinId: user.data.id,
-              kategorie: stelleData.kategorie,
-              title: "Neue Ehrenamtsstelle! 🌱",
-              body: `${user.data.name} sucht Freiwillige`,
-              url: "/",
-            });
-            await loadStellen(gemeindeId);
-            goBack();
+            try {
+              const insertPayload = {
+                titel: stelleData.titel,
+                beschreibung: stelleData.beschreibung,
+                kategorie: stelleData.kategorie,
+                typ: stelleData.typ || "event",
+                aufwand: stelleData.aufwand || "",
+                ort: stelleData.ort || user.data.ort || "",
+                plz: stelleData.plz || user.data.plz || "",
+                standort: stelleData.standort || null,
+                ansprechpartner: stelleData.ansprechpartner || null,
+                kontakt_email: stelleData.kontakt_email || null,
+                dringend: Boolean(stelleData.dringend),
+                verein_id: user.data.id,
+                gemeinde_id: user.data.gemeinde_id,
+                created_by_type: "verein",
+                archiviert: false,
+                aufrufe: 0,
+              };
+
+              const { data: stelle, error: stelleError } = await supabase
+                .from("stellen")
+                .insert(insertPayload)
+                .select()
+                .single();
+
+              if (stelleError) {
+                console.error("VEREIN STELLE INSERT ERROR:", stelleError, insertPayload);
+                throw stelleError;
+              }
+
+              if (stelle && termineData.length > 0) {
+                const terminePayload = termineData.map((t) => ({
+                  stelle_id: stelle.id,
+                  datum: t.datum,
+                  startzeit: t.startzeit,
+                  endzeit: t.endzeit || null,
+                  freie_plaetze: t.freie_plaetze ?? t.plaetze ?? 5,
+                  gesamt_plaetze: t.gesamt_plaetze ?? t.plaetze ?? 5,
+                  status: "geplant",
+                }));
+
+                const { error: termineError } = await supabase
+                  .from("termine")
+                  .insert(terminePayload);
+
+                if (termineError) {
+                  console.error("VEREIN TERMINE INSERT ERROR:", termineError, terminePayload);
+                  throw termineError;
+                }
+              }
+
+              showToast("✓ Stelle veröffentlicht!");
+              await sendVolunteerPush({
+                gemeindeId: user.data.gemeinde_id,
+                notificationType: "neue_stellen",
+                vereinId: user.data.id,
+                kategorie: stelleData.kategorie,
+                title: "Neue Ehrenamtsstelle! 🌱",
+                body: `${user.data.name} sucht Freiwillige`,
+                url: "/",
+              });
+              await loadStellen(gemeindeId);
+              goBack();
+            } catch (err) {
+              console.error("VEREIN STELLE SPEICHERN FEHLER:", err);
+              showToast(`Fehler beim Speichern: ${err.message || "Unbekannter Fehler"}`, "#E85C5C");
+            }
           }}
         />
       )}
