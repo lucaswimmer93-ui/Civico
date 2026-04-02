@@ -2396,56 +2396,142 @@ export default function App() {
           onHome={goHome}
           onBestaetigen={handleBestaetigen}
           onStornieren={async (bewId, terminId) => {
-            await supabase.from("bewerbungen").delete().eq("id", bewId);
-            await supabase.rpc("increment_plaetze", { termin_id: terminId });
-            // Warteliste prüfen
-            const { data: nextOnList } = await supabase
-              .from("warteliste")
-              .select("*")
-              .eq("termin_id", terminId)
-              .order("created_at", { ascending: true })
-              .limit(1)
-              .single();
-            if (nextOnList) {
-              const { data: erfolg } = await supabase.rpc("book_slot", {
-                p_stelle_id: nextOnList.stelle_id,
-                p_termin_id: terminId,
-                p_freiwilliger_id: nextOnList.freiwilliger_id,
-                p_name: nextOnList.freiwilliger_name,
-                p_email: nextOnList.freiwilliger_email,
-              });
-              if (erfolg) {
-                await supabase
-                  .from("notifications")
-                  .insert({
-                    user_id: nextOnList.freiwilliger_id,
-                    titel: "🎉 Du wurdest nachgerückt!",
-                    text: `Du bist von der Warteliste bei "${selected.titel}" nachgerückt und automatisch angemeldet!`,
-                    typ: "platz_frei",
-                    gelesen: false,
-                  });
-                await sendVolunteerPush({
-                  gemeindeId,
-                  notificationType: "freie_plaetze",
-                  freiwilligerIds: [nextOnList.freiwilliger_id],
-                  title: "🎉 Du wurdest nachgerückt!",
-                  body: `Du bist bei "${selected.titel}" automatisch nachgerückt.`,
-                  url: "/",
-                });
-              }
-              await supabase
+            try {
+              await supabase.from("bewerbungen").delete().eq("id", bewId);
+              await supabase.rpc("increment_plaetze", { termin_id: terminId });
+
+              // Warteliste prüfen
+              const { data: nextOnList } = await supabase
                 .from("warteliste")
-                .delete()
-                .eq("id", nextOnList.id);
+                .select("*")
+                .eq("termin_id", terminId)
+                .order("created_at", { ascending: true })
+                .limit(1)
+                .maybeSingle();
+
+              if (nextOnList) {
+                const { data: erfolg } = await supabase.rpc("book_slot", {
+                  p_stelle_id: nextOnList.stelle_id,
+                  p_termin_id: terminId,
+                  p_freiwilliger_id: nextOnList.freiwilliger_id,
+                  p_name: nextOnList.freiwilliger_name,
+                  p_email: nextOnList.freiwilliger_email,
+                });
+
+                if (erfolg) {
+                  await supabase
+                    .from("notifications")
+                    .insert({
+                      user_id: nextOnList.freiwilliger_id,
+                      titel: "🎉 Du wurdest nachgerückt!",
+                      text: `Du bist von der Warteliste bei "${selected.titel}" nachgerückt und automatisch angemeldet!`,
+                      typ: "platz_frei",
+                      gelesen: false,
+                    });
+
+                  await sendVolunteerPush({
+                    gemeindeId,
+                    notificationType: "freie_plaetze",
+                    freiwilligerIds: [nextOnList.freiwilliger_id],
+                    title: "🎉 Du wurdest nachgerückt!",
+                    body: `Du bist bei "${selected.titel}" automatisch nachgerückt.`,
+                    url: "/",
+                  });
+                }
+
+                await supabase
+                  .from("warteliste")
+                  .delete()
+                  .eq("id", nextOnList.id);
+              }
+
+              showToast("✓ Anmeldung storniert.", "#E85C5C");
+              await loadStellen(gemeindeId);
+              const { data } = await supabase
+                .from("stellen")
+                .select("*, vereine(*), termine(*, bewerbungen(*))")
+                .eq("id", selected.id)
+                .single();
+              if (data) setSelected(data);
+            } catch (error) {
+              console.error("Verein Anmeldung stornieren fehlgeschlagen:", error);
+              showToast("Fehler beim Stornieren.", "#E85C5C");
             }
-            showToast("✓ Anmeldung storniert.", "#E85C5C");
-            await loadStellen(gemeindeId);
-            const { data } = await supabase
-              .from("stellen")
-              .select("*, vereine(*), termine(*, bewerbungen(*))")
-              .eq("id", selected.id)
-              .single();
-            if (data) setSelected(data);
+          }}
+          onTerminAbsagen={async (terminId) => {
+            try {
+              if (!terminId) {
+                showToast("Termin-ID fehlt.", "#E85C5C");
+                return;
+              }
+
+              const { error: markError } = await supabase
+                .from("termine")
+                .update({ abgesagt: true })
+                .eq("id", terminId);
+
+              if (markError) throw markError;
+
+              const { error: rpcError } = await supabase.rpc(
+                "queue_termin_cancelled_for_termin",
+                { p_termin_id: terminId }
+              );
+              if (rpcError) {
+                console.log("queue_termin_cancelled_for_termin failed:", rpcError);
+              }
+
+              showToast("✓ Termin abgesagt.", "#E85C5C");
+              await loadStellen(gemeindeId);
+              const { data } = await supabase
+                .from("stellen")
+                .select("*, vereine(*), termine(*, bewerbungen(*))")
+                .eq("id", selected.id)
+                .single();
+              if (data) setSelected(data);
+            } catch (error) {
+              console.error("Verein Termin absagen fehlgeschlagen:", error);
+              showToast("Fehler beim Absagen.", "#E85C5C");
+            }
+          }}
+          onTerminVerschieben={async (terminId, datum, startzeit, endzeit) => {
+            try {
+              if (!terminId || !datum || !startzeit) {
+                showToast("Bitte Datum und Startzeit angeben.", "#E85C5C");
+                return;
+              }
+
+              const { error: updateError } = await supabase
+                .from("termine")
+                .update({
+                  datum,
+                  startzeit,
+                  endzeit: endzeit || null,
+                  abgesagt: false,
+                })
+                .eq("id", terminId);
+
+              if (updateError) throw updateError;
+
+              const { error: rpcError } = await supabase.rpc(
+                "queue_termin_rescheduled_for_termin",
+                { p_termin_id: terminId }
+              );
+              if (rpcError) {
+                console.log("queue_termin_rescheduled_for_termin failed:", rpcError);
+              }
+
+              showToast("✓ Termin verschoben!");
+              await loadStellen(gemeindeId);
+              const { data } = await supabase
+                .from("stellen")
+                .select("*, vereine(*), termine(*, bewerbungen(*))")
+                .eq("id", selected.id)
+                .single();
+              if (data) setSelected(data);
+            } catch (error) {
+              console.error("Verein Termin verschieben fehlgeschlagen:", error);
+              showToast("Fehler beim Verschieben.", "#E85C5C");
+            }
           }}
           onFreiwilligerProfil={async (bew) => {
             const { data: profil } = await supabase
