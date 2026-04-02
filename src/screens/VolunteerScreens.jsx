@@ -11,6 +11,34 @@ const bewerbungIstNoShow = (bewerbung) =>
 const bewerbungIstOffen = (bewerbung) =>
   !bewerbungIstErschienen(bewerbung) && !bewerbungIstNoShow(bewerbung);
 
+const bewerbungIstAktiv = (bewerbung) => {
+  if (!bewerbung) return false;
+  const status = String(bewerbung.status || "").toLowerCase();
+  return !["storniert", "abgesagt", "cancelled", "canceled"].includes(status);
+};
+
+const getTerminPlaetze = (termin) => {
+  const gesamtPlaetze = Number(
+    termin?.gesamt_plaetze ?? termin?.max_helfer ?? termin?.plaetze ?? 0
+  );
+  const aktiveBewerbungen = (termin?.bewerbungen || []).filter(bewerbungIstAktiv).length;
+  const freiePlaetzeAusDb = termin?.freie_plaetze;
+
+  const freiePlaetze = Number.isFinite(Number(freiePlaetzeAusDb))
+    ? Math.max(0, Number(freiePlaetzeAusDb))
+    : Math.max(0, gesamtPlaetze - aktiveBewerbungen);
+
+  const angemeldet = gesamtPlaetze > 0
+    ? Math.min(gesamtPlaetze, aktiveBewerbungen)
+    : aktiveBewerbungen;
+
+  return {
+    gesamtPlaetze,
+    freiePlaetze,
+    angemeldet,
+    belegt: freiePlaetze <= 0,
+  };
+};
 
 function DetailScreen({
   stelle,
@@ -260,13 +288,12 @@ function DetailScreen({
           termine.map((t) => {
             const meineBew = user
               ? (t.bewerbungen || []).find(
-                  (b) => b.freiwilliger_id === user?.data?.id
+                  (b) =>
+                    b.freiwilliger_id === user?.data?.id &&
+                    bewerbungIstAktiv(b)
                 )
               : null;
-            const gesamtPlaetze = t.gesamt_plaetze || t.freie_plaetze || 0;
-            const freiBis = t.freie_plaetze || 0;
-            const angemeldet = Math.max(0, gesamtPlaetze - freiBis);
-            const belegt = freiBis <= 0;
+            const { freiePlaetze, angemeldet, belegt } = getTerminPlaetze(t);
             return (
               <div
                 key={t.id}
@@ -323,7 +350,7 @@ function DetailScreen({
                     >
                       {belegt
                         ? "Ausgebucht"
-                        : `Noch ${freiBis} Helfer gesucht`}
+                        : `Noch ${freiePlaetze} Helfer gesucht`}
                     </div>
                   </div>
                 </div>
@@ -345,9 +372,10 @@ function DetailScreen({
                       ✓ Du bist für diesen Termin angemeldet
                     </div>
                     <div style={{ display: "flex", gap: 8 }}>
-                      {termine.filter(
-                        (x) => x.id !== t.id && (x.freie_plaetze || 0) > 0
-                      ).length > 0 && (
+                      {termine.filter((x) => {
+                        if (x.id === t.id) return false;
+                        return getTerminPlaetze(x).freiePlaetze > 0;
+                      }).length > 0 && (
                         <button
                           onClick={() => onTerminWechsel(meineBew.id, t.id)}
                           style={{
