@@ -1185,42 +1185,41 @@ export default function App() {
           // Verein benachrichtigen
           const stelle = stellen.find((s) => s.id === stelleId);
           if (stelle?.verein_id) {
-            try {
-              const { error: vereinNotifError } = await supabase
-                .from("verein_notifications")
-                .insert({
-                  verein_id: stelle.verein_id,
-                  titel: "🎉 Neue Anmeldung!",
-                  text: `${user.data.name} hat sich für "${stelle.titel}" angemeldet.`,
-                  typ: "anmeldung",
-                  gelesen: false,
-                });
-              if (vereinNotifError) {
-                console.log("verein_notifications anmeldung failed:", vereinNotifError);
-              }
-            } catch (e) {
-              console.log("verein_notifications anmeldung crashed:", e);
-            }
-
-            try {
-              await sendVereinPush({
-                vereinId: stelle.verein_id,
-                notificationType: "anmeldung",
-                title: "🎉 Neue Anmeldung!",
-                body: `${user.data.name} hat sich für "${stelle.titel}" angemeldet.`,
-                url: "/",
+            supabase
+              .from("verein_notifications")
+              .insert({
+                verein_id: stelle.verein_id,
+                titel: "🎉 Neue Anmeldung!",
+                text: `${user.data.name} hat sich für "${stelle.titel}" angemeldet.`,
+                typ: "anmeldung",
+                gelesen: false,
+              })
+              .then(({ error }) => {
+                if (error) {
+                  console.log("verein_notifications anmeldung failed:", error);
+                }
+              })
+              .catch((e) => {
+                console.log("verein_notifications anmeldung crashed:", e);
               });
-            } catch (e) {
-              console.log("sendVereinPush anmeldung crashed:", e);
-            }
+
+            sendVereinPush({
+              vereinId: stelle.verein_id,
+              notificationType: "anmeldung",
+              title: "🎉 Neue Anmeldung!",
+              body: `${user.data.name} hat sich für "${stelle.titel}" angemeldet.`,
+              url: "/",
+            }).catch((e) => {
+              console.log("sendVereinPush anmeldung failed:", e);
+            });
           }
         } else {
           setTerminWechselModus(false);
           showToast("✓ Termin geändert!");
           // Verein über Terminwechsel benachrichtigen
           const stelle = stellen.find((s) => s.id === stelleId);
-          if (stelle) {
-            const { error: vereinNotifError } = await supabase
+          if (stelle?.verein_id) {
+            supabase
               .from("verein_notifications")
               .insert({
                 verein_id: stelle.verein_id,
@@ -1228,14 +1227,24 @@ export default function App() {
                 text: `${user.data.name} hat den Termin für "${stelle.titel}" geändert.`,
                 typ: "termin_wechsel",
                 gelesen: false,
+              })
+              .then(({ error }) => {
+                if (error) {
+                  console.log("verein_notifications termin_wechsel failed:", error);
+                }
+              })
+              .catch((e) => {
+                console.log("verein_notifications termin_wechsel crashed:", e);
               });
-            if (vereinNotifError) console.log("verein_notifications termin_wechsel failed:", vereinNotifError);
-            await sendVereinPush({
+
+            sendVereinPush({
               vereinId: stelle.verein_id,
               notificationType: "termin_wechsel",
               title: "📅 Termin geändert",
               body: `${user.data.name} hat den Termin für "${stelle.titel}" geändert.`,
               url: "/",
+            }).catch((e) => {
+              console.log("sendVereinPush termin_wechsel failed:", e);
             });
           }
         }
@@ -1280,8 +1289,8 @@ export default function App() {
       const abmeldeStelle = stellen.find((s) =>
         (s.termine || []).some((t) => t.id === terminId)
       );
-      if (abmeldeStelle) {
-        const { error: vereinNotifError } = await supabase
+      if (abmeldeStelle?.verein_id) {
+        supabase
           .from("verein_notifications")
           .insert({
             verein_id: abmeldeStelle.verein_id,
@@ -1289,14 +1298,24 @@ export default function App() {
             text: `${user.data.name} hat sich von "${abmeldeStelle.titel}" abgemeldet.`,
             typ: "abmeldung",
             gelesen: false,
+          })
+          .then(({ error }) => {
+            if (error) {
+              console.log("verein_notifications abmeldung failed:", error);
+            }
+          })
+          .catch((e) => {
+            console.log("verein_notifications abmeldung crashed:", e);
           });
-        if (vereinNotifError) console.log("verein_notifications abmeldung failed:", vereinNotifError);
-        await sendVereinPush({
+
+        sendVereinPush({
           vereinId: abmeldeStelle.verein_id,
           notificationType: "abmeldung",
           title: "❌ Abmeldung",
           body: `${user.data.name} hat sich von "${abmeldeStelle.titel}" abgemeldet.`,
           url: "/",
+        }).catch((e) => {
+          console.log("sendVereinPush abmeldung failed:", e);
         });
       }
       // Warteliste prüfen
@@ -1363,12 +1382,14 @@ export default function App() {
                 gelesen: false,
               })
               .catch(() => {});
-            await sendVereinPush({
+            sendVereinPush({
               vereinId: selected.verein_id,
               notificationType: "warteliste",
               title: "🔄 Warteliste nachgerückt",
               body: `${nextOnList.freiwilliger_name} ist automatisch von der Warteliste nachgerückt.`,
               url: "/",
+            }).catch((e) => {
+              console.log("sendVereinPush warteliste failed:", e);
             });
           }
         } else {
