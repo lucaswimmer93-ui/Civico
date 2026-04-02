@@ -31,6 +31,8 @@ function VereinDashboard({
   followers,
   notifications = [],
   onMarkNotifRead,
+  unreadCount = null,
+  onNotifications = null,
 }) {
   const [showNotif, setShowNotif] = useState(false);
   const meineStellen = stellen.filter(
@@ -131,6 +133,9 @@ function VereinDashboard({
             <button
               onClick={() => {
                 setShowNotif((p) => !p);
+                if (typeof onNotifications === "function") {
+                  onNotifications();
+                }
                 if (notifications.some((n) => !n.gelesen))
                   onMarkNotifRead && onMarkNotifRead();
               }}
@@ -144,7 +149,7 @@ function VereinDashboard({
               }}
             >
               🔔
-              {notifications.filter((n) => !n.gelesen).length > 0 && (
+              {((unreadCount ?? notifications.filter((n) => !n.gelesen).length) > 0) && (
                 <span
                   style={{
                     position: "absolute",
@@ -162,9 +167,9 @@ function VereinDashboard({
                     fontWeight: "bold",
                   }}
                 >
-                  {notifications.filter((n) => !n.gelesen).length > 9
+                  {(unreadCount ?? notifications.filter((n) => !n.gelesen).length) > 9
                     ? "9+"
-                    : notifications.filter((n) => !n.gelesen).length}
+                    : (unreadCount ?? notifications.filter((n) => !n.gelesen).length)}
                 </span>
               )}
             </button>
