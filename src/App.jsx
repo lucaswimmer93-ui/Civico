@@ -1226,35 +1226,27 @@ export default function App() {
       const isEchteNeuanmeldung = isNew && !terminWechselModus;
       if (isNew) {
         if (!terminWechselModus) {
-          // Prüfe auf JEDER Stelle und JEDEM Termin ob bereits angemeldet
+          // Nur denselben Termin blockieren, nicht andere Termine derselben Stelle
           const bereitsAngemeldet = stellen
             .find((s) => s.id === stelleId)
-            ?.termine?.some((t) =>
-              (t.bewerbungen || []).some(
-                (b) => b.freiwilliger_id === user.data.id
-              )
-            );
+            ?.termine?.find((t) => t.id === terminId)
+            ?.bewerbungen?.some((b) => b.freiwilliger_id === user.data.id);
           if (bereitsAngemeldet) {
             showToast(
-              "Du bist bereits bei dieser Stelle angemeldet!",
+              "Du bist für diesen Termin bereits angemeldet!",
               "#E8A87C"
             );
             return;
           }
-          // Extra Sicherheit: direkt in DB prüfen
+          // Extra Sicherheit: direkt in DB nur für genau diesen Termin prüfen
           const { data: dbCheck } = await supabase
             .from("bewerbungen")
             .select("id")
             .eq("freiwilliger_id", user.data.id)
-            .in(
-              "termin_id",
-              stellen
-                .find((s) => s.id === stelleId)
-                ?.termine?.map((t) => t.id) || []
-            );
+            .eq("termin_id", terminId);
           if (dbCheck && dbCheck.length > 0) {
             showToast(
-              "Du bist bereits bei dieser Stelle angemeldet!",
+              "Du bist für diesen Termin bereits angemeldet!",
               "#E8A87C"
             );
             return;
@@ -2501,29 +2493,31 @@ export default function App() {
               );
 
               if (rpcError) {
-                console.log("queue_termin_cancelled_for_termin failed:", rpcError);
+                throw rpcError;
               }
 
-              const { error: deleteBewerbungenError } = await supabase
+              // Betroffene Anmeldungen und Warteliste für diesen Termin entfernen,
+              // damit der Termin wirklich verschwindet und niemand angemeldet bleibt.
+              const { error: bewerbungenDeleteError } = await supabase
                 .from("bewerbungen")
                 .delete()
                 .eq("termin_id", terminId);
 
-              if (deleteBewerbungenError) throw deleteBewerbungenError;
+              if (bewerbungenDeleteError) throw bewerbungenDeleteError;
 
-              const { error: deleteWartelisteError } = await supabase
+              const { error: wartelisteDeleteError } = await supabase
                 .from("warteliste")
                 .delete()
                 .eq("termin_id", terminId);
 
-              if (deleteWartelisteError) throw deleteWartelisteError;
+              if (wartelisteDeleteError) throw wartelisteDeleteError;
 
-              const { error: deleteTerminError } = await supabase
+              const { error: terminDeleteError } = await supabase
                 .from("termine")
                 .delete()
                 .eq("id", terminId);
 
-              if (deleteTerminError) throw deleteTerminError;
+              if (terminDeleteError) throw terminDeleteError;
 
               showToast("✓ Termin abgesagt.", "#E85C5C");
               await loadStellen(gemeindeId);
@@ -2531,8 +2525,12 @@ export default function App() {
                 .from("stellen")
                 .select("*, vereine(*), termine(*, bewerbungen(*))")
                 .eq("id", selected.id)
-                .single();
-              if (data) setSelected(data);
+                .maybeSingle();
+              if (data) {
+                setSelected(data);
+              } else {
+                goBack();
+              }
             } catch (error) {
               console.error("Verein Termin absagen fehlgeschlagen:", error);
               showToast("Fehler beim Absagen.", "#E85C5C");
@@ -2793,28 +2791,35 @@ export default function App() {
               // Abgesagte Termine löschen + Freiwillige benachrichtigen
               const abgesagt = termineData.filter((t) => t.absagen && t.id);
               for (const t of abgesagt) {
-                const { data: bews } = await supabase
-                  .from("bewerbungen")
-                  .select("freiwilliger_id")
-                  .eq("termin_id", t.id);
-                if (bews)
-                  for (const b of bews) {
-                    const { error: notifError } = await supabase
-                      .from("notifications")
-                      .insert({
-                        user_id: b.freiwilliger_id,
-                        titel: "❌ Termin abgesagt",
-                        text: `Dein Termin für "${selected.titel}" wurde leider abgesagt.`,
-                        typ: "termin_abgesagt",
-                        gelesen: false,
-                      });
-                    if (notifError) console.log("termin_abgesagt notification failed:", notifError);
-                  }
-                await supabase
+                const { error: markCancelledError } = await supabase
+                  .from("termine")
+                  .update({ abgesagt: true })
+                  .eq("id", t.id);
+                if (markCancelledError) throw markCancelledError;
+
+                const { error: rpcError } = await supabase.rpc(
+                  "queue_termin_cancelled_for_termin",
+                  { p_termin_id: t.id }
+                );
+                if (rpcError) throw rpcError;
+
+                const { error: bewerbungenDeleteError } = await supabase
                   .from("bewerbungen")
                   .delete()
                   .eq("termin_id", t.id);
-                await supabase.from("termine").delete().eq("id", t.id);
+                if (bewerbungenDeleteError) throw bewerbungenDeleteError;
+
+                const { error: wartelisteDeleteError } = await supabase
+                  .from("warteliste")
+                  .delete()
+                  .eq("termin_id", t.id);
+                if (wartelisteDeleteError) throw wartelisteDeleteError;
+
+                const { error: terminDeleteError } = await supabase
+                  .from("termine")
+                  .delete()
+                  .eq("id", t.id);
+                if (terminDeleteError) throw terminDeleteError;
               }
               // Verschobene Termine updaten
               const geaendert = termineData.filter((t) => !t.absagen && t.id);
@@ -2830,28 +2835,19 @@ export default function App() {
                     endzeit: t.endzeit || null,
                   })
                   .eq("id", t.id);
-                if (original && original.datum !== t.datum) {
-                  const { data: bews } = await supabase
-                    .from("bewerbungen")
-                    .select("freiwilliger_id")
-                    .eq("termin_id", t.id);
-                  if (bews)
-                    for (const b of bews) {
-                      const { error: notifError } = await supabase
-                        .from("notifications")
-                        .insert({
-                          user_id: b.freiwilliger_id,
-                          titel: "📅 Termin verschoben",
-                          text: `Dein Termin für "${
-                            selected.titel
-                          }" wurde auf ${new Date(t.datum).toLocaleDateString(
-                            "de-DE"
-                          )} verschoben.`,
-                          typ: "termin_geaendert",
-                          gelesen: false,
-                        });
-                      if (notifError) console.log("termin_geaendert notification failed:", notifError);
-                    }
+                if (
+                  original &&
+                  (
+                    original.datum !== t.datum ||
+                    original.startzeit !== t.startzeit ||
+                    (original.endzeit || null) !== (t.endzeit || null)
+                  )
+                ) {
+                  const { error: rpcError } = await supabase.rpc(
+                    "queue_termin_rescheduled_for_termin",
+                    { p_termin_id: t.id }
+                  );
+                  if (rpcError) throw rpcError;
                 }
               }
               // Neue Termine einfügen
