@@ -2504,6 +2504,27 @@ export default function App() {
                 console.log("queue_termin_cancelled_for_termin failed:", rpcError);
               }
 
+              const { error: deleteBewerbungenError } = await supabase
+                .from("bewerbungen")
+                .delete()
+                .eq("termin_id", terminId);
+
+              if (deleteBewerbungenError) throw deleteBewerbungenError;
+
+              const { error: deleteWartelisteError } = await supabase
+                .from("warteliste")
+                .delete()
+                .eq("termin_id", terminId);
+
+              if (deleteWartelisteError) throw deleteWartelisteError;
+
+              const { error: deleteTerminError } = await supabase
+                .from("termine")
+                .delete()
+                .eq("id", terminId);
+
+              if (deleteTerminError) throw deleteTerminError;
+
               showToast("✓ Termin abgesagt.", "#E85C5C");
               await loadStellen(gemeindeId);
               const { data } = await supabase
@@ -2525,6 +2546,7 @@ export default function App() {
               }
 
               const originalTermin = (selected?.termine || []).find((t) => t.id === terminId);
+
               const datumChanged = originalTermin?.datum !== datum;
               const startzeitChanged = originalTermin?.startzeit !== startzeit;
               const endzeitChanged = (originalTermin?.endzeit || null) !== (endzeit || null);
@@ -2542,13 +2564,61 @@ export default function App() {
               if (updateError) throw updateError;
 
               if (datumChanged || startzeitChanged || endzeitChanged) {
-                const { error: rpcError } = await supabase.rpc(
-                  "queue_termin_rescheduled_for_termin",
-                  { p_termin_id: terminId }
-                );
+                const { data: bews, error: bewsError } = await supabase
+                  .from("bewerbungen")
+                  .select("freiwilliger_id")
+                  .eq("termin_id", terminId);
 
-                if (rpcError) {
-                  console.log("queue_termin_rescheduled_for_termin failed:", rpcError);
+                if (bewsError) {
+                  console.log("bewerbungen fuer termin_verschoben failed:", bewsError);
+                }
+
+                const freiwilligenIds = [...new Set((bews || []).map((b) => b.freiwilliger_id).filter(Boolean))];
+
+                if (freiwilligenIds.length) {
+                  const { data: freiwilligeRows, error: freiwilligeError } = await supabase
+                    .from("freiwillige")
+                    .select("id, auth_id")
+                    .in("id", freiwilligenIds);
+
+                  if (freiwilligeError) {
+                    console.log("freiwillige fuer termin_verschoben failed:", freiwilligeError);
+                  }
+
+                  const authIds = [...new Set((freiwilligeRows || []).map((f) => f.auth_id).filter(Boolean))];
+
+                  if (authIds.length) {
+                    const datumText = new Date(datum).toLocaleDateString("de-DE");
+                    const zeitText = endzeit
+                      ? `${startzeit}–${endzeit} Uhr`
+                      : `${startzeit} Uhr`;
+
+                    const notificationRows = authIds.map((authId) => ({
+                      user_id: authId,
+                      titel: "📅 Termin verschoben",
+                      text: `Dein Termin für "${selected.titel}" wurde auf ${datumText}, ${zeitText} verschoben.`,
+                      typ: "termin_rescheduled",
+                      gelesen: false,
+                      read_at: null,
+                    }));
+
+                    const { error: notifError } = await supabase
+                      .from("notifications")
+                      .insert(notificationRows);
+
+                    if (notifError) {
+                      console.log("termin_rescheduled notification failed:", notifError);
+                    }
+
+                    await sendVolunteerPush({
+                      gemeindeId,
+                      notificationType: "termin_wechsel",
+                      freiwilligerIds,
+                      title: "📅 Termin verschoben",
+                      body: `Dein Termin für "${selected.titel}" wurde auf ${datumText}, ${zeitText} verschoben.`,
+                      url: "/",
+                    });
+                  }
                 }
               }
 
@@ -2723,12 +2793,23 @@ export default function App() {
               // Abgesagte Termine löschen + Freiwillige benachrichtigen
               const abgesagt = termineData.filter((t) => t.absagen && t.id);
               for (const t of abgesagt) {
-                const { error: rpcError } = await supabase.rpc(
-                  "queue_termin_cancelled_for_termin",
-                  { p_termin_id: t.id }
-                );
-                if (rpcError) console.log("queue_termin_cancelled_for_termin failed:", rpcError);
-
+                const { data: bews } = await supabase
+                  .from("bewerbungen")
+                  .select("freiwilliger_id")
+                  .eq("termin_id", t.id);
+                if (bews)
+                  for (const b of bews) {
+                    const { error: notifError } = await supabase
+                      .from("notifications")
+                      .insert({
+                        user_id: b.freiwilliger_id,
+                        titel: "❌ Termin abgesagt",
+                        text: `Dein Termin für "${selected.titel}" wurde leider abgesagt.`,
+                        typ: "termin_abgesagt",
+                        gelesen: false,
+                      });
+                    if (notifError) console.log("termin_abgesagt notification failed:", notifError);
+                  }
                 await supabase
                   .from("bewerbungen")
                   .delete()
@@ -2741,11 +2822,6 @@ export default function App() {
                 const original = (selected.termine || []).find(
                   (ot) => ot.id === t.id
                 );
-
-                const datumChanged = original?.datum !== t.datum;
-                const startzeitChanged = original?.startzeit !== t.startzeit;
-                const endzeitChanged = (original?.endzeit || null) !== (t.endzeit || null);
-
                 await supabase
                   .from("termine")
                   .update({
@@ -2754,13 +2830,28 @@ export default function App() {
                     endzeit: t.endzeit || null,
                   })
                   .eq("id", t.id);
-
-                if (datumChanged || startzeitChanged || endzeitChanged) {
-                  const { error: rpcError } = await supabase.rpc(
-                    "queue_termin_rescheduled_for_termin",
-                    { p_termin_id: t.id }
-                  );
-                  if (rpcError) console.log("queue_termin_rescheduled_for_termin failed:", rpcError);
+                if (original && original.datum !== t.datum) {
+                  const { data: bews } = await supabase
+                    .from("bewerbungen")
+                    .select("freiwilliger_id")
+                    .eq("termin_id", t.id);
+                  if (bews)
+                    for (const b of bews) {
+                      const { error: notifError } = await supabase
+                        .from("notifications")
+                        .insert({
+                          user_id: b.freiwilliger_id,
+                          titel: "📅 Termin verschoben",
+                          text: `Dein Termin für "${
+                            selected.titel
+                          }" wurde auf ${new Date(t.datum).toLocaleDateString(
+                            "de-DE"
+                          )} verschoben.`,
+                          typ: "termin_geaendert",
+                          gelesen: false,
+                        });
+                      if (notifError) console.log("termin_geaendert notification failed:", notifError);
+                    }
                 }
               }
               // Neue Termine einfügen
