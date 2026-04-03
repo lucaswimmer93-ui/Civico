@@ -565,56 +565,91 @@ export default function App() {
 
   const toggleFollowVerein = async (vereinId) => {
     if (!user?.data?.id) return;
+
     const isFollowing = follows.vereine.includes(vereinId);
-    if (isFollowing) {
-      await supabase
-        .from("follows")
-        .delete()
-        .eq("freiwilliger_id", user.data.id)
-        .eq("typ", "verein")
-        .eq("ziel_id", vereinId);
-      setFollows((prev) => ({
-        ...prev,
-        vereine: prev.vereine.filter((id) => id !== vereinId),
-      }));
-    } else {
-      await supabase
+
+    try {
+      if (isFollowing) {
+        const { error } = await supabase
+          .from("follows")
+          .delete()
+          .eq("freiwilliger_id", user.data.id)
+          .eq("typ", "verein")
+          .eq("ziel_id", vereinId);
+
+        if (error) throw error;
+
+        setFollows((prev) => ({
+          ...prev,
+          vereine: prev.vereine.filter((id) => id !== vereinId),
+        }));
+        return;
+      }
+
+      const { error } = await supabase
         .from("follows")
         .insert({
           freiwilliger_id: user.data.id,
           typ: "verein",
           ziel_id: vereinId,
         });
-      setFollows((prev) => ({ ...prev, vereine: [...prev.vereine, vereinId] }));
+
+      if (error) throw error;
+
+      setFollows((prev) => ({
+        ...prev,
+        vereine: prev.vereine.includes(vereinId)
+          ? prev.vereine
+          : [...prev.vereine, vereinId],
+      }));
+    } catch (error) {
+      console.error("FOLLOW VEREIN FEHLER:", error);
+      showToast("Verein konnte nicht gefolgt werden.", "#E85C5C");
     }
   };
 
   const toggleFollowKategorie = async (katId) => {
     if (!user?.data?.id) return;
+
     const isFollowing = follows.kategorien.includes(katId);
-    if (isFollowing) {
-      await supabase
-        .from("follows")
-        .delete()
-        .eq("freiwilliger_id", user.data.id)
-        .eq("typ", "kategorie")
-        .eq("ziel_wert", katId);
-      setFollows((prev) => ({
-        ...prev,
-        kategorien: prev.kategorien.filter((k) => k !== katId),
-      }));
-    } else {
-      await supabase
+
+    try {
+      if (isFollowing) {
+        const { error } = await supabase
+          .from("follows")
+          .delete()
+          .eq("freiwilliger_id", user.data.id)
+          .eq("typ", "kategorie")
+          .eq("ziel_wert", katId);
+
+        if (error) throw error;
+
+        setFollows((prev) => ({
+          ...prev,
+          kategorien: prev.kategorien.filter((k) => k !== katId),
+        }));
+        return;
+      }
+
+      const { error } = await supabase
         .from("follows")
         .insert({
           freiwilliger_id: user.data.id,
           typ: "kategorie",
           ziel_wert: katId,
         });
+
+      if (error) throw error;
+
       setFollows((prev) => ({
         ...prev,
-        kategorien: [...prev.kategorien, katId],
+        kategorien: prev.kategorien.includes(katId)
+          ? prev.kategorien
+          : [...prev.kategorien, katId],
       }));
+    } catch (error) {
+      console.error("FOLLOW KATEGORIE FEHLER:", error);
+      showToast("Kategorie konnte nicht gefolgt werden.", "#E85C5C");
     }
   };
 
