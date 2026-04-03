@@ -132,9 +132,6 @@ function DetailScreen({
             {`Gemeinde ${stelle.ort || ""}`.trim()}
           </div>
         )}
-        <div style={{ fontSize: 12, color: "#6B5840", marginTop: 4 }}>
-          👁️ {stelle.aufrufe || 0} Aufrufe
-        </div>
         {user?.type === "freiwilliger" && (
           <button
             onClick={() =>
