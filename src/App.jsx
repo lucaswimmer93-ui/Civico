@@ -2519,16 +2519,39 @@ export default function App() {
           }}
           onTerminVerschieben={async (terminId, datum, startzeit, endzeit) => {
             try {
+              console.log("🔥 RESCHEDULE FLOW START", { terminId, datum, startzeit, endzeit, selectedId: selected?.id });
+
               if (!terminId || !datum || !startzeit) {
+                console.log("🔥 RESCHEDULE ABORT missing values", { terminId, datum, startzeit });
                 showToast("Bitte Datum und Startzeit angeben.", "#E85C5C");
                 return;
               }
 
               const originalTermin = (selected?.termine || []).find((t) => t.id === terminId);
+              console.log("🔥 RESCHEDULE ORIGINAL", originalTermin);
 
-              const datumChanged = originalTermin?.datum !== datum;
-              const startzeitChanged = originalTermin?.startzeit !== startzeit;
-              const endzeitChanged = (originalTermin?.endzeit || null) !== (endzeit || null);
+              const normalizedOriginalDate = originalTermin?.datum ? String(originalTermin.datum).slice(0, 10) : null;
+              const normalizedNewDate = datum ? String(datum).slice(0, 10) : null;
+              const normalizedOriginalStart = originalTermin?.startzeit || null;
+              const normalizedNewStart = startzeit || null;
+              const normalizedOriginalEnd = originalTermin?.endzeit || null;
+              const normalizedNewEnd = endzeit || null;
+
+              const datumChanged = normalizedOriginalDate !== normalizedNewDate;
+              const startzeitChanged = normalizedOriginalStart !== normalizedNewStart;
+              const endzeitChanged = normalizedOriginalEnd !== normalizedNewEnd;
+
+              console.log("🔥 RESCHEDULE CHANGES", {
+                normalizedOriginalDate,
+                normalizedNewDate,
+                normalizedOriginalStart,
+                normalizedNewStart,
+                normalizedOriginalEnd,
+                normalizedNewEnd,
+                datumChanged,
+                startzeitChanged,
+                endzeitChanged,
+              });
 
               const { error: updateError } = await supabase
                 .from("termine")
@@ -2540,31 +2563,49 @@ export default function App() {
                 })
                 .eq("id", terminId);
 
-              if (updateError) throw updateError;
+              if (updateError) {
+                console.log("🔥 RESCHEDULE UPDATE ERROR", updateError);
+                throw updateError;
+              }
 
-              if (datumChanged || startzeitChanged || endzeitChanged) {
+              const hasRelevantChange = datumChanged || startzeitChanged || endzeitChanged;
+              console.log("🔥 RESCHEDULE HAS CHANGE", hasRelevantChange);
+
+              if (!hasRelevantChange) {
+                console.log("🔥 RESCHEDULE SKIP NOTIFICATION because no relevant change");
+              }
+
+              if (hasRelevantChange) {
                 const { data: bews, error: bewsError } = await supabase
                   .from("bewerbungen")
-                  .select("freiwilliger_id")
-                  .eq("termin_id", terminId);
+                  .select("id, freiwilliger_id, status, cancelled_at")
+                  .eq("termin_id", terminId)
+                  .eq("status", "angemeldet")
+                  .is("cancelled_at", null);
+
+                console.log("🔥 RESCHEDULE BEWERBUNGEN", { bews, bewsError });
 
                 if (bewsError) {
                   console.log("bewerbungen fuer termin_verschoben failed:", bewsError);
                 }
 
                 const freiwilligenIds = [...new Set((bews || []).map((b) => b.freiwilliger_id).filter(Boolean))];
+                console.log("🔥 RESCHEDULE FREIWILLIGEN IDS", freiwilligenIds);
 
                 if (freiwilligenIds.length) {
                   const { data: freiwilligeRows, error: freiwilligeError } = await supabase
                     .from("freiwillige")
-                    .select("id, auth_id")
+                    .select("id, auth_id, name, email")
                     .in("id", freiwilligenIds);
+
+                  console.log("🔥 RESCHEDULE FREIWILLIGE ROWS", { freiwilligeRows, freiwilligeError });
 
                   if (freiwilligeError) {
                     console.log("freiwillige fuer termin_verschoben failed:", freiwilligeError);
                   }
 
                   const authIds = [...new Set((freiwilligeRows || []).map((f) => f.auth_id).filter(Boolean))];
+                  console.log("🔥 RESCHEDULE AUTH IDS", authIds);
 
                   if (authIds.length) {
                     const datumText = new Date(datum).toLocaleDateString("de-DE");
@@ -2575,15 +2616,20 @@ export default function App() {
                     const notificationRows = authIds.map((authId) => ({
                       user_id: authId,
                       titel: "📅 Termin verschoben",
-                      text: `Dein Termin für "${selected.titel}" wurde auf ${datumText}, ${zeitText} verschoben.`,
+                      text: `Dein Termin für "${selected?.titel || "deine Stelle"}" wurde auf ${datumText}, ${zeitText} verschoben.`,
                       typ: "termin_rescheduled",
                       gelesen: false,
                       read_at: null,
                     }));
 
-                    const { error: notifError } = await supabase
+                    console.log("🔥 WILL INSERT NOTIFICATION", notificationRows);
+
+                    const { data: insertedNotifications, error: notifError } = await supabase
                       .from("notifications")
-                      .insert(notificationRows);
+                      .insert(notificationRows)
+                      .select();
+
+                    console.log("🔥 INSERT RESULT", { insertedNotifications, notifError });
 
                     if (notifError) {
                       console.log("termin_rescheduled notification failed:", notifError);
@@ -2594,10 +2640,14 @@ export default function App() {
                       notificationType: "termin_wechsel",
                       freiwilligerIds,
                       title: "📅 Termin verschoben",
-                      body: `Dein Termin für "${selected.titel}" wurde auf ${datumText}, ${zeitText} verschoben.`,
+                      body: `Dein Termin für "${selected?.titel || "deine Stelle"}" wurde auf ${datumText}, ${zeitText} verschoben.`,
                       url: "/",
                     });
+                  } else {
+                    console.log("🔥 RESCHEDULE NO AUTH IDS FOUND");
                   }
+                } else {
+                  console.log("🔥 RESCHEDULE NO MATCHING BEWERBUNGEN");
                 }
               }
 
