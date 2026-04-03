@@ -2525,10 +2525,10 @@ export default function App() {
               }
 
               const originalTermin = (selected?.termine || []).find((t) => t.id === terminId);
-              const datumGeaendert = originalTermin?.datum !== datum;
-              const startzeitGeaendert = originalTermin?.startzeit !== startzeit;
-              const endzeitGeaendert = (originalTermin?.endzeit || null) !== (endzeit || null);
-              const terminHatSichGeaendert = datumGeaendert || startzeitGeaendert || endzeitGeaendert;
+
+              const datumChanged = originalTermin?.datum !== datum;
+              const startzeitChanged = originalTermin?.startzeit !== startzeit;
+              const endzeitChanged = (originalTermin?.endzeit || null) !== (endzeit || null);
 
               const { error: updateError } = await supabase
                 .from("termine")
@@ -2542,50 +2542,62 @@ export default function App() {
 
               if (updateError) throw updateError;
 
-              if (terminHatSichGeaendert) {
+              if (datumChanged || startzeitChanged || endzeitChanged) {
                 const { data: bews, error: bewsError } = await supabase
                   .from("bewerbungen")
                   .select("freiwilliger_id")
-                  .eq("termin_id", terminId)
-                  .eq("status", "angemeldet")
-                  .is("cancelled_at", null);
+                  .eq("termin_id", terminId);
 
                 if (bewsError) {
-                  console.log("bewerbungen für termin_verschoben konnten nicht geladen werden:", bewsError);
+                  console.log("bewerbungen fuer termin_verschoben failed:", bewsError);
                 }
 
-                const freiwilligerIds = [...new Set((bews || []).map((b) => b.freiwilliger_id).filter(Boolean))];
+                const freiwilligenIds = [...new Set((bews || []).map((b) => b.freiwilliger_id).filter(Boolean))];
 
-                if (freiwilligerIds.length > 0) {
-                  const formatierteZeit = endzeit
-                    ? `${startzeit}–${endzeit}`
-                    : startzeit;
+                if (freiwilligenIds.length) {
+                  const { data: freiwilligeRows, error: freiwilligeError } = await supabase
+                    .from("freiwillige")
+                    .select("id, auth_id")
+                    .in("id", freiwilligenIds);
 
-                  const notificationRows = freiwilligerIds.map((freiwilligerId) => ({
-                    user_id: freiwilligerId,
-                    titel: "📅 Termin verschoben",
-                    text: `Dein Termin für "${selected.titel}" wurde auf ${new Date(`${datum}T12:00:00`).toLocaleDateString("de-DE")} um ${formatierteZeit} verschoben.`,
-                    typ: "termin_geaendert",
-                    gelesen: false,
-                    read_at: null,
-                  }));
-
-                  const { error: notifError } = await supabase
-                    .from("notifications")
-                    .insert(notificationRows);
-
-                  if (notifError) {
-                    console.log("termin_geaendert notification failed:", notifError);
+                  if (freiwilligeError) {
+                    console.log("freiwillige fuer termin_verschoben failed:", freiwilligeError);
                   }
 
-                  await sendVolunteerPush({
-                    gemeindeId,
-                    notificationType: "termin_wechsel",
-                    freiwilligerIds,
-                    title: "📅 Termin verschoben",
-                    body: `Dein Termin für "${selected.titel}" wurde verschoben.`,
-                    url: "/",
-                  });
+                  const authIds = [...new Set((freiwilligeRows || []).map((f) => f.auth_id).filter(Boolean))];
+
+                  if (authIds.length) {
+                    const datumText = new Date(datum).toLocaleDateString("de-DE");
+                    const zeitText = endzeit
+                      ? `${startzeit}–${endzeit} Uhr`
+                      : `${startzeit} Uhr`;
+
+                    const notificationRows = authIds.map((authId) => ({
+                      user_id: authId,
+                      titel: "📅 Termin verschoben",
+                      text: `Dein Termin für "${selected.titel}" wurde auf ${datumText}, ${zeitText} verschoben.`,
+                      typ: "termin_rescheduled",
+                      gelesen: false,
+                      read_at: null,
+                    }));
+
+                    const { error: notifError } = await supabase
+                      .from("notifications")
+                      .insert(notificationRows);
+
+                    if (notifError) {
+                      console.log("termin_rescheduled notification failed:", notifError);
+                    }
+
+                    await sendVolunteerPush({
+                      gemeindeId,
+                      notificationType: "termin_wechsel",
+                      freiwilligerIds,
+                      title: "📅 Termin verschoben",
+                      body: `Dein Termin für "${selected.titel}" wurde auf ${datumText}, ${zeitText} verschoben.`,
+                      url: "/",
+                    });
+                  }
                 }
               }
 
