@@ -1656,38 +1656,35 @@ export default function App() {
     if (selected) await reloadSelected(selected.id);
   };
 
-  const openDetail = async (stelle) => {
-    const shouldTrackView =
-      !user || user.type !== "verein" || user.data.id !== stelle.verein_id;
 
-    let stelleMitViews = stelle;
+const openDetail = async (stelle) => {
+  const shouldTrackView =
+    !user || user.type !== "verein" || user.data.id !== stelle.verein_id;
 
-    if (shouldTrackView) {
-      const nextViews = (stelle.aufrufe || 0) + 1;
-      const { data: updatedViewRow, error: viewError } = await supabase
-        .from("stellen")
-        .update({ aufrufe: nextViews })
-        .eq("id", stelle.id)
-        .select("id, aufrufe")
-        .maybeSingle();
+  let stelleMitViews = stelle;
 
-      if (viewError) {
-        console.error("STELLEN AUFRUFE TRACKING FEHLER:", viewError);
-      } else {
-        const trackedViews = updatedViewRow?.aufrufe ?? nextViews;
-        stelleMitViews = { ...stelle, aufrufe: trackedViews };
-        setStellen((prev) =>
-          prev.map((item) =>
-            item.id === stelle.id ? { ...item, aufrufe: trackedViews } : item
-          )
-        );
-      }
+  if (shouldTrackView) {
+    const { data: newViews, error: viewError } = await supabase.rpc(
+      "increment_stelle_aufrufe",
+      { p_stelle_id: stelle.id }
+    );
+
+    if (viewError) {
+      console.error("STELLEN AUFRUFE TRACKING FEHLER:", viewError);
+    } else if (typeof newViews === "number") {
+      stelleMitViews = { ...stelle, aufrufe: newViews };
+      setStellen((prev) =>
+        prev.map((item) =>
+          item.id === stelle.id ? { ...item, aufrufe: newViews } : item
+        )
+      );
     }
+  }
 
-    setSelected(stelleMitViews);
-    navigateTo("detail");
-  };
-  const handleGemeindeStelleSpeichern = async (payload) => {
+  setSelected(stelleMitViews);
+  navigateTo("detail");
+};
+const handleGemeindeStelleSpeichern = async (payload) => {
     try {
       const { data: stelle } = await supabase
         .from("stellen")
