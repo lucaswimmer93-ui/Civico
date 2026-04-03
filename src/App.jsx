@@ -395,148 +395,52 @@ export default function App() {
   const [follows, setFollows] = useState({ vereine: [], kategorien: [] });
   const [notifications, setNotifications] = useState([]);
   const [showNotifications, setShowNotifications] = useState(false);
-  const [dbKategorien, setDbKategorien] = useState([]);
-
-
-  const normalizeKategorieValue = (value) =>
-    String(value || "")
-      .toLowerCase()
-      .trim()
-      .replace(/ä/g, "ae")
-      .replace(/ö/g, "oe")
-      .replace(/ü/g, "ue")
-      .replace(/ß/g, "ss");
-
-  const mapDbKategorieNameToUiId = (name) => {
-    const normalized = normalizeKategorieValue(name);
-    const mapping = {
-      soziales: "sozial",
-      sozial: "sozial",
-      umwelt: "umwelt",
-      sport: "sport",
-      kultur: "kultur",
-      bildung: "bildung",
-      feuerwehr: "feuerwehr",
-      senioren: "senioren",
-      tierschutz: "tierschutz",
-    };
-    return mapping[normalized] || null;
-  };
-
-  const getDbKategorieIdFromUiId = (uiId) => {
-    const wanted = normalizeKategorieValue(uiId);
-    const match = (dbKategorien || []).find((entry) => {
-      const dbUiId = mapDbKategorieNameToUiId(entry?.name);
-      return dbUiId === wanted;
-    });
-    return match?.id || null;
-  };
 
   // ── Notifications ─────────────────────────────────────────────────────────
-  const getNotificationUserId = (profile = user?.data) => {
-    if (!profile) return null;
-    return profile.auth_id || profile.user_id || null;
-  };
-
-  const isNotificationUnread = (notification) =>
-    !notification?.read_at && notification?.gelesen !== true;
-
-  const unreadNotificationCount = notifications.filter(isNotificationUnread).length;
-
-  const loadNotifications = async (authUserId) => {
-    if (!authUserId) {
-      setNotifications([]);
-      return;
-    }
-
-    const { data, error } = await supabase
+  const loadNotifications = async (userId) => {
+    const { data } = await supabase
       .from("notifications")
       .select("*")
-      .eq("user_id", authUserId)
+      .eq("user_id", userId)
       .order("created_at", { ascending: false })
       .limit(30);
-
-    if (error) {
-      console.error("NOTIFICATIONS LADEN FEHLER:", error);
-      return;
-    }
-
     if (data) setNotifications(data);
   };
 
   const markAllRead = async () => {
-    const authUserId = getNotificationUserId();
-    if (!authUserId) return;
-
-    const now = new Date().toISOString();
-
-    const { error } = await supabase
+    if (!user?.data?.id) return;
+    await supabase
       .from("notifications")
-      .update({ gelesen: true, read_at: now })
-      .eq("user_id", authUserId)
-      .is("read_at", null);
-
-    if (error) {
-      console.error("NOTIFICATIONS READ FEHLER:", error);
-      return;
-    }
-
-    setNotifications((prev) =>
-      prev.map((n) => ({ ...n, gelesen: true, read_at: n.read_at || now }))
-    );
+      .update({ gelesen: true })
+      .eq("user_id", user.data.id)
+      .eq("gelesen", false);
+    setNotifications((prev) => prev.map((n) => ({ ...n, gelesen: true })));
   };
 
   const addNotification = async (userId, titel, text, typ) => {
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from("notifications")
-      .insert({ user_id: userId, titel, text, typ, gelesen: false, read_at: null })
+      .insert({ user_id: userId, titel, text, typ, gelesen: false })
       .select()
       .single();
-
-    if (error) {
-      console.error("NOTIFICATION INSERT FEHLER:", error);
-      return;
-    }
-
-    if (data && getNotificationUserId() === userId) {
-      setNotifications((prev) => {
-        const exists = prev.some((item) => item.id === data.id);
-        return exists ? prev : [data, ...prev];
-      });
+    if (data && user?.data?.id === userId) {
+      setNotifications((prev) => [data, ...prev]);
     }
   };
 
   // ── Follows ────────────────────────────────────────────────────────────────
   const loadFollows = async (userId) => {
-    if (!userId) {
-      setFollows({ vereine: [], kategorien: [] });
-      return;
-    }
-
-    try {
-      const [vereinResult, kategorieResult] = await Promise.all([
-        supabase
-          .from("verein_follows")
-          .select("verein_id")
-          .eq("freiwilliger_id", userId),
-        supabase
-          .from("kategorie_follows")
-          .select("kategorie_id, kategorien(name)")
-          .eq("freiwilliger_id", userId),
-      ]);
-
-      if (vereinResult.error) throw vereinResult.error;
-      if (kategorieResult.error) throw kategorieResult.error;
-
+    const { data } = await supabase
+      .from("follows")
+      .select("*")
+      .eq("freiwilliger_id", userId);
+    if (data) {
       setFollows({
-        vereine: (vereinResult.data || []).map((row) => row.verein_id).filter(Boolean),
-        kategorien: (kategorieResult.data || [])
-          .map((row) => mapDbKategorieNameToUiId(row?.kategorien?.name))
-          .filter(Boolean),
+        vereine: data.filter((f) => f.typ === "verein").map((f) => f.ziel_id),
+        kategorien: data
+          .filter((f) => f.typ === "kategorie")
+          .map((f) => f.ziel_wert),
       });
-    } catch (error) {
-      console.error("FOLLOWS LADEN FEHLER:", error);
-      setFollows({ vereine: [], kategorien: [] });
     }
   };
 
@@ -565,9 +469,10 @@ export default function App() {
     }
     try {
       const { data: followRows, error: followError } = await supabase
-        .from("verein_follows")
+        .from("follows")
         .select("freiwilliger_id")
-        .eq("verein_id", vereinId);
+        .eq("typ", "verein")
+        .eq("ziel_id", vereinId);
 
       if (followError) throw followError;
 
@@ -617,91 +522,57 @@ export default function App() {
   };
 
   const toggleFollowVerein = async (vereinId) => {
-    if (!user?.data?.id || !vereinId) return;
-
+    if (!user?.data?.id) return;
     const isFollowing = follows.vereine.includes(vereinId);
-
-    try {
-      if (isFollowing) {
-        const { error } = await supabase
-          .from("verein_follows")
-          .delete()
-          .eq("freiwilliger_id", user.data.id)
-          .eq("verein_id", vereinId);
-
-        if (error) throw error;
-
-        setFollows((prev) => ({
-          ...prev,
-          vereine: prev.vereine.filter((id) => id !== vereinId),
-        }));
-      } else {
-        const { error } = await supabase
-          .from("verein_follows")
-          .insert({
-            freiwilliger_id: user.data.id,
-            verein_id: vereinId,
-          });
-
-        if (error) throw error;
-
-        setFollows((prev) => ({
-          ...prev,
-          vereine: [...prev.vereine, vereinId],
-        }));
-      }
-
-      await loadVereinFollowers(vereinId);
-    } catch (error) {
-      console.error("VEREIN FOLLOW TOGGLE FEHLER:", error);
-      showToast("Follow konnte nicht gespeichert werden.", "#E85C5C");
+    if (isFollowing) {
+      await supabase
+        .from("follows")
+        .delete()
+        .eq("freiwilliger_id", user.data.id)
+        .eq("typ", "verein")
+        .eq("ziel_id", vereinId);
+      setFollows((prev) => ({
+        ...prev,
+        vereine: prev.vereine.filter((id) => id !== vereinId),
+      }));
+    } else {
+      await supabase
+        .from("follows")
+        .insert({
+          freiwilliger_id: user.data.id,
+          typ: "verein",
+          ziel_id: vereinId,
+        });
+      setFollows((prev) => ({ ...prev, vereine: [...prev.vereine, vereinId] }));
     }
   };
 
   const toggleFollowKategorie = async (katId) => {
-    if (!user?.data?.id || !katId) return;
-
-    const dbKategorieId = getDbKategorieIdFromUiId(katId);
-    if (!dbKategorieId) {
-      console.error("Kategorie konnte nicht gemappt werden:", katId, dbKategorien);
-      showToast("Kategorie konnte nicht gespeichert werden.", "#E85C5C");
-      return;
-    }
-
+    if (!user?.data?.id) return;
     const isFollowing = follows.kategorien.includes(katId);
-
-    try {
-      if (isFollowing) {
-        const { error } = await supabase
-          .from("kategorie_follows")
-          .delete()
-          .eq("freiwilliger_id", user.data.id)
-          .eq("kategorie_id", dbKategorieId);
-
-        if (error) throw error;
-
-        setFollows((prev) => ({
-          ...prev,
-          kategorien: prev.kategorien.filter((k) => k !== katId),
-        }));
-      } else {
-        const { error } = await supabase
-          .from("kategorie_follows")
-          .insert({
-            freiwilliger_id: user.data.id,
-            kategorie_id: dbKategorieId,
-          });
-
-        if (error) throw error;
-
-        setFollows((prev) => ({
-          ...prev,
-          kategorien: [...prev.kategorien, katId],
-        }));
-      }
-    } catch (error) {
-      console.error("KATEGORIE FOLLOW TOGGLE FEHLER:", error);
-      showToast("Follow konnte nicht gespeichert werden.", "#E85C5C");
+    if (isFollowing) {
+      await supabase
+        .from("follows")
+        .delete()
+        .eq("freiwilliger_id", user.data.id)
+        .eq("typ", "kategorie")
+        .eq("ziel_wert", katId);
+      setFollows((prev) => ({
+        ...prev,
+        kategorien: prev.kategorien.filter((k) => k !== katId),
+      }));
+    } else {
+      await supabase
+        .from("follows")
+        .insert({
+          freiwilliger_id: user.data.id,
+          typ: "kategorie",
+          ziel_wert: katId,
+        });
+      setFollows((prev) => ({
+        ...prev,
+        kategorien: [...prev.kategorien, katId],
+      }));
     }
   };
 
@@ -852,33 +723,25 @@ export default function App() {
         notificationType === "neue_stellen" &&
         (vereinId || kategorie)
       ) {
-        const dbKategorieId = kategorie ? getDbKategorieIdFromUiId(kategorie) : null;
+        const followFilters = [];
+        if (vereinId) {
+          followFilters.push(`and(typ.eq.verein,ziel_id.eq.${vereinId})`);
+        }
+        if (kategorie) {
+          followFilters.push(`and(typ.eq.kategorie,ziel_id.eq.${kategorie})`);
+        }
 
-        const [vereinFollowResult, kategorieFollowResult] = await Promise.all([
-          vereinId
-            ? supabase
-                .from("verein_follows")
-                .select("freiwilliger_id")
-                .eq("verein_id", vereinId)
-                .in("freiwilliger_id", erlaubteIds)
-            : Promise.resolve({ data: [], error: null }),
-          dbKategorieId
-            ? supabase
-                .from("kategorie_follows")
-                .select("freiwilliger_id")
-                .eq("kategorie_id", dbKategorieId)
-                .in("freiwilliger_id", erlaubteIds)
-            : Promise.resolve({ data: [], error: null }),
-        ]);
+        if (!followFilters.length) return [];
 
-        if (vereinFollowResult.error || kategorieFollowResult.error) return [];
+        const { data: followRows, error: followsError } = await supabase
+          .from("follows")
+          .select("freiwilliger_id")
+          .or(followFilters.join(","))
+          .in("freiwilliger_id", erlaubteIds);
 
-        const followIds = [
-          ...(vereinFollowResult.data || []).map((row) => row.freiwilliger_id),
-          ...(kategorieFollowResult.data || []).map((row) => row.freiwilliger_id),
-        ].filter(Boolean);
+        if (followsError || !followRows?.length) return [];
 
-        erlaubteIds = [...new Set(followIds)];
+        erlaubteIds = [...new Set(followRows.map((row) => row.freiwilliger_id).filter(Boolean))];
         if (!erlaubteIds.length) return [];
       }
 
@@ -1051,25 +914,6 @@ export default function App() {
     }
   };
 
-  useEffect(() => {
-    const loadDbKategorien = async () => {
-      try {
-        const { data, error } = await supabase
-          .from("kategorien")
-          .select("id, name")
-          .order("name", { ascending: true });
-
-        if (error) throw error;
-        setDbKategorien(data || []);
-      } catch (error) {
-        console.error("KATEGORIEN LADEN FEHLER:", error);
-        setDbKategorien([]);
-      }
-    };
-
-    loadDbKategorien();
-  }, []);
-
     useEffect(() => {
         const authState = detectAuthRedirectState();
     const currentPath = authState.pathname;
@@ -1157,7 +1001,7 @@ export default function App() {
           loadStellen(profil.gemeinde_id, profil.plz, profil.umkreis);
           loadVereine(profil.gemeinde_id);
           loadFollows(profil.id);
-          loadNotifications(profil.auth_id);
+          loadNotifications(profil.id);
           setScreen("home");
           return;
         }
@@ -1247,6 +1091,14 @@ export default function App() {
           reloadSelectedRealtime();
         }
       )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "stellen" },
+        () => {
+          loadStellen();
+          reloadSelectedRealtime();
+        }
+      )
       .subscribe();
     return () => {
       supabase.removeChannel(channel);
@@ -1278,35 +1130,6 @@ export default function App() {
       supabase.removeChannel(channel);
     };
   }, [user?.type, user?.data?.id]);
-
-  useEffect(() => {
-    if (user?.type !== "freiwilliger") return;
-
-    const authUserId = getNotificationUserId(user?.data);
-    if (!authUserId) return;
-
-    loadNotifications(authUserId);
-
-    const channel = supabase
-      .channel(`notifications-${authUserId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "notifications",
-          filter: `user_id=eq.${authUserId}`,
-        },
-        () => {
-          loadNotifications(authUserId);
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [user?.type, user?.data?.auth_id]);
 
   // Filter
   const plzMatch = (s) => {
@@ -1656,35 +1479,17 @@ export default function App() {
     if (selected) await reloadSelected(selected.id);
   };
 
-
-const openDetail = async (stelle) => {
-  const shouldTrackView =
-    !user || user.type !== "verein" || user.data.id !== stelle.verein_id;
-
-  let stelleMitViews = stelle;
-
-  if (shouldTrackView) {
-    const { data: newViews, error: viewError } = await supabase.rpc(
-      "increment_stelle_aufrufe",
-      { p_stelle_id: stelle.id }
-    );
-
-    if (viewError) {
-      console.error("STELLEN AUFRUFE TRACKING FEHLER:", viewError);
-    } else if (typeof newViews === "number") {
-      stelleMitViews = { ...stelle, aufrufe: newViews };
-      setStellen((prev) =>
-        prev.map((item) =>
-          item.id === stelle.id ? { ...item, aufrufe: newViews } : item
-        )
-      );
+  const openDetail = async (stelle) => {
+    setSelected(stelle);
+    navigateTo("detail");
+    if (!user || user.type !== "verein" || user.data.id !== stelle.verein_id) {
+      await supabase
+        .from("stellen")
+        .update({ aufrufe: (stelle.aufrufe || 0) + 1 })
+        .eq("id", stelle.id);
     }
-  }
-
-  setSelected(stelleMitViews);
-  navigateTo("detail");
-};
-const handleGemeindeStelleSpeichern = async (payload) => {
+  };
+  const handleGemeindeStelleSpeichern = async (payload) => {
     try {
       const { data: stelle } = await supabase
         .from("stellen")
@@ -1861,13 +1666,7 @@ const handleGemeindeStelleSpeichern = async (payload) => {
                 {user.type === "freiwilliger" && (
                   <div style={{ position: "relative" }}>
                     <button
-                      onClick={() => {
-                        const nextOpen = !showNotifications;
-                        setShowNotifications(nextOpen);
-                        if (nextOpen && unreadNotificationCount > 0) {
-                          markAllRead();
-                        }
-                      }}
+                      onClick={() => setShowNotifications(!showNotifications)}
                       style={{
                         background: "none",
                         border: "none",
@@ -1878,7 +1677,7 @@ const handleGemeindeStelleSpeichern = async (payload) => {
                       }}
                     >
                       🔔
-                      {unreadNotificationCount > 0 && (
+                      {notifications.filter((n) => !n.gelesen).length > 0 && (
                         <span
                           style={{
                             position: "absolute",
@@ -1896,7 +1695,9 @@ const handleGemeindeStelleSpeichern = async (payload) => {
                             fontWeight: "bold",
                           }}
                         >
-                          {unreadNotificationCount > 9 ? "9+" : unreadNotificationCount}
+                          {notifications.filter((n) => !n.gelesen).length > 9
+                            ? "9+"
+                            : notifications.filter((n) => !n.gelesen).length}
                         </span>
                       )}
                     </button>
@@ -2002,7 +1803,7 @@ const handleGemeindeStelleSpeichern = async (payload) => {
                     style={{
                       padding: "10px 14px",
                       borderBottom: "1px solid #F0EBE0",
-                      background: isNotificationUnread(n) ? "#EDE8DE" : "#FAF7F2",
+                      background: n.gelesen ? "#FAF7F2" : "#EDE8DE",
                     }}
                   >
                     <div
@@ -2311,7 +2112,7 @@ const handleGemeindeStelleSpeichern = async (payload) => {
             }
             if (type === "freiwilliger") {
               loadFollows(data.id);
-              loadNotifications(data.auth_id);
+              loadNotifications(data.id);
             }
             if (type === "verein") {
               autoArchivieren(data.id);
@@ -2528,142 +2329,56 @@ const handleGemeindeStelleSpeichern = async (payload) => {
           onHome={goHome}
           onBestaetigen={handleBestaetigen}
           onStornieren={async (bewId, terminId) => {
-            try {
-              await supabase.from("bewerbungen").delete().eq("id", bewId);
-              await supabase.rpc("increment_plaetze", { termin_id: terminId });
-
-              // Warteliste prüfen
-              const { data: nextOnList } = await supabase
-                .from("warteliste")
-                .select("*")
-                .eq("termin_id", terminId)
-                .order("created_at", { ascending: true })
-                .limit(1)
-                .maybeSingle();
-
-              if (nextOnList) {
-                const { data: erfolg } = await supabase.rpc("book_slot", {
-                  p_stelle_id: nextOnList.stelle_id,
-                  p_termin_id: terminId,
-                  p_freiwilliger_id: nextOnList.freiwilliger_id,
-                  p_name: nextOnList.freiwilliger_name,
-                  p_email: nextOnList.freiwilliger_email,
-                });
-
-                if (erfolg) {
-                  await supabase
-                    .from("notifications")
-                    .insert({
-                      user_id: nextOnList.freiwilliger_id,
-                      titel: "🎉 Du wurdest nachgerückt!",
-                      text: `Du bist von der Warteliste bei "${selected.titel}" nachgerückt und automatisch angemeldet!`,
-                      typ: "platz_frei",
-                      gelesen: false,
-                    });
-
-                  await sendVolunteerPush({
-                    gemeindeId,
-                    notificationType: "freie_plaetze",
-                    freiwilligerIds: [nextOnList.freiwilliger_id],
-                    title: "🎉 Du wurdest nachgerückt!",
-                    body: `Du bist bei "${selected.titel}" automatisch nachgerückt.`,
-                    url: "/",
-                  });
-                }
-
+            await supabase.from("bewerbungen").delete().eq("id", bewId);
+            await supabase.rpc("increment_plaetze", { termin_id: terminId });
+            // Warteliste prüfen
+            const { data: nextOnList } = await supabase
+              .from("warteliste")
+              .select("*")
+              .eq("termin_id", terminId)
+              .order("created_at", { ascending: true })
+              .limit(1)
+              .single();
+            if (nextOnList) {
+              const { data: erfolg } = await supabase.rpc("book_slot", {
+                p_stelle_id: nextOnList.stelle_id,
+                p_termin_id: terminId,
+                p_freiwilliger_id: nextOnList.freiwilliger_id,
+                p_name: nextOnList.freiwilliger_name,
+                p_email: nextOnList.freiwilliger_email,
+              });
+              if (erfolg) {
                 await supabase
-                  .from("warteliste")
-                  .delete()
-                  .eq("id", nextOnList.id);
+                  .from("notifications")
+                  .insert({
+                    user_id: nextOnList.freiwilliger_id,
+                    titel: "🎉 Du wurdest nachgerückt!",
+                    text: `Du bist von der Warteliste bei "${selected.titel}" nachgerückt und automatisch angemeldet!`,
+                    typ: "platz_frei",
+                    gelesen: false,
+                  });
+                await sendVolunteerPush({
+                  gemeindeId,
+                  notificationType: "freie_plaetze",
+                  freiwilligerIds: [nextOnList.freiwilliger_id],
+                  title: "🎉 Du wurdest nachgerückt!",
+                  body: `Du bist bei "${selected.titel}" automatisch nachgerückt.`,
+                  url: "/",
+                });
               }
-
-              showToast("✓ Anmeldung storniert.", "#E85C5C");
-              await loadStellen(gemeindeId);
-              const { data } = await supabase
-                .from("stellen")
-                .select("*, vereine(*), termine(*, bewerbungen(*))")
-                .eq("id", selected.id)
-                .single();
-              if (data) setSelected(data);
-            } catch (error) {
-              console.error("Verein Anmeldung stornieren fehlgeschlagen:", error);
-              showToast("Fehler beim Stornieren.", "#E85C5C");
+              await supabase
+                .from("warteliste")
+                .delete()
+                .eq("id", nextOnList.id);
             }
-          }}
-          onTerminAbsagen={async (terminId) => {
-            try {
-              if (!terminId) {
-                showToast("Termin-ID fehlt.", "#E85C5C");
-                return;
-              }
-
-              const { error: markError } = await supabase
-                .from("termine")
-                .update({ abgesagt: true })
-                .eq("id", terminId);
-
-              if (markError) throw markError;
-
-              const { error: rpcError } = await supabase.rpc(
-                "queue_termin_cancelled_for_termin",
-                { p_termin_id: terminId }
-              );
-              if (rpcError) {
-                console.log("queue_termin_cancelled_for_termin failed:", rpcError);
-              }
-
-              showToast("✓ Termin abgesagt.", "#E85C5C");
-              await loadStellen(gemeindeId);
-              const { data } = await supabase
-                .from("stellen")
-                .select("*, vereine(*), termine(*, bewerbungen(*))")
-                .eq("id", selected.id)
-                .single();
-              if (data) setSelected(data);
-            } catch (error) {
-              console.error("Verein Termin absagen fehlgeschlagen:", error);
-              showToast("Fehler beim Absagen.", "#E85C5C");
-            }
-          }}
-          onTerminVerschieben={async (terminId, datum, startzeit, endzeit) => {
-            try {
-              if (!terminId || !datum || !startzeit) {
-                showToast("Bitte Datum und Startzeit angeben.", "#E85C5C");
-                return;
-              }
-
-              const { error: updateError } = await supabase
-                .from("termine")
-                .update({
-                  datum,
-                  startzeit,
-                  endzeit: endzeit || null,
-                  abgesagt: false,
-                })
-                .eq("id", terminId);
-
-              if (updateError) throw updateError;
-
-              const { error: rpcError } = await supabase.rpc(
-                "queue_termin_rescheduled_for_termin",
-                { p_termin_id: terminId }
-              );
-              if (rpcError) {
-                console.log("queue_termin_rescheduled_for_termin failed:", rpcError);
-              }
-
-              showToast("✓ Termin verschoben!");
-              await loadStellen(gemeindeId);
-              const { data } = await supabase
-                .from("stellen")
-                .select("*, vereine(*), termine(*, bewerbungen(*))")
-                .eq("id", selected.id)
-                .single();
-              if (data) setSelected(data);
-            } catch (error) {
-              console.error("Verein Termin verschieben fehlgeschlagen:", error);
-              showToast("Fehler beim Verschieben.", "#E85C5C");
-            }
+            showToast("✓ Anmeldung storniert.", "#E85C5C");
+            await loadStellen(gemeindeId);
+            const { data } = await supabase
+              .from("stellen")
+              .select("*, vereine(*), termine(*, bewerbungen(*))")
+              .eq("id", selected.id)
+              .single();
+            if (data) setSelected(data);
           }}
           onFreiwilligerProfil={async (bew) => {
             const { data: profil } = await supabase
