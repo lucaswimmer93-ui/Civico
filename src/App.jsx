@@ -395,42 +395,6 @@ export default function App() {
   const [follows, setFollows] = useState({ vereine: [], kategorien: [] });
   const [notifications, setNotifications] = useState([]);
   const [showNotifications, setShowNotifications] = useState(false);
-  const [dbKategorien, setDbKategorien] = useState([]);
-
-
-  const normalizeKategorieValue = (value) =>
-    String(value || "")
-      .toLowerCase()
-      .trim()
-      .replace(/ä/g, "ae")
-      .replace(/ö/g, "oe")
-      .replace(/ü/g, "ue")
-      .replace(/ß/g, "ss");
-
-  const mapDbKategorieNameToUiId = (name) => {
-    const normalized = normalizeKategorieValue(name);
-    const mapping = {
-      soziales: "sozial",
-      sozial: "sozial",
-      umwelt: "umwelt",
-      sport: "sport",
-      kultur: "kultur",
-      bildung: "bildung",
-      feuerwehr: "feuerwehr",
-      senioren: "senioren",
-      tierschutz: "tierschutz",
-    };
-    return mapping[normalized] || null;
-  };
-
-  const getDbKategorieIdFromUiId = (uiId) => {
-    const wanted = normalizeKategorieValue(uiId);
-    const match = (dbKategorien || []).find((entry) => {
-      const dbUiId = mapDbKategorieNameToUiId(entry?.name);
-      return dbUiId === wanted;
-    });
-    return match?.id || null;
-  };
 
   // ── Notifications ─────────────────────────────────────────────────────────
   const getNotificationUserId = (profile = user?.data) => {
@@ -508,35 +472,17 @@ export default function App() {
 
   // ── Follows ────────────────────────────────────────────────────────────────
   const loadFollows = async (userId) => {
-    if (!userId) {
-      setFollows({ vereine: [], kategorien: [] });
-      return;
-    }
-
-    try {
-      const [vereinResult, kategorieResult] = await Promise.all([
-        supabase
-          .from("verein_follows")
-          .select("verein_id")
-          .eq("freiwilliger_id", userId),
-        supabase
-          .from("kategorie_follows")
-          .select("kategorie_id, kategorien(name)")
-          .eq("freiwilliger_id", userId),
-      ]);
-
-      if (vereinResult.error) throw vereinResult.error;
-      if (kategorieResult.error) throw kategorieResult.error;
-
+    const { data } = await supabase
+      .from("follows")
+      .select("*")
+      .eq("freiwilliger_id", userId);
+    if (data) {
       setFollows({
-        vereine: (vereinResult.data || []).map((row) => row.verein_id).filter(Boolean),
-        kategorien: (kategorieResult.data || [])
-          .map((row) => mapDbKategorieNameToUiId(row?.kategorien?.name))
-          .filter(Boolean),
+        vereine: data.filter((f) => f.typ === "verein").map((f) => f.ziel_id),
+        kategorien: data
+          .filter((f) => f.typ === "kategorie")
+          .map((f) => f.ziel_wert),
       });
-    } catch (error) {
-      console.error("FOLLOWS LADEN FEHLER:", error);
-      setFollows({ vereine: [], kategorien: [] });
     }
   };
 
@@ -565,9 +511,10 @@ export default function App() {
     }
     try {
       const { data: followRows, error: followError } = await supabase
-        .from("verein_follows")
+        .from("follows")
         .select("freiwilliger_id")
-        .eq("verein_id", vereinId);
+        .eq("typ", "verein")
+        .eq("ziel_id", vereinId);
 
       if (followError) throw followError;
 
@@ -617,91 +564,57 @@ export default function App() {
   };
 
   const toggleFollowVerein = async (vereinId) => {
-    if (!user?.data?.id || !vereinId) return;
-
+    if (!user?.data?.id) return;
     const isFollowing = follows.vereine.includes(vereinId);
-
-    try {
-      if (isFollowing) {
-        const { error } = await supabase
-          .from("verein_follows")
-          .delete()
-          .eq("freiwilliger_id", user.data.id)
-          .eq("verein_id", vereinId);
-
-        if (error) throw error;
-
-        setFollows((prev) => ({
-          ...prev,
-          vereine: prev.vereine.filter((id) => id !== vereinId),
-        }));
-      } else {
-        const { error } = await supabase
-          .from("verein_follows")
-          .insert({
-            freiwilliger_id: user.data.id,
-            verein_id: vereinId,
-          });
-
-        if (error) throw error;
-
-        setFollows((prev) => ({
-          ...prev,
-          vereine: [...prev.vereine, vereinId],
-        }));
-      }
-
-      await loadVereinFollowers(vereinId);
-    } catch (error) {
-      console.error("VEREIN FOLLOW TOGGLE FEHLER:", error);
-      showToast("Follow konnte nicht gespeichert werden.", "#E85C5C");
+    if (isFollowing) {
+      await supabase
+        .from("follows")
+        .delete()
+        .eq("freiwilliger_id", user.data.id)
+        .eq("typ", "verein")
+        .eq("ziel_id", vereinId);
+      setFollows((prev) => ({
+        ...prev,
+        vereine: prev.vereine.filter((id) => id !== vereinId),
+      }));
+    } else {
+      await supabase
+        .from("follows")
+        .insert({
+          freiwilliger_id: user.data.id,
+          typ: "verein",
+          ziel_id: vereinId,
+        });
+      setFollows((prev) => ({ ...prev, vereine: [...prev.vereine, vereinId] }));
     }
   };
 
   const toggleFollowKategorie = async (katId) => {
-    if (!user?.data?.id || !katId) return;
-
-    const dbKategorieId = getDbKategorieIdFromUiId(katId);
-    if (!dbKategorieId) {
-      console.error("Kategorie konnte nicht gemappt werden:", katId, dbKategorien);
-      showToast("Kategorie konnte nicht gespeichert werden.", "#E85C5C");
-      return;
-    }
-
+    if (!user?.data?.id) return;
     const isFollowing = follows.kategorien.includes(katId);
-
-    try {
-      if (isFollowing) {
-        const { error } = await supabase
-          .from("kategorie_follows")
-          .delete()
-          .eq("freiwilliger_id", user.data.id)
-          .eq("kategorie_id", dbKategorieId);
-
-        if (error) throw error;
-
-        setFollows((prev) => ({
-          ...prev,
-          kategorien: prev.kategorien.filter((k) => k !== katId),
-        }));
-      } else {
-        const { error } = await supabase
-          .from("kategorie_follows")
-          .insert({
-            freiwilliger_id: user.data.id,
-            kategorie_id: dbKategorieId,
-          });
-
-        if (error) throw error;
-
-        setFollows((prev) => ({
-          ...prev,
-          kategorien: [...prev.kategorien, katId],
-        }));
-      }
-    } catch (error) {
-      console.error("KATEGORIE FOLLOW TOGGLE FEHLER:", error);
-      showToast("Follow konnte nicht gespeichert werden.", "#E85C5C");
+    if (isFollowing) {
+      await supabase
+        .from("follows")
+        .delete()
+        .eq("freiwilliger_id", user.data.id)
+        .eq("typ", "kategorie")
+        .eq("ziel_wert", katId);
+      setFollows((prev) => ({
+        ...prev,
+        kategorien: prev.kategorien.filter((k) => k !== katId),
+      }));
+    } else {
+      await supabase
+        .from("follows")
+        .insert({
+          freiwilliger_id: user.data.id,
+          typ: "kategorie",
+          ziel_wert: katId,
+        });
+      setFollows((prev) => ({
+        ...prev,
+        kategorien: [...prev.kategorien, katId],
+      }));
     }
   };
 
@@ -852,33 +765,25 @@ export default function App() {
         notificationType === "neue_stellen" &&
         (vereinId || kategorie)
       ) {
-        const dbKategorieId = kategorie ? getDbKategorieIdFromUiId(kategorie) : null;
+        const followFilters = [];
+        if (vereinId) {
+          followFilters.push(`and(typ.eq.verein,ziel_id.eq.${vereinId})`);
+        }
+        if (kategorie) {
+          followFilters.push(`and(typ.eq.kategorie,ziel_id.eq.${kategorie})`);
+        }
 
-        const [vereinFollowResult, kategorieFollowResult] = await Promise.all([
-          vereinId
-            ? supabase
-                .from("verein_follows")
-                .select("freiwilliger_id")
-                .eq("verein_id", vereinId)
-                .in("freiwilliger_id", erlaubteIds)
-            : Promise.resolve({ data: [], error: null }),
-          dbKategorieId
-            ? supabase
-                .from("kategorie_follows")
-                .select("freiwilliger_id")
-                .eq("kategorie_id", dbKategorieId)
-                .in("freiwilliger_id", erlaubteIds)
-            : Promise.resolve({ data: [], error: null }),
-        ]);
+        if (!followFilters.length) return [];
 
-        if (vereinFollowResult.error || kategorieFollowResult.error) return [];
+        const { data: followRows, error: followsError } = await supabase
+          .from("follows")
+          .select("freiwilliger_id")
+          .or(followFilters.join(","))
+          .in("freiwilliger_id", erlaubteIds);
 
-        const followIds = [
-          ...(vereinFollowResult.data || []).map((row) => row.freiwilliger_id),
-          ...(kategorieFollowResult.data || []).map((row) => row.freiwilliger_id),
-        ].filter(Boolean);
+        if (followsError || !followRows?.length) return [];
 
-        erlaubteIds = [...new Set(followIds)];
+        erlaubteIds = [...new Set(followRows.map((row) => row.freiwilliger_id).filter(Boolean))];
         if (!erlaubteIds.length) return [];
       }
 
@@ -1050,25 +955,6 @@ export default function App() {
           .eq("id", s.id);
     }
   };
-
-  useEffect(() => {
-    const loadDbKategorien = async () => {
-      try {
-        const { data, error } = await supabase
-          .from("kategorien")
-          .select("id, name")
-          .order("name", { ascending: true });
-
-        if (error) throw error;
-        setDbKategorien(data || []);
-      } catch (error) {
-        console.error("KATEGORIEN LADEN FEHLER:", error);
-        setDbKategorien([]);
-      }
-    };
-
-    loadDbKategorien();
-  }, []);
 
     useEffect(() => {
         const authState = detectAuthRedirectState();
@@ -2534,7 +2420,6 @@ export default function App() {
               await supabase.from("bewerbungen").delete().eq("id", bewId);
               await supabase.rpc("increment_plaetze", { termin_id: terminId });
 
-              // Warteliste prüfen
               const { data: nextOnList } = await supabase
                 .from("warteliste")
                 .select("*")
@@ -2553,15 +2438,13 @@ export default function App() {
                 });
 
                 if (erfolg) {
-                  await supabase
-                    .from("notifications")
-                    .insert({
-                      user_id: nextOnList.freiwilliger_id,
-                      titel: "🎉 Du wurdest nachgerückt!",
-                      text: `Du bist von der Warteliste bei "${selected.titel}" nachgerückt und automatisch angemeldet!`,
-                      typ: "platz_frei",
-                      gelesen: false,
-                    });
+                  await supabase.from("notifications").insert({
+                    user_id: nextOnList.freiwilliger_id,
+                    titel: "🎉 Du wurdest nachgerückt!",
+                    text: `Du bist von der Warteliste bei "${selected.titel}" nachgerückt und automatisch angemeldet!`,
+                    typ: "platz_frei",
+                    gelesen: false,
+                  });
 
                   await sendVolunteerPush({
                     gemeindeId,
@@ -2573,10 +2456,7 @@ export default function App() {
                   });
                 }
 
-                await supabase
-                  .from("warteliste")
-                  .delete()
-                  .eq("id", nextOnList.id);
+                await supabase.from("warteliste").delete().eq("id", nextOnList.id);
               }
 
               showToast("✓ Anmeldung storniert.", "#E85C5C");
@@ -2592,6 +2472,15 @@ export default function App() {
               showToast("Fehler beim Stornieren.", "#E85C5C");
             }
           }}
+          onFreiwilligerProfil={async (bew) => {
+            const { data: profil } = await supabase
+              .from("freiwillige")
+              .select("*")
+              .eq("email", bew.freiwilliger_email)
+              .single();
+            setSelectedFreiwilliger({ ...bew, profil: profil || null });
+            navigateTo("freiwilliger-profil-verein");
+          }}
           onTerminAbsagen={async (terminId) => {
             try {
               if (!terminId) {
@@ -2599,17 +2488,18 @@ export default function App() {
                 return;
               }
 
-              const { error: markError } = await supabase
+              const { error: updateError } = await supabase
                 .from("termine")
                 .update({ abgesagt: true })
                 .eq("id", terminId);
 
-              if (markError) throw markError;
+              if (updateError) throw updateError;
 
               const { error: rpcError } = await supabase.rpc(
                 "queue_termin_cancelled_for_termin",
                 { p_termin_id: terminId }
               );
+
               if (rpcError) {
                 console.log("queue_termin_cancelled_for_termin failed:", rpcError);
               }
@@ -2650,6 +2540,7 @@ export default function App() {
                 "queue_termin_rescheduled_for_termin",
                 { p_termin_id: terminId }
               );
+
               if (rpcError) {
                 console.log("queue_termin_rescheduled_for_termin failed:", rpcError);
               }
@@ -2666,15 +2557,6 @@ export default function App() {
               console.error("Verein Termin verschieben fehlgeschlagen:", error);
               showToast("Fehler beim Verschieben.", "#E85C5C");
             }
-          }}
-          onFreiwilligerProfil={async (bew) => {
-            const { data: profil } = await supabase
-              .from("freiwillige")
-              .select("*")
-              .eq("email", bew.freiwilliger_email)
-              .single();
-            setSelectedFreiwilliger({ ...bew, profil: profil || null });
-            navigateTo("freiwilliger-profil-verein");
           }}
           onLoeschen={async () => {
             const anmeldungen = (selected.termine || []).reduce(
