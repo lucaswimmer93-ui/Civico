@@ -2524,6 +2524,12 @@ export default function App() {
                 return;
               }
 
+              const originalTermin = (selected?.termine || []).find((t) => t.id === terminId);
+              const datumGeaendert = originalTermin?.datum !== datum;
+              const startzeitGeaendert = originalTermin?.startzeit !== startzeit;
+              const endzeitGeaendert = (originalTermin?.endzeit || null) !== (endzeit || null);
+              const terminHatSichGeaendert = datumGeaendert || startzeitGeaendert || endzeitGeaendert;
+
               const { error: updateError } = await supabase
                 .from("termine")
                 .update({
@@ -2536,13 +2542,51 @@ export default function App() {
 
               if (updateError) throw updateError;
 
-              const { error: rpcError } = await supabase.rpc(
-                "queue_termin_rescheduled_for_termin",
-                { p_termin_id: terminId }
-              );
+              if (terminHatSichGeaendert) {
+                const { data: bews, error: bewsError } = await supabase
+                  .from("bewerbungen")
+                  .select("freiwilliger_id")
+                  .eq("termin_id", terminId)
+                  .eq("status", "angemeldet")
+                  .is("cancelled_at", null);
 
-              if (rpcError) {
-                console.log("queue_termin_rescheduled_for_termin failed:", rpcError);
+                if (bewsError) {
+                  console.log("bewerbungen für termin_verschoben konnten nicht geladen werden:", bewsError);
+                }
+
+                const freiwilligerIds = [...new Set((bews || []).map((b) => b.freiwilliger_id).filter(Boolean))];
+
+                if (freiwilligerIds.length > 0) {
+                  const formatierteZeit = endzeit
+                    ? `${startzeit}–${endzeit}`
+                    : startzeit;
+
+                  const notificationRows = freiwilligerIds.map((freiwilligerId) => ({
+                    user_id: freiwilligerId,
+                    titel: "📅 Termin verschoben",
+                    text: `Dein Termin für "${selected.titel}" wurde auf ${new Date(`${datum}T12:00:00`).toLocaleDateString("de-DE")} um ${formatierteZeit} verschoben.`,
+                    typ: "termin_geaendert",
+                    gelesen: false,
+                    read_at: null,
+                  }));
+
+                  const { error: notifError } = await supabase
+                    .from("notifications")
+                    .insert(notificationRows);
+
+                  if (notifError) {
+                    console.log("termin_geaendert notification failed:", notifError);
+                  }
+
+                  await sendVolunteerPush({
+                    gemeindeId,
+                    notificationType: "termin_wechsel",
+                    freiwilligerIds,
+                    title: "📅 Termin verschoben",
+                    body: `Dein Termin für "${selected.titel}" wurde verschoben.`,
+                    url: "/",
+                  });
+                }
               }
 
               showToast("✓ Termin verschoben!");
