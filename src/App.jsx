@@ -706,7 +706,7 @@ export default function App() {
 
   // ── Push Notifications ────────────────────────────────────────────────────
   const VAPID_PUBLIC_KEY =
-    "BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qBHoLThSIqcWqGqlzqc";
+    "BHJgkySbqsme2Y4GpBs7_CamHMvR43kVMJbMs3D0lkFYbvCKusAkLjZtyNMJfZ1EPcNBzyHsJqHloQhHI1zxweA";
 
   const urlBase64ToUint8Array = (base64String) => {
     const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
