@@ -567,38 +567,24 @@ export default function App() {
     if (!user?.data?.id) return;
     const isFollowing = follows.vereine.includes(vereinId);
     if (isFollowing) {
-      const { error } = await supabase
+      await supabase
         .from("follows")
         .delete()
         .eq("freiwilliger_id", user.data.id)
         .eq("typ", "verein")
         .eq("ziel_id", vereinId);
-
-      if (error) {
-        console.error("FOLLOW VEREIN DELETE FEHLER:", error);
-        showToast("Verein konnte nicht entfolgt werden.", "#E85C5C");
-        return;
-      }
-
       setFollows((prev) => ({
         ...prev,
         vereine: prev.vereine.filter((id) => id !== vereinId),
       }));
     } else {
-      const { error } = await supabase
+      await supabase
         .from("follows")
         .insert({
           freiwilliger_id: user.data.id,
           typ: "verein",
           ziel_id: vereinId,
         });
-
-      if (error) {
-        console.error("FOLLOW VEREIN FEHLER:", error);
-        showToast("Verein konnte nicht gefolgt werden.", "#E85C5C");
-        return;
-      }
-
       setFollows((prev) => ({ ...prev, vereine: [...prev.vereine, vereinId] }));
     }
   };
@@ -607,38 +593,24 @@ export default function App() {
     if (!user?.data?.id) return;
     const isFollowing = follows.kategorien.includes(katId);
     if (isFollowing) {
-      const { error } = await supabase
+      await supabase
         .from("follows")
         .delete()
         .eq("freiwilliger_id", user.data.id)
         .eq("typ", "kategorie")
         .eq("ziel_wert", katId);
-
-      if (error) {
-        console.error("FOLLOW KATEGORIE DELETE FEHLER:", error);
-        showToast("Kategorie konnte nicht entfolgt werden.", "#E85C5C");
-        return;
-      }
-
       setFollows((prev) => ({
         ...prev,
         kategorien: prev.kategorien.filter((k) => k !== katId),
       }));
     } else {
-      const { error } = await supabase
+      await supabase
         .from("follows")
         .insert({
           freiwilliger_id: user.data.id,
           typ: "kategorie",
           ziel_wert: katId,
         });
-
-      if (error) {
-        console.error("FOLLOW KATEGORIE FEHLER:", error);
-        showToast("Kategorie konnte nicht gefolgt werden.", "#E85C5C");
-        return;
-      }
-
       setFollows((prev) => ({
         ...prev,
         kategorien: [...prev.kategorien, katId],
@@ -762,14 +734,13 @@ export default function App() {
     }
   };
 
-
   const getVolunteerPushRecipients = async ({
     gemeindeId: zielGemeindeId,
     notificationType,
     vereinId = null,
     kategorie = null,
-    freiwilligerIds = null,
     stelleId = null,
+    freiwilligerIds = null,
   }) => {
     try {
       let settingsQuery = supabase
@@ -791,7 +762,10 @@ export default function App() {
       let erlaubteIds = [...new Set(settingsRows.map((row) => row.freiwilliger_id).filter(Boolean))];
       if (!erlaubteIds.length) return [];
 
-      if (notificationType === "neue_stellen" && (vereinId || kategorie)) {
+      if (
+        notificationType === "neue_stellen" &&
+        (vereinId || kategorie)
+      ) {
         const followFilters = [];
         if (vereinId) {
           followFilters.push(`and(typ.eq.verein,ziel_id.eq.${vereinId})`);
@@ -814,50 +788,73 @@ export default function App() {
         if (!erlaubteIds.length) return [];
 
         if (stelleId) {
-          const { data: freiwilligeRows, error: freiwilligeError } = await supabase
+          const { data: stelleRow, error: stelleError } = await supabase
+            .from("stellen")
+            .select("id, plz")
+            .eq("id", stelleId)
+            .maybeSingle();
+
+          if (stelleError || !stelleRow?.plz) return [];
+
+          const { data: kandidatRows, error: kandidatError } = await supabase
             .from("freiwillige")
             .select("id, plz, umkreis")
             .in("id", erlaubteIds);
 
-          if (freiwilligeError || !freiwilligeRows?.length) return [];
+          if (kandidatError || !kandidatRows?.length) return [];
 
-          const idsImUmkreis = [];
+          const plzSet = [...new Set(kandidatRows.map((row) => row.plz).filter(Boolean))];
+          const { data: koordinatenRows, error: koordinatenError } = await supabase
+            .from("plz_koordinaten")
+            .select("plz, lat, lng")
+            .in("plz", plzSet);
 
-          for (const fw of freiwilligeRows) {
-            const radiusKm = Number(fw.umkreis);
-            if (!fw?.plz || !Number.isFinite(radiusKm) || radiusKm <= 0) continue;
+          if (koordinatenError) return [];
 
-            try {
-              const { data: idsImRadius, error: radiusError } = await supabase.rpc("stellen_in_umkreis", {
-                p_plz: fw.plz,
-                p_radius_km: radiusKm >= 9999 ? 9999 : radiusKm,
-              });
+          const koordinatenMap = new Map(
+            (koordinatenRows || []).map((row) => [String(row.plz), row])
+          );
 
-              if (radiusError || !idsImRadius?.length) continue;
+          const passendeIds = new Set();
 
-              const gefunden = idsImRadius.some((row) => (row.stelle_id || row.id || row) === stelleId);
-              if (gefunden) idsImUmkreis.push(fw.id);
-            } catch (_e) {
-              // Nutzer ohne verwertbare PLZ/Radius oder RPC-Fehler werden ignoriert.
+          for (const kandidat of kandidatRows) {
+            const plzKey = String(kandidat.plz || "");
+            const coords = koordinatenMap.get(plzKey);
+            const radiusKm = Number(kandidat.umkreis || 0);
+
+            if (!coords?.lat || !coords?.lng || !radiusKm) continue;
+
+            const { data: nearbyRows, error: nearbyError } = await supabase.rpc(
+              "stellen_in_umkreis",
+              {
+                lat: coords.lat,
+                lng: coords.lng,
+                radius_km: radiusKm,
+              }
+            );
+
+            if (nearbyError || !nearbyRows?.length) continue;
+
+            const istImUmkreis = nearbyRows.some(
+              (row) => row.stelle_id === stelleId
+            );
+
+            if (istImUmkreis) {
+              passendeIds.add(kandidat.id);
             }
           }
 
-          erlaubteIds = [...new Set(idsImUmkreis)];
+          erlaubteIds = [...passendeIds];
           if (!erlaubteIds.length) return [];
         }
-
-        // Für neue Stellen entscheidet der Umkreis über die fachliche Zielgruppe.
-        // Push-Token werden erst beim echten Versand geprüft.
-        return erlaubteIds;
       }
 
       let freiwilligeQuery = supabase
         .from("freiwillige")
         .select("id, push_token")
-        .in("id", erlaubteIds)
-        .not("push_token", "is", null);
+        .in("id", erlaubteIds);
 
-      if (zielGemeindeId) {
+      if (notificationType !== "neue_stellen" && zielGemeindeId) {
         freiwilligeQuery = freiwilligeQuery.eq("gemeinde_id", zielGemeindeId);
       }
 
@@ -871,7 +868,6 @@ export default function App() {
     }
   };
 
-
   const sendVolunteerPush = async ({
     title,
     body,
@@ -880,8 +876,8 @@ export default function App() {
     gemeindeId: zielGemeindeId,
     vereinId = null,
     kategorie = null,
-    freiwilligerIds = null,
     stelleId = null,
+    freiwilligerIds = null,
     persistInApp = false,
     inAppType = null,
   }) => {
@@ -891,8 +887,8 @@ export default function App() {
         notificationType,
         vereinId,
         kategorie,
-        freiwilligerIds,
         stelleId,
+        freiwilligerIds,
       });
 
       if (!empfaengerIds.length) {
@@ -901,7 +897,6 @@ export default function App() {
           vereinId,
           kategorie,
           zielGemeindeId,
-          stelleId,
         });
         return;
       }
@@ -950,15 +945,11 @@ export default function App() {
         return;
       }
 
-      const pushableIds = (pushRows || []).map((row) => row.id).filter(Boolean);
+      const pushEmpfaengerIds = (pushRows || []).map((row) => row.id);
 
-      if (!pushableIds.length) {
-        console.log("Volunteer push skipped: recipients matched, but no push tokens", {
+      if (!pushEmpfaengerIds.length) {
+        console.log("Volunteer web push skipped: no push tokens", {
           notificationType,
-          vereinId,
-          kategorie,
-          zielGemeindeId,
-          stelleId,
           empfaengerIds,
         });
         return;
@@ -971,7 +962,7 @@ export default function App() {
           url,
           gemeinde_id: zielGemeindeId,
           notification_type: notificationType,
-          freiwilliger_ids: pushableIds,
+          freiwilliger_ids: pushEmpfaengerIds,
           verein_id: vereinId,
           kategorie,
         },
@@ -1180,6 +1171,7 @@ export default function App() {
           loadVereine(profil.gemeinde_id);
           loadFollows(profil.id);
           loadNotifications(profil.auth_id);
+          registerPush(profil.id);
           setScreen("home");
           return;
         }
@@ -1329,12 +1321,6 @@ export default function App() {
       supabase.removeChannel(channel);
     };
   }, [user?.type, user?.data?.auth_id]);
-
-  useEffect(() => {
-    if (user?.type !== "freiwilliger" || !user?.data?.id) return;
-    registerPush(user.data.id);
-  }, [user?.type, user?.data?.id]);
-
 
   // Filter
   const plzMatch = (s) => {
@@ -2334,6 +2320,7 @@ export default function App() {
             if (type === "freiwilliger") {
               loadFollows(data.id);
               loadNotifications(data.auth_id);
+              registerPush(data.id);
             }
             if (type === "verein") {
               autoArchivieren(data.id);
