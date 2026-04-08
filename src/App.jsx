@@ -706,7 +706,7 @@ export default function App() {
 
   // ── Push Notifications ────────────────────────────────────────────────────
   const VAPID_PUBLIC_KEY =
-    "BHJgkySbqsme2Y4GpBs7_CamHMvR43kVMJbMs3D0lkFYbvCKusAkLjZtyNMJfZ1EPcNBzyHsJqHloQhHI1zxweA";
+    "BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qBHoLThSIqcWqGqlzqc";
 
   const urlBase64ToUint8Array = (base64String) => {
     const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
@@ -848,7 +848,7 @@ export default function App() {
           followFilters.push(`and(typ.eq.verein,ziel_id.eq.${vereinId})`);
         }
         if (kategorie) {
-          followFilters.push(`and(typ.eq.kategorie,ziel_id.eq.${kategorie})`);
+          followFilters.push(`and(typ.eq.kategorie,ziel_wert.eq.)`);
         }
 
         if (!followFilters.length) return [];
@@ -2791,17 +2791,7 @@ export default function App() {
                 .insert(
                   termineData.map((t) => ({ ...t, stelle_id: stelle.id }))
                 );
-            showToast("✓ Stelle veröffentlicht!");
-            await sendVolunteerPush({
-              gemeindeId: user.data.gemeinde_id,
-              notificationType: "neue_stellen",
-              vereinId: user.data.id,
-              kategorie: stelleData.kategorie,
-              title: "Neue Ehrenamtsstelle! 🌱",
-              body: `${user.data.name} sucht Freiwillige`,
-              url: "/",
-            });
-            await loadStellen(gemeindeId);
+            showToast("✓ Stelle veröffentlicht!");            await loadStellen(gemeindeId);
             goBack();
           }}
         />
