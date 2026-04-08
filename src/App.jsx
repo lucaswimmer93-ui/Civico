@@ -381,7 +381,7 @@ export default function App() {
   const [selectedFreiwilliger, setSelectedFreiwilliger] = useState(null);
   const [filterKat, setFilterKat] = useState(null);
   const [filterPlz, setFilterPlz] = useState("");
-  const [filterUmkreis, setFilterUmkreis] = useState(9999);
+  const [filterUmkreis, setFilterUmkreis] = useState(50);
   const [filterName, setFilterName] = useState("");
   const [toast, setToast] = useState(null);
   const [gemeindeId, setGemeindeId] = useState(null);
@@ -848,7 +848,7 @@ export default function App() {
           followFilters.push(`and(typ.eq.verein,ziel_id.eq.${vereinId})`);
         }
         if (kategorie) {
-          followFilters.push(`and(typ.eq.kategorie,ziel_wert.eq.)`);
+          followFilters.push(`and(typ.eq.kategorie,ziel_id.eq.${kategorie})`);
         }
 
         if (!followFilters.length) return [];
@@ -969,7 +969,7 @@ export default function App() {
           const { data: ids } = await supabase.rpc("stellen_in_umkreis", {
             lat: plzData.lat,
             lng: plzData.lng,
-            radius_km: umkreis >= 9999 ? 9999 : umkreis,
+            radius_km: umkreis,
           });
           if (ids && ids.length > 0) {
             const stelleIds = ids.map((r) => r.stelle_id || r.id || r);
@@ -1360,6 +1360,10 @@ export default function App() {
             },
           }));
           showToast("Du bist dabei 🙌\nWir freuen uns auf dich.");
+
+    await supabase.functions.invoke("notify-stelle-almost-full", {
+      body: { stelle_id: stelleId }
+    });
           // Verein benachrichtigen
           const stelle = stellen.find((s) => s.id === stelleId);
           if (stelle?.vereine?.auth_id) {
@@ -2087,8 +2091,7 @@ export default function App() {
                     <option value={10}>10 km</option>
                     <option value={25}>25 km</option>
                     <option value={50}>50 km</option>
-                    <option value={9999}>Alle</option>
-                  </select>
+                                      </select>
                 </div>
                 <div
                   style={{
@@ -2791,7 +2794,17 @@ export default function App() {
                 .insert(
                   termineData.map((t) => ({ ...t, stelle_id: stelle.id }))
                 );
-            showToast("✓ Stelle veröffentlicht!");            await loadStellen(gemeindeId);
+            showToast("✓ Stelle veröffentlicht!");
+            await sendVolunteerPush({
+              gemeindeId: user.data.gemeinde_id,
+              notificationType: "neue_stellen",
+              vereinId: user.data.id,
+              kategorie: stelleData.kategorie,
+              title: "Neue Ehrenamtsstelle! 🌱",
+              body: `${user.data.name} sucht Freiwillige`,
+              url: "/",
+            });
+            await loadStellen(gemeindeId);
             goBack();
           }}
         />
