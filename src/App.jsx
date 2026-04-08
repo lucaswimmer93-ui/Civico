@@ -848,7 +848,7 @@ export default function App() {
           followFilters.push(`and(typ.eq.verein,ziel_id.eq.${vereinId})`);
         }
         if (kategorie) {
-          followFilters.push(`and(typ.eq.kategorie,ziel_id.eq.${kategorie})`);
+          followFilters.push(`and(typ.eq.kategorie,ziel_wert.eq.)`);
         }
 
         if (!followFilters.length) return [];
@@ -1360,10 +1360,9 @@ export default function App() {
             },
           }));
           showToast("Du bist dabei 🙌\nWir freuen uns auf dich.");
-
-    await supabase.functions.invoke("notify-stelle-almost-full", {
-      body: { stelle_id: stelleId }
-    });
+          await supabase.functions.invoke("notify-stelle-almost-full", {
+            body: { stelle_id: stelleId },
+          });
           // Verein benachrichtigen
           const stelle = stellen.find((s) => s.id === stelleId);
           if (stelle?.vereine?.auth_id) {
@@ -2091,7 +2090,7 @@ export default function App() {
                     <option value={10}>10 km</option>
                     <option value={25}>25 km</option>
                     <option value={50}>50 km</option>
-                                      </select>
+                  </select>
                 </div>
                 <div
                   style={{
@@ -2794,17 +2793,7 @@ export default function App() {
                 .insert(
                   termineData.map((t) => ({ ...t, stelle_id: stelle.id }))
                 );
-            showToast("✓ Stelle veröffentlicht!");
-            await sendVolunteerPush({
-              gemeindeId: user.data.gemeinde_id,
-              notificationType: "neue_stellen",
-              vereinId: user.data.id,
-              kategorie: stelleData.kategorie,
-              title: "Neue Ehrenamtsstelle! 🌱",
-              body: `${user.data.name} sucht Freiwillige`,
-              url: "/",
-            });
-            await loadStellen(gemeindeId);
+            showToast("✓ Stelle veröffentlicht!");            await loadStellen(gemeindeId);
             goBack();
           }}
         />
