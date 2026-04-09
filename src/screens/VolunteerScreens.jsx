@@ -1139,44 +1139,6 @@ function VereinProfilPublic({
           </div>
         )}
 
-        {/* Aktuelle Aktionen */}
-        <div
-          style={{
-            background: "#FAF7F2",
-            borderRadius: 14,
-            padding: "16px",
-            marginBottom: 14,
-            border: "1px solid #E0D8C8",
-          }}
-        >
-          <div
-            style={{
-              fontSize: 11,
-              color: "#8B7355",
-              letterSpacing: 2,
-              textTransform: "uppercase",
-              marginBottom: 10,
-            }}
-          >
-            AKTUELLE AKTIONEN ({vereinStellen.length})
-          </div>
-          {vereinStellen.length === 0 ? (
-            <div
-              style={{ fontSize: 13, color: "#C4B89A", fontStyle: "italic" }}
-            >
-              Derzeit keine offenen Ehrenamtsstellen.
-            </div>
-          ) : (
-            vereinStellen.map((s) => (
-              <StelleCard
-                key={s.id}
-                stelle={s}
-                verein={verein}
-                onClick={() => onStelleClick && onStelleClick(s)}
-              />
-            ))
-          )}
-        </div>
       </div>
     </div>
   );
