@@ -385,31 +385,78 @@ export default function GemeindeDashboard({
     };
   }, [latestSnapshot, previousSnapshot, csrData, snapshotsLoading]);
 
-  const csrInsight = useMemo(() => {
-    if (!snapshotMonthly.length) {
-      return 'Sobald Monats-Snapshots vorliegen, sehen Sie hier Trends und Entwicklungen Ihrer Gemeinde.';
-    }
+  const csrInsightCards = useMemo(() => {
+    const monthlySource = snapshotMonthly.length
+      ? snapshotMonthly
+      : [{ label: 'Aktuell', quote: Number(csrData.teilnahmequote || 0), anmeldungen: Number(csrData.anmeldungen || 0), noShows: Number(csrData.noShows || 0), stellen: Number(csrData.einsaetze || 0) }];
 
-    const last = snapshotMonthly[snapshotMonthly.length - 1];
-    const prev = snapshotMonthly.length > 1 ? snapshotMonthly[snapshotMonthly.length - 2] : null;
-    const topCategory = csrData.categories[0];
+    const bestMonth = monthlySource.reduce((best, current) => {
+      if (!best) return current;
+      if ((current.quote || 0) > (best.quote || 0)) return current;
+      if ((current.quote || 0) === (best.quote || 0) && (current.anmeldungen || 0) > (best.anmeldungen || 0)) return current;
+      return best;
+    }, null);
 
-    if (prev) {
-      const diff = last.anmeldungen - prev.anmeldungen;
-      if (diff > 0) {
-        return `Engagement steigt: ${diff} zusätzliche Anmeldungen im Vergleich zum Vormonat.${topCategory ? ` ${topCategory.label} dominiert aktuell.` : ''}`;
+    const weakestMonth = monthlySource.reduce((worst, current) => {
+      if (!worst) return current;
+      if ((current.quote || 0) < (worst.quote || 0)) return current;
+      if ((current.quote || 0) === (worst.quote || 0) && (current.noShows || 0) > (worst.noShows || 0)) return current;
+      return worst;
+    }, null);
+
+    const topCategory = csrData.categories[0] || null;
+    const topRanking = csrData.ranking[0] || null;
+    const last = monthlySource[monthlySource.length - 1] || null;
+    const prev = monthlySource.length > 1 ? monthlySource[monthlySource.length - 2] : null;
+
+    let trendTitle = 'Entwicklung stabil';
+    let trendText = 'Die letzten Monate verlaufen ohne größere Ausschläge.';
+    let recommendation = 'Verlässlichkeit stabil halten und gezielt weitere sichtbare Einsätze schaffen.';
+
+    if (last && prev) {
+      const quoteDiff = Number(last.quote || 0) - Number(prev.quote || 0);
+      const anmeldungenDiff = Number(last.anmeldungen || 0) - Number(prev.anmeldungen || 0);
+
+      if (quoteDiff > 0 || anmeldungenDiff > 0) {
+        trendTitle = 'Engagement nimmt zu';
+        trendText = `${last.label} liegt ${anmeldungenDiff > 0 ? `mit ${anmeldungenDiff} zusätzlichen Zusagen` : 'bei ähnlicher Nachfrage'} ${quoteDiff > 0 ? `und +${quoteDiff.toFixed(1)} Prozentpunkten Verlässlichkeit` : 'bei stabiler Verlässlichkeit'} vor dem Vormonat.`;
+      } else if (quoteDiff < 0 || anmeldungenDiff < 0) {
+        trendTitle = 'Aufmerksamkeit nötig';
+        trendText = `${last.label} liegt ${anmeldungenDiff < 0 ? `mit ${Math.abs(anmeldungenDiff)} weniger Zusagen` : 'bei ähnlicher Nachfrage'} ${quoteDiff < 0 ? `und ${Math.abs(quoteDiff).toFixed(1)} Punkten weniger Verlässlichkeit` : 'bei stabiler Verlässlichkeit'} hinter dem Vormonat.`;
       }
-      if (diff < 0) {
-        return `Engagement schwächer als im Vormonat: ${Math.abs(diff)} weniger Anmeldungen.${topCategory ? ` Schwerpunkt bleibt ${topCategory.label}.` : ''}`;
-      }
     }
 
-    if (topCategory) {
-      return `${topCategory.label} ist aktuell der stärkste Bereich in Ihrer Gemeinde.`;
+    if (topCategory && topCategory.percent >= 60) {
+      recommendation = `${topCategory.label} prägt aktuell das Engagement. Prüfen Sie, ob andere Bereiche zusätzliche Impulse brauchen.`;
+    }
+    if (weakestMonth && Number(weakestMonth.quote || 0) < 70) {
+      recommendation = `Schwächste Phase: ${weakestMonth.label} mit ${Number(weakestMonth.quote || 0).toFixed(1)}% Verlässlichkeit. Mehr Unterstützung rund um diese Phase einplanen.`;
+    }
+    if (topRanking && topRanking.name && topRanking.name !== '–' && Number(topRanking.noShows || 0) === 0) {
+      recommendation = `${topRanking.name} setzt aktuell den positiven Standard. Dieses Muster lässt sich auf weitere Organisationen übertragen.`;
     }
 
-    return 'Die Entwicklung bleibt aktuell stabil.';
-  }, [snapshotMonthly, csrData.categories]);
+    return [
+      {
+        icon: '📈',
+        title: 'Beste Phase',
+        value: bestMonth ? `${bestMonth.label} (${Number(bestMonth.quote || 0).toFixed(1)}%)` : 'Noch keine Daten',
+        text: bestMonth ? `${bestMonth.anmeldungen || 0} Zusagen · ${bestMonth.stellen || 0} Einsatz(e)` : 'Sobald Monats-Snapshots vorliegen, erscheint hier die stärkste Phase.',
+      },
+      {
+        icon: '⚠️',
+        title: trendTitle,
+        value: weakestMonth ? `${weakestMonth.label} (${Number(weakestMonth.quote || 0).toFixed(1)}%)` : 'Noch keine Daten',
+        text: trendText,
+      },
+      {
+        icon: '💡',
+        title: 'Empfehlung',
+        value: topCategory ? `${topCategory.icon} ${topCategory.label}` : 'Nächster Fokus',
+        text: recommendation,
+      },
+    ];
+  }, [snapshotMonthly, csrData]);
 
   const handleHeaderBack = () => {
     if (verschiebeTermin) {
@@ -1548,8 +1595,14 @@ export default function GemeindeDashboard({
             ))}
           </div>
 
-          <div style={{ background:'#FFF7E8', borderRadius:16, padding:'14px 16px', border:'1px solid #E6D9C2', marginBottom:14, fontSize:13, color:'#6D5632' }}>
-            {csrInsight}
+          <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(240px, 1fr))', gap:12, marginBottom:14 }}>
+            {csrInsightCards.map((card) => (
+              <div key={card.title} style={{ background:'#FFF7E8', borderRadius:16, padding:'16px 18px', border:'1px solid #E6D9C2' }}>
+                <div style={{ fontSize:12, color:'#8B7355', marginBottom:6 }}>{card.icon} {card.title}</div>
+                <div style={{ fontSize:22, fontWeight:700, color:'#2C2416', marginBottom:6 }}>{card.value}</div>
+                <div style={{ fontSize:13, color:'#6D5632', lineHeight:1.6 }}>{card.text}</div>
+              </div>
+            ))}
           </div>
 
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(180px, 1fr))', gap:12, marginBottom:14 }}>
@@ -1570,22 +1623,18 @@ export default function GemeindeDashboard({
 
           <div style={{ display:'grid', gridTemplateColumns:'1.2fr 0.8fr', gap:14, marginBottom:14 }}>
             <div style={{ background:'#FAF7F2', borderRadius:18, padding:18, border:'1px solid #E6D9C2' }}>
-              <SectionLabel>Trend der letzten Monate</SectionLabel>
-              <div style={{ display:'flex', alignItems:'end', gap:12, minHeight:220, paddingTop:14 }}>
+              <SectionLabel>Monatsbild</SectionLabel>
+              <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(110px, 1fr))', gap:10, paddingTop:8 }}>
                 {(snapshotMonthly.length ? snapshotMonthly : [{ key:'fallback', label:'Aktuell', anmeldungen: csrData.anmeldungen, erschienen: csrData.erschienene, noShows: csrData.noShows, quote: csrData.teilnahmequote, stellen: csrData.einsaetze }]).map((month) => {
-                  const source = snapshotMonthly.length ? snapshotMonthly : [{ anmeldungen: csrData.anmeldungen }];
-                  const maxAnmeldungen = Math.max(...source.map((m) => m.anmeldungen || 0), 1);
-                  const height = Math.max(((month.anmeldungen || 0) / maxAnmeldungen) * 140, (month.anmeldungen || 0) > 0 ? 24 : 10);
+                  const quote = Number(month.quote || 0);
+                  const tone = quote >= 85 ? '#3A7D44' : quote >= 70 ? '#C8A96E' : '#E85C5C';
                   return (
-                    <div key={month.key} style={{ flex:1, textAlign:'center' }}>
-                      <div style={{ fontSize:11, color:'#8B7355', marginBottom:8 }}>{month.quote}% Quote</div>
-                      <div style={{ height:150, display:'flex', alignItems:'flex-end', justifyContent:'center' }}>
-                        <div style={{ width:'100%', maxWidth:72, height, borderRadius:'14px 14px 6px 6px', background:'linear-gradient(180deg, #C8A96E 0%, #8B7355 100%)', display:'flex', alignItems:'end', justifyContent:'center', color:'#fff', fontSize:11, fontWeight:700, paddingBottom:8 }}>
-                          {(month.anmeldungen || 0) > 0 ? month.anmeldungen : ''}
-                        </div>
-                      </div>
-                      <div style={{ fontWeight:700, color:'#2C2416', marginTop:10 }}>{month.label}</div>
-                      <div style={{ fontSize:11, color:'#8B7355', marginTop:4 }}>{month.stellen} Einsatz(e)</div>
+                    <div key={month.key} style={{ background:'#F7F1E6', borderRadius:14, padding:'12px 10px', border:'1px solid #E6D9C2' }}>
+                      <div style={{ fontWeight:700, color:'#2C2416', marginBottom:8 }}>{month.label}</div>
+                      <div style={{ fontSize:22, fontWeight:700, color:tone, marginBottom:4 }}>{quote.toFixed(1)}%</div>
+                      <div style={{ fontSize:11, color:'#8B7355', marginBottom:8 }}>Verlässlichkeit</div>
+                      <div style={{ fontSize:12, color:'#2C2416' }}>{month.anmeldungen || 0} Zusagen</div>
+                      <div style={{ fontSize:12, color:'#8B7355', marginTop:2 }}>{month.stellen || 0} Einsatz(e)</div>
                     </div>
                   );
                 })}
