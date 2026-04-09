@@ -2543,14 +2543,22 @@ export default function App() {
           onBestaetigen={handleBestaetigen}
           onStornieren={async (bewId, terminId) => {
             try {
-              await supabase.from("bewerbungen").delete().eq("id", bewId);
+              const aktuelleStelleId = selected?.id;
+              const aktuelleStelleTitel = selected?.titel || "der Stelle";
+
+              const { error: deleteBewError } = await supabase
+                .from("bewerbungen")
+                .delete()
+                .eq("id", bewId);
+              if (deleteBewError) throw deleteBewError;
+
               await supabase.rpc("increment_plaetze", { termin_id: terminId });
 
-              setSelected((prev) => {
-                if (!prev) return prev;
+              const removeBewFromStelle = (stelle) => {
+                if (!stelle) return stelle;
                 return {
-                  ...prev,
-                  termine: (prev.termine || []).map((termin) => {
+                  ...stelle,
+                  termine: (stelle.termine || []).map((termin) => {
                     if (termin.id !== terminId) return termin;
                     return {
                       ...termin,
@@ -2558,7 +2566,12 @@ export default function App() {
                     };
                   }),
                 };
-              });
+              };
+
+              setSelected((prev) => removeBewFromStelle(prev));
+              setStellen((prev) => prev.map((stelle) => (
+                stelle.id === aktuelleStelleId ? removeBewFromStelle(stelle) : stelle
+              )));
 
               const { data: nextOnList } = await supabase
                 .from("warteliste")
@@ -2569,13 +2582,15 @@ export default function App() {
                 .maybeSingle();
 
               if (nextOnList) {
-                const { data: erfolg } = await supabase.rpc("book_slot", {
+                const { data: erfolg, error: bookError } = await supabase.rpc("book_slot", {
                   p_stelle_id: nextOnList.stelle_id,
                   p_termin_id: terminId,
                   p_freiwilliger_id: nextOnList.freiwilliger_id,
                   p_name: nextOnList.name || nextOnList.freiwilliger_name,
                   p_email: nextOnList.email || nextOnList.freiwilliger_email,
                 });
+
+                if (bookError) throw bookError;
 
                 if (erfolg) {
                   const { data: freiwilligerProfil } = await supabase
@@ -2588,7 +2603,7 @@ export default function App() {
                     await supabase.from("notifications").insert({
                       user_id: freiwilligerProfil.auth_id,
                       titel: "🎉 Du wurdest nachgerückt!",
-                      text: `Du bist von der Warteliste bei "${selected.titel}" nachgerückt und automatisch angemeldet!`,
+                      text: `Du bist von der Warteliste bei "${aktuelleStelleTitel}" nachgerückt und automatisch angemeldet!`,
                       typ: "platz_frei",
                       gelesen: false,
                     });
@@ -2599,7 +2614,7 @@ export default function App() {
                     notificationType: "freie_plaetze",
                     freiwilligerIds: [nextOnList.freiwilliger_id],
                     title: "🎉 Du wurdest nachgerückt!",
-                    body: `Du bist bei "${selected.titel}" automatisch nachgerückt.`,
+                    body: `Du bist bei "${aktuelleStelleTitel}" automatisch nachgerückt.`,
                     url: "/",
                   });
                 }
@@ -2607,18 +2622,27 @@ export default function App() {
                 await supabase.from("warteliste").delete().eq("id", nextOnList.id);
               }
 
-              showToast("✓ Anmeldung storniert.", "#E85C5C");
-              await loadStellen(gemeindeId);
-              const { data } = await supabase
-                .from("stellen")
-                .select("*, vereine(*), termine(*, bewerbungen(*))")
-                .eq("id", selected.id)
-                .maybeSingle();
-              if (data) {
-                setSelected(data);
-              } else {
-                goBack();
+              if (aktuelleStelleId) {
+                const { data } = await supabase
+                  .from("stellen")
+                  .select("*, vereine(*), termine(*, bewerbungen(*))")
+                  .eq("id", aktuelleStelleId)
+                  .maybeSingle();
+
+                if (data) {
+                  setSelected(data);
+                  setStellen((prev) => prev.map((stelle) => (
+                    stelle.id === aktuelleStelleId ? data : stelle
+                  )));
+                } else {
+                  setSelected(null);
+                  setStellen((prev) => prev.filter((stelle) => stelle.id !== aktuelleStelleId));
+                  goBack();
+                }
               }
+
+              await loadStellen(gemeindeId);
+              showToast("✓ Anmeldung storniert.", "#E85C5C");
             } catch (error) {
               console.error("Verein Anmeldung stornieren fehlgeschlagen:", error);
               showToast("Fehler beim Stornieren.", "#E85C5C");
@@ -2640,6 +2664,9 @@ export default function App() {
                 return;
               }
 
+              const aktuelleStelleId = selected?.id;
+              const verbleibendeTermineVorher = (selected?.termine || []).filter((termin) => termin.id !== terminId);
+
               const { error: updateError } = await supabase
                 .from("termine")
                 .update({ abgesagt: true })
@@ -2652,45 +2679,74 @@ export default function App() {
                 { p_termin_id: terminId }
               );
 
-              if (rpcError) {
-                throw rpcError;
-              }
+              if (rpcError) throw rpcError;
 
-              // Betroffene Anmeldungen und Warteliste für diesen Termin entfernen,
-              // damit der Termin wirklich verschwindet und niemand angemeldet bleibt.
               const { error: bewerbungenDeleteError } = await supabase
                 .from("bewerbungen")
                 .delete()
                 .eq("termin_id", terminId);
-
               if (bewerbungenDeleteError) throw bewerbungenDeleteError;
 
               const { error: wartelisteDeleteError } = await supabase
                 .from("warteliste")
                 .delete()
                 .eq("termin_id", terminId);
-
               if (wartelisteDeleteError) throw wartelisteDeleteError;
 
               const { error: terminDeleteError } = await supabase
                 .from("termine")
                 .delete()
                 .eq("id", terminId);
-
               if (terminDeleteError) throw terminDeleteError;
 
-              showToast("✓ Termin abgesagt.", "#E85C5C");
-              await loadStellen(gemeindeId);
-              const { data } = await supabase
-                .from("stellen")
-                .select("*, vereine(*), termine(*, bewerbungen(*))")
-                .eq("id", selected.id)
-                .maybeSingle();
-              if (data) {
-                setSelected(data);
-              } else {
+              if (aktuelleStelleId && verbleibendeTermineVorher.length === 0) {
+                const { error: deleteStelleError } = await supabase
+                  .from("stellen")
+                  .delete()
+                  .eq("id", aktuelleStelleId);
+                if (deleteStelleError) throw deleteStelleError;
+
+                setStellen((prev) => prev.filter((stelle) => stelle.id !== aktuelleStelleId));
+                setSelected(null);
+                await loadStellen(gemeindeId);
+                showToast("✓ Letzter Termin abgesagt – Stelle gelöscht.", "#E85C5C");
                 goBack();
+                return;
               }
+
+              setSelected((prev) => {
+                if (!prev) return prev;
+                return {
+                  ...prev,
+                  termine: (prev.termine || []).filter((termin) => termin.id !== terminId),
+                };
+              });
+              setStellen((prev) => prev.map((stelle) => {
+                if (stelle.id !== aktuelleStelleId) return stelle;
+                return {
+                  ...stelle,
+                  termine: (stelle.termine || []).filter((termin) => termin.id !== terminId),
+                };
+              }));
+
+              await loadStellen(gemeindeId);
+
+              if (aktuelleStelleId) {
+                const { data } = await supabase
+                  .from("stellen")
+                  .select("*, vereine(*), termine(*, bewerbungen(*))")
+                  .eq("id", aktuelleStelleId)
+                  .maybeSingle();
+                if (data) {
+                  setSelected(data);
+                } else {
+                  setSelected(null);
+                  goBack();
+                  return;
+                }
+              }
+
+              showToast("✓ Termin abgesagt.", "#E85C5C");
             } catch (error) {
               console.error("Verein Termin absagen fehlgeschlagen:", error);
               showToast("Fehler beim Absagen.", "#E85C5C");
