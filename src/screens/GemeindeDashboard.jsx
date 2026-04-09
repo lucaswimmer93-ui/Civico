@@ -91,6 +91,8 @@ export default function GemeindeDashboard({
   const [neueStartzeit, setNeueStartzeit] = useState('');
   const [neueEndzeit, setNeueEndzeit] = useState('');
   const [csrRange, setCsrRange] = useState('90');
+  const [gemeindeSnapshots, setGemeindeSnapshots] = useState([]);
+  const [snapshotsLoading, setSnapshotsLoading] = useState(false);
 
   useEffect(() => {
     setSettingsForm({
@@ -103,6 +105,41 @@ export default function GemeindeDashboard({
     });
     setForm((prev) => ({ ...prev, plz: user?.plz || '' }));
   }, [user]);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadSnapshots = async () => {
+      if (!user?.id) {
+        setGemeindeSnapshots([]);
+        return;
+      }
+
+      try {
+        setSnapshotsLoading(true);
+        const { data, error } = await supabase
+          .from('gemeinde_analyse_snapshots')
+          .select('*')
+          .eq('gemeinde_id', user.id)
+          .order('snapshot_jahr', { ascending: true })
+          .order('snapshot_monat', { ascending: true });
+
+        if (error) throw error;
+        if (!active) return;
+        setGemeindeSnapshots(data || []);
+      } catch (err) {
+        console.error('Gemeinde-Snapshots laden fehlgeschlagen:', err);
+        if (active) setGemeindeSnapshots([]);
+      } finally {
+        if (active) setSnapshotsLoading(false);
+      }
+    };
+
+    loadSnapshots();
+    return () => {
+      active = false;
+    };
+  }, [user?.id]);
 
   const alleGemeindeStellen = useMemo(
     () => stellen.filter((s) => s.gemeinde_id === user?.id),
@@ -283,6 +320,96 @@ export default function GemeindeDashboard({
       aktivsterVerein: ranking[0]?.name || '–',
     };
   }, [alleGemeindeStellen, csrRange]);
+
+  const filteredSnapshots = useMemo(() => {
+    if (!gemeindeSnapshots.length) return [];
+    if (csrRange === 'all') return gemeindeSnapshots;
+    const maxMonths = csrRange === '30' ? 1 : csrRange === '90' ? 3 : 12;
+    return gemeindeSnapshots.slice(-maxMonths);
+  }, [gemeindeSnapshots, csrRange]);
+
+  const latestSnapshot = filteredSnapshots[filteredSnapshots.length - 1] || gemeindeSnapshots[gemeindeSnapshots.length - 1] || null;
+  const previousSnapshot = filteredSnapshots.length > 1 ? filteredSnapshots[filteredSnapshots.length - 2] : null;
+
+  const snapshotMonthly = useMemo(() => {
+    const source = filteredSnapshots.length ? filteredSnapshots : gemeindeSnapshots.slice(-3);
+    return source.map((entry) => {
+      const labelDate = new Date(entry.snapshot_jahr, (entry.snapshot_monat || 1) - 1, 1);
+      return {
+        key: `${entry.snapshot_jahr}-${String(entry.snapshot_monat).padStart(2, '0')}`,
+        label: labelDate.toLocaleDateString('de-DE', { month: 'short' }),
+        anmeldungen: Number(entry.anmeldungen_gesamt || 0),
+        erschienen: Number(entry.erschienen_gesamt || 0),
+        noShows: Number(entry.no_show_gesamt || 0),
+        quote: Number(entry.erscheinungsquote || 0),
+        stellen: Number(entry.stellen_gesamt || 0),
+      };
+    });
+  }, [filteredSnapshots, gemeindeSnapshots]);
+
+  const dashboardOverview = useMemo(() => {
+    const einsaetze = Number(latestSnapshot?.stellen_gesamt ?? csrData.einsaetze ?? 0);
+    const engagierteHelfer = csrData.helfer || 0;
+    const verlaesslichkeit = Number(latestSnapshot?.erscheinungsquote ?? csrData.teilnahmequote ?? 0);
+    const noShowRate = (() => {
+      if (latestSnapshot) {
+        const erschienen = Number(latestSnapshot.erschienen_gesamt || 0);
+        const noShow = Number(latestSnapshot.no_show_gesamt || 0);
+        const total = erschienen + noShow;
+        return total > 0 ? Math.round((noShow / total) * 100) : 0;
+      }
+      return csrData.noShowRate || 0;
+    })();
+
+    const trendDirection = previousSnapshot
+      ? Number(latestSnapshot?.anmeldungen_gesamt || 0) - Number(previousSnapshot?.anmeldungen_gesamt || 0)
+      : 0;
+
+    const trendText = previousSnapshot
+      ? trendDirection > 0
+        ? `↗ ${trendDirection} mehr Anmeldungen als im Vormonat`
+        : trendDirection < 0
+          ? `↘ ${Math.abs(trendDirection)} weniger Anmeldungen als im Vormonat`
+          : '→ Anmeldungen stabil zum Vormonat'
+      : snapshotsLoading
+        ? 'Snapshots werden geladen …'
+        : 'Sobald mehrere Monatsstände vorliegen, sehen Sie hier Trends.';
+
+    return {
+      einsaetze,
+      engagierteHelfer,
+      verlaesslichkeit,
+      noShowRate,
+      trendText,
+      aktivsterAkteur: csrData.aktivsterVerein || '–',
+    };
+  }, [latestSnapshot, previousSnapshot, csrData, snapshotsLoading]);
+
+  const csrInsight = useMemo(() => {
+    if (!snapshotMonthly.length) {
+      return 'Sobald Monats-Snapshots vorliegen, sehen Sie hier Trends und Entwicklungen Ihrer Gemeinde.';
+    }
+
+    const last = snapshotMonthly[snapshotMonthly.length - 1];
+    const prev = snapshotMonthly.length > 1 ? snapshotMonthly[snapshotMonthly.length - 2] : null;
+    const topCategory = csrData.categories[0];
+
+    if (prev) {
+      const diff = last.anmeldungen - prev.anmeldungen;
+      if (diff > 0) {
+        return `Engagement steigt: ${diff} zusätzliche Anmeldungen im Vergleich zum Vormonat.${topCategory ? ` ${topCategory.label} dominiert aktuell.` : ''}`;
+      }
+      if (diff < 0) {
+        return `Engagement schwächer als im Vormonat: ${Math.abs(diff)} weniger Anmeldungen.${topCategory ? ` Schwerpunkt bleibt ${topCategory.label}.` : ''}`;
+      }
+    }
+
+    if (topCategory) {
+      return `${topCategory.label} ist aktuell der stärkste Bereich in Ihrer Gemeinde.`;
+    }
+
+    return 'Die Entwicklung bleibt aktuell stabil.';
+  }, [snapshotMonthly, csrData.categories]);
 
   const handleHeaderBack = () => {
     if (verschiebeTermin) {
@@ -668,18 +795,22 @@ export default function GemeindeDashboard({
       {tab === 'dashboard' && (
         <div style={{ padding:'0 16px 24px' }}>
           <div style={{ background:'#FAF7F2', borderRadius:18, padding:18, border:'1px solid #E6D9C2', marginBottom:12 }}>
-            <div style={{ fontSize:20, fontWeight:700, color:'#2C2416', marginBottom:6 }}>Wirkung in Ihrer Gemeinde</div>
+            <div style={{ fontSize:20, fontWeight:700, color:'#2C2416', marginBottom:6 }}>So engagiert ist Ihre Gemeinde aktuell</div>
             <div style={{ fontSize:13, color:'#8B7355', lineHeight:1.6 }}>
-              Hier sehen Sie kompakt, wie viel Engagement aktuell über Civico in Ihrer Gemeinde sichtbar wird.
+              Hier sehen Sie kompakt, wie sichtbar, verlässlich und wirksam Ehrenamt in Ihrer Gemeinde gerade organisiert wird.
             </div>
+          </div>
+
+          <div style={{ background:'#FFF7E8', borderRadius:16, padding:'14px 16px', border:'1px solid #E6D9C2', marginBottom:12, fontSize:13, color:'#6D5632' }}>
+            {dashboardOverview.trendText}
           </div>
 
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(220px, 1fr))', gap:12 }}>
             {[
-              ['Einsätze', csrData.einsaetze, `${csrData.termine} Termin(e)`],
-              ['Engagierte Helfer', csrData.helfer, `${csrData.anmeldungen} Anmeldungen`],
-              ['Verlässlichkeit', `${csrData.teilnahmequote}%`, `${csrData.erschienene} erschienen · ${csrData.noShows} no-show`],
-              ['Aktivster Akteur', csrData.aktivsterVerein || '–', 'nach Helferstunden'],
+              ['Sichtbare Einsätze', dashboardOverview.einsaetze, `${latestSnapshot?.termine_gesamt ?? csrData.termine} Termin(e)`],
+              ['Engagierte Helfer', dashboardOverview.engagierteHelfer, `${latestSnapshot?.anmeldungen_gesamt ?? csrData.anmeldungen} Anmeldungen sichtbar`],
+              ['Verlässlichkeit', `${dashboardOverview.verlaesslichkeit}%`, `${latestSnapshot?.erschienen_gesamt ?? csrData.erschienene} erschienen · ${latestSnapshot?.no_show_gesamt ?? csrData.noShows} no-show`],
+              ['Aktivster Akteur', dashboardOverview.aktivsterAkteur || '–', 'aktuell stärkster Bereich'],
             ].map(([label, value, sub]) => (
               <div key={label} style={{ background:'#FAF7F2', borderRadius:18, padding:18, border:'1px solid #E6D9C2' }}>
                 <div style={{ fontSize:28, fontWeight:700, color:'#2C2416', marginBottom:8 }}>{value}</div>
@@ -1101,7 +1232,7 @@ export default function GemeindeDashboard({
             {form.typ === 'dauerhaft' && (
               <div style={{ marginBottom:14 }}>
                 <div style={{ fontSize:12, color:'#8B7355', marginBottom:6, letterSpacing:0.5 }}>
-                  ZEAITAUFWAND PRO WOCHE (PFLICHT)
+                  ZEITAUFWAND PRO WOCHE (PFLICHT)
                 </div>
                 <div style={{ display:'flex', alignItems:'center', gap:8 }}>
                   <input
@@ -1384,9 +1515,9 @@ export default function GemeindeDashboard({
         <div style={{ padding:'0 16px 24px' }}>
           <div style={{ background:'linear-gradient(135deg, #2C2416, #4A3C28)', borderRadius:22, padding:22, color:'#F4F0E8', marginBottom:14 }}>
             <div style={{ fontSize:12, letterSpacing:1.6, color:'#C4B89A', textTransform:'uppercase', marginBottom:8 }}>CSR-Report</div>
-            <div style={{ fontSize:24, fontWeight:700, marginBottom:8 }}>Wirkung in Ihrer Gemeinde sichtbar machen</div>
+            <div style={{ fontSize:24, fontWeight:700, marginBottom:8 }}>So viel Engagement passiert in Ihrer Gemeinde</div>
             <div style={{ fontSize:14, color:'#E7D9C5', lineHeight:1.6, maxWidth:760 }}>
-              Hier sehen Sie belastbare Kennzahlen zu Einsätzen, Teilnahme, Verlässlichkeit und Helferstunden – direkt aus den aktuell erfassten Stellen und Terminen.
+              Die Kennzahlen basieren auf Ihren Monats-Snapshots und machen sichtbar, wie verlässlich und aktiv Ehrenamt in Ihrer Gemeinde organisiert wird.
             </div>
           </div>
 
@@ -1417,14 +1548,17 @@ export default function GemeindeDashboard({
             ))}
           </div>
 
+          <div style={{ background:'#FFF7E8', borderRadius:16, padding:'14px 16px', border:'1px solid #E6D9C2', marginBottom:14, fontSize:13, color:'#6D5632' }}>
+            {csrInsight}
+          </div>
+
           <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(180px, 1fr))', gap:12, marginBottom:14 }}>
             {[
-              ['Einsätze', csrData.einsaetze, `${csrData.termine} Termine`],
-              ['Helfer gesamt', csrData.helfer, `${csrData.anmeldungen} Anmeldungen`],
-              ['Teilnahmequote', `${csrData.teilnahmequote}%`, `${csrData.erschienene} erschienen`],
-              ['No-Show Rate', `${csrData.noShowRate}%`, `${csrData.noShows} nicht erschienen`],
-              ['Helferstunden', csrData.helferstunden, 'sichtbarer Impact'],
-              ['Aktivster Akteur', csrData.aktivsterVerein, csrData.ranking.length ? 'nach Helferstunden' : 'noch keine Daten'],
+              ['Sichtbare Einsätze', latestSnapshot?.stellen_gesamt ?? csrData.einsaetze, `${latestSnapshot?.termine_gesamt ?? csrData.termine} Termine`],
+              ['Engagierte Helfer', csrData.helfer, `${latestSnapshot?.anmeldungen_gesamt ?? csrData.anmeldungen} Anmeldungen sichtbar`],
+              ['Verlässlichkeit', `${latestSnapshot?.erscheinungsquote ?? csrData.teilnahmequote}%`, `${latestSnapshot?.erschienen_gesamt ?? csrData.erschienene} erschienen`],
+              ['No-Show Rate', `${dashboardOverview.noShowRate}%`, `${latestSnapshot?.no_show_gesamt ?? csrData.noShows} nicht erschienen`],
+              ['Aktivster Akteur', csrData.aktivsterVerein, csrData.ranking.length ? 'aktuell stärkster Bereich' : 'noch keine Daten'],
             ].map(([label, value, sub]) => (
               <div key={label} style={{ background:'#FAF7F2', borderRadius:18, padding:18, border:'1px solid #E6D9C2' }}>
                 <div style={{ fontSize:28, fontWeight:700, color:'#2C2416', marginBottom:8 }}>{value}</div>
@@ -1436,21 +1570,22 @@ export default function GemeindeDashboard({
 
           <div style={{ display:'grid', gridTemplateColumns:'1.2fr 0.8fr', gap:14, marginBottom:14 }}>
             <div style={{ background:'#FAF7F2', borderRadius:18, padding:18, border:'1px solid #E6D9C2' }}>
-              <SectionLabel>Trend der letzten 3 Monate</SectionLabel>
+              <SectionLabel>Trend der letzten Monate</SectionLabel>
               <div style={{ display:'flex', alignItems:'end', gap:12, minHeight:220, paddingTop:14 }}>
-                {csrData.monthly.map((month) => {
-                  const maxHours = Math.max(...csrData.monthly.map((m) => m.helferstunden), 1);
-                  const height = Math.max((month.helferstunden / maxHours) * 140, month.helferstunden > 0 ? 22 : 10);
+                {(snapshotMonthly.length ? snapshotMonthly : [{ key:'fallback', label:'Aktuell', anmeldungen: csrData.anmeldungen, erschienen: csrData.erschienene, noShows: csrData.noShows, quote: csrData.teilnahmequote, stellen: csrData.einsaetze }]).map((month) => {
+                  const source = snapshotMonthly.length ? snapshotMonthly : [{ anmeldungen: csrData.anmeldungen }];
+                  const maxAnmeldungen = Math.max(...source.map((m) => m.anmeldungen || 0), 1);
+                  const height = Math.max(((month.anmeldungen || 0) / maxAnmeldungen) * 140, (month.anmeldungen || 0) > 0 ? 24 : 10);
                   return (
                     <div key={month.key} style={{ flex:1, textAlign:'center' }}>
-                      <div style={{ fontSize:11, color:'#8B7355', marginBottom:8 }}>{month.helferstunden.toFixed(1)}h</div>
+                      <div style={{ fontSize:11, color:'#8B7355', marginBottom:8 }}>{month.quote}% Quote</div>
                       <div style={{ height:150, display:'flex', alignItems:'flex-end', justifyContent:'center' }}>
                         <div style={{ width:'100%', maxWidth:72, height, borderRadius:'14px 14px 6px 6px', background:'linear-gradient(180deg, #C8A96E 0%, #8B7355 100%)', display:'flex', alignItems:'end', justifyContent:'center', color:'#fff', fontSize:11, fontWeight:700, paddingBottom:8 }}>
-                          {month.helfer > 0 ? month.helfer : ''}
+                          {(month.anmeldungen || 0) > 0 ? month.anmeldungen : ''}
                         </div>
                       </div>
                       <div style={{ fontWeight:700, color:'#2C2416', marginTop:10 }}>{month.label}</div>
-                      <div style={{ fontSize:11, color:'#8B7355', marginTop:4 }}>{month.termine} Termin(e)</div>
+                      <div style={{ fontSize:11, color:'#8B7355', marginTop:4 }}>{month.stellen} Einsatz(e)</div>
                     </div>
                   );
                 })}
@@ -1474,6 +1609,22 @@ export default function GemeindeDashboard({
                   </div>
                 ))
               )}
+            </div>
+          </div>
+
+          <div style={{ background:'#FAF7F2', borderRadius:18, padding:18, border:'1px solid #E6D9C2', marginBottom:14 }}>
+            <SectionLabel>Wirkung kompakt</SectionLabel>
+            <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(220px, 1fr))', gap:12 }}>
+              <div style={{ background:'#F7F1E6', borderRadius:14, padding:14 }}>
+                <div style={{ fontSize:12, color:'#8B7355', marginBottom:4 }}>Helferstunden</div>
+                <div style={{ fontSize:22, fontWeight:700, color:'#2C2416' }}>{latestSnapshot?.helferstunden_gesamt ?? csrData.helferstunden}h</div>
+                <div style={{ fontSize:12, color:'#8B7355', marginTop:4 }}>sichtbarer Impact, sekundäre KPI</div>
+              </div>
+              <div style={{ background:'#F7F1E6', borderRadius:14, padding:14 }}>
+                <div style={{ fontSize:12, color:'#8B7355', marginBottom:4 }}>Stärkste Kategorie</div>
+                <div style={{ fontSize:22, fontWeight:700, color:'#2C2416' }}>{csrData.categories[0] ? `${csrData.categories[0].icon} ${csrData.categories[0].label}` : '–'}</div>
+                <div style={{ fontSize:12, color:'#8B7355', marginTop:4 }}>prägender Bereich im gewählten Zeitraum</div>
+              </div>
             </div>
           </div>
 
