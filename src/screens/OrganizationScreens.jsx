@@ -13,12 +13,6 @@ const bewerbungIstNoShow = (bewerbung) =>
 const bewerbungIstOffen = (bewerbung) =>
   !bewerbungIstErschienen(bewerbung) && !bewerbungIstNoShow(bewerbung);
 
-const bewerbungIstAktiv = (bewerbung) => {
-  if (!bewerbung) return false;
-  const status = String(bewerbung.status || "").toLowerCase();
-  return !["storniert", "abgesagt", "cancelled", "canceled"].includes(status);
-};
-
 
 function VereinDashboard({
   user,
@@ -467,8 +461,7 @@ function VereinDashboard({
         ) : (
           meineStellen.map((s) => {
             const gesamtAnmeldungen = (s.termine || []).reduce(
-              (sum, t) =>
-                sum + ((t.bewerbungen || []).filter(bewerbungIstAktiv).length || 0),
+              (sum, t) => sum + (t.bewerbungen?.length || 0),
               0
             );
             return (
@@ -772,7 +765,6 @@ function VereinStelleDetail({
         {alleTermine.map((t) => {
           const istVergangen = !isTerminAktuell(t);
           const nochNichtGestartet = isTerminNochNichtGestartet(t);
-          const aktiveBewerbungen = (t.bewerbungen || []).filter(bewerbungIstAktiv);
 
           return (
             <div
@@ -859,14 +851,14 @@ function VereinStelleDetail({
 
               {/* Angemeldete */}
               <SectionLabel>
-                Angemeldete ({aktiveBewerbungen.length})
+                Angemeldete ({(t.bewerbungen || []).length})
               </SectionLabel>
-              {aktiveBewerbungen.length === 0 ? (
+              {(t.bewerbungen || []).length === 0 ? (
                 <div style={{ fontSize: 12, color: "#8B7355" }}>
                   Noch niemand angemeldet.
                 </div>
               ) : (
-                aktiveBewerbungen.map((b) => (
+                (t.bewerbungen || []).map((b) => (
                   <div
                     key={b.id}
                     style={{
@@ -2138,7 +2130,7 @@ function VereinProfilEdit({
                   kontakt_email: kontaktEmail,
                   mitglieder: parseInt(mitglieder) || 0,
                   gegruendet: parseInt(gegruendet) || 0,
-                  logo_url: logoUrl || null,
+                  logo: logoUrl || null,
                 })
               }
               green
