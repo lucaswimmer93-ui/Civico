@@ -13,6 +13,21 @@ const bewerbungIstNoShow = (bewerbung) =>
 const bewerbungIstOffen = (bewerbung) =>
   !bewerbungIstErschienen(bewerbung) && !bewerbungIstNoShow(bewerbung);
 
+const getVereinLogoSrc = (verein) => {
+  const raw = verein?.logo_url || verein?.logo || "";
+  if (typeof raw !== "string") return "";
+  const value = raw.trim();
+  if (!value) return "";
+  if (
+    value.startsWith("http://") ||
+    value.startsWith("https://") ||
+    value.startsWith("data:image/") ||
+    value.startsWith("blob:")
+  ) {
+    return value;
+  }
+  return "";
+};
 
 function VereinDashboard({
   user,
@@ -1708,7 +1723,7 @@ function VereinProfilEdit({
   const [gegruendet, setGegruendet] = useState(
     verein.gegruendet ? String(verein.gegruendet) : ""
   );
-  const [logoUrl, setLogoUrl] = useState(verein.logo_url || "");
+  const [logoUrl, setLogoUrl] = useState(getVereinLogoSrc(verein));
   const [logoUploading, setLogoUploading] = useState(false);
   const [activeTab, setActiveTab] = useState("profil");
   const [neuesPasswort, setNeuesPasswort] = useState("");
@@ -1730,7 +1745,7 @@ function VereinProfilEdit({
     }
     setLogoUploading(true);
     const ext = file.name.split(".").pop();
-    const path = `logos/${verein.id}.${ext}`;
+    const path = `vereine/${verein.id}.${ext}`;
     const { error: upErr } = await supabase.storage
       .from("avatars")
       .upload(path, file, { upsert: true });
@@ -2130,7 +2145,7 @@ function VereinProfilEdit({
                   kontakt_email: kontaktEmail,
                   mitglieder: parseInt(mitglieder) || 0,
                   gegruendet: parseInt(gegruendet) || 0,
-                  logo_url: logoUrl || null,
+                  logo: logoUrl || verein.logo || "🏢",
                 })
               }
               green
@@ -2771,8 +2786,13 @@ function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
       .from("analyse_snapshots")
       .select("*")
       .eq("verein_id", vereinId)
-      .order("erstellt_am", { ascending: false })
-      .then(({ data }) => {
+      .order("created_at", { ascending: false })
+      .then(({ data, error }) => {
+        if (error) {
+          console.log("analyse_snapshots load skipped:", error);
+          setSnapshots([]);
+          return;
+        }
         if (data) setSnapshots(data);
       });
     // Follower Analyse
@@ -3045,7 +3065,7 @@ function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
                         </div>
                         <div style={{ fontSize: 10, color: "#C4B89A" }}>
                           📦{" "}
-                          {new Date(s.erstellt_am).toLocaleDateString("de-DE")}
+                          {new Date(s.created_at).toLocaleDateString("de-DE")}
                         </div>
                       </div>
                       <div

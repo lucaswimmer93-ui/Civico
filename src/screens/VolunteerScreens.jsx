@@ -17,6 +17,22 @@ const bewerbungIstAktiv = (bewerbung) => {
   return !["storniert", "abgesagt", "cancelled", "canceled"].includes(status);
 };
 
+const getVereinLogoSrc = (verein) => {
+  const raw = verein?.logo_url || verein?.logo || "";
+  if (typeof raw !== "string") return "";
+  const value = raw.trim();
+  if (!value) return "";
+  if (
+    value.startsWith("http://") ||
+    value.startsWith("https://") ||
+    value.startsWith("data:image/") ||
+    value.startsWith("blob:")
+  ) {
+    return value;
+  }
+  return "";
+};
+
 const getTerminPlaetze = (termin) => {
   const gesamtPlaetze = Number(
     termin?.gesamt_plaetze ?? termin?.max_helfer ?? termin?.plaetze ?? 0
@@ -411,26 +427,29 @@ function DetailScreen({
                 ) : !belegt && isTerminNochNichtGestartet(t) ? (
                   <button
                     onClick={() => {
+                      if (user?.type === "verein") return;
                       if (!user) {
                         onLogin();
                         return;
                       }
                       onBuchen(stelle.id, t.id, true);
                     }}
+                    disabled={user?.type === "verein"}
                     style={{
                       width: "100%",
                       padding: "10px",
                       borderRadius: 10,
                       border: "none",
-                      background: "#3A7D44",
-                      color: "#fff",
+                      background: user?.type === "verein" ? "#D9D1C2" : "#3A7D44",
+                      color: user?.type === "verein" ? "#8B7355" : "#fff",
                       fontSize: 13,
                       fontFamily: "inherit",
                       fontWeight: "bold",
-                      cursor: "pointer",
+                      cursor: user?.type === "verein" ? "not-allowed" : "pointer",
+                      opacity: user?.type === "verein" ? 0.9 : 1,
                     }}
                   >
-                    {user ? "Dabei sein & helfen →" : "Registrieren & helfen →"}
+                    {user?.type === "verein" ? "Nur für Freiwillige" : user ? "Dabei sein & helfen →" : "Registrieren & helfen →"}
                   </button>
                 ) : !belegt && !isTerminNochNichtGestartet(t) ? (
                   <div
@@ -447,7 +466,7 @@ function DetailScreen({
                   >
                     ⏳ Termin läuft gerade – Anmeldung nicht mehr möglich
                   </div>
-                ) : user ? (
+                ) : user && user?.type !== "verein" ? (
                   <button
                     onClick={() =>
                       onWarteliste && onWarteliste(stelle.id, t.id)
@@ -594,9 +613,9 @@ function VereinProfilPublic({
               marginBottom: 4,
             }}
           >
-            {verein.logo_url ? (
+            {getVereinLogoSrc(verein) ? (
               <img
-                src={verein.logo_url}
+                src={getVereinLogoSrc(verein)}
                 alt="Logo"
                 style={{
                   width: 80,
