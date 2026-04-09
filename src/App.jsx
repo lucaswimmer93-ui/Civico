@@ -93,64 +93,6 @@ const getInitialScreenFromPath = () => {
   return "home";
 };
 
-const LAST_ROLE_STORAGE_KEY = "civico_last_role";
-
-const setLastRolePreference = (role) => {
-  if (typeof window === "undefined") return;
-  if (!role) {
-    sessionStorage.removeItem(LAST_ROLE_STORAGE_KEY);
-    return;
-  }
-  sessionStorage.setItem(LAST_ROLE_STORAGE_KEY, role);
-};
-
-const getLastRolePreference = () => {
-  if (typeof window === "undefined") return null;
-  return sessionStorage.getItem(LAST_ROLE_STORAGE_KEY);
-};
-
-const buildCleanStellePayload = (stelleData = {}, extra = {}) => {
-  const clean = {
-    titel: stelleData.titel || "",
-    beschreibung: stelleData.beschreibung || "",
-    kategorie: stelleData.kategorie || null,
-    ort: stelleData.ort || stelleData.standort || null,
-    treffpunkt: stelleData.treffpunkt || stelleData.standort || null,
-    plz: stelleData.plz || null,
-    strasse: stelleData.strasse || null,
-    hausnummer: stelleData.hausnummer || null,
-    verein_id: extra.verein_id ?? stelleData.verein_id ?? null,
-    gemeinde_id: extra.gemeinde_id ?? stelleData.gemeinde_id ?? null,
-    created_by_type: extra.created_by_type ?? stelleData.created_by_type ?? null,
-    archiviert: Boolean(stelleData.archiviert ?? extra.archiviert ?? false),
-    aufrufe: Number.isFinite(stelleData.aufrufe) ? stelleData.aufrufe : (extra.aufrufe ?? 0),
-  };
-
-  return Object.fromEntries(
-    Object.entries(clean).filter(([, value]) => value !== undefined)
-  );
-};
-
-const buildCleanTerminPayloads = (termineData = [], stelleId) => {
-  return (termineData || [])
-    .filter((t) => t?.datum)
-    .map((t) => {
-      const plaetze = Number(t.plaetze ?? t.freie_plaetze ?? t.gesamt_plaetze ?? 0);
-      const clean = {
-        stelle_id: stelleId,
-        datum: t.datum,
-        startzeit: t.startzeit || null,
-        endzeit: t.endzeit || null,
-        freie_plaetze: Number.isFinite(plaetze) && plaetze > 0 ? plaetze : 1,
-        gesamt_plaetze: Number.isFinite(plaetze) && plaetze > 0 ? plaetze : 1,
-      };
-
-      return Object.fromEntries(
-        Object.entries(clean).filter(([, value]) => value !== undefined)
-      );
-    });
-};
-
 function AuthCallbackScreen() {
   useEffect(() => {
     const handleAuth = async () => {
@@ -757,7 +699,7 @@ export default function App() {
     if (typeof window !== "undefined") {
       sessionStorage.removeItem("civico_auth_flow");
     }
-    setLastRolePreference(null);
+    clearPreferredRole();
     setUser(null);
     setHistory([]);
     setScreen("home");
@@ -1011,6 +953,63 @@ export default function App() {
     setTimeout(() => setToast(null), 3000);
   };
 
+  const rememberPreferredRole = (role) => {
+    if (typeof window === "undefined" || !role) return;
+    sessionStorage.setItem("civico_preferred_role", role);
+  };
+
+  const clearPreferredRole = () => {
+    if (typeof window === "undefined") return;
+    sessionStorage.removeItem("civico_preferred_role");
+  };
+
+  const buildCleanStellePayload = (stelleData = {}, currentUser = null) => {
+    const ort = stelleData.ort || stelleData.standort || "";
+    const payload = {
+      titel: stelleData.titel || "",
+      beschreibung: stelleData.beschreibung || "",
+      kategorie: stelleData.kategorie || null,
+      typ: stelleData.typ || "event",
+      aufwand: stelleData.aufwand || null,
+      ort,
+      plz: stelleData.plz || currentUser?.plz || null,
+      standort: stelleData.standort || ort || null,
+      ansprechpartner: stelleData.ansprechpartner || null,
+      kontakt_email: stelleData.kontakt_email || currentUser?.kontakt_email || currentUser?.email || null,
+      telefon: stelleData.telefon || currentUser?.telefon || null,
+      dringend: Boolean(stelleData.dringend),
+      archiviert: false,
+      aufrufe: Number(stelleData.aufrufe || 0),
+      published: typeof stelleData.published === "boolean" ? stelleData.published : true,
+      archived: false,
+      umkreis: stelleData.umkreis != null && stelleData.umkreis !== "" ? Number(stelleData.umkreis) : null,
+    };
+
+    if (currentUser?.id) {
+      payload.verein_id = currentUser.id;
+      payload.gemeinde_id = currentUser.gemeinde_id || null;
+      payload.created_by_type = "verein";
+    }
+
+    return payload;
+  };
+
+  const buildCleanTerminePayload = (termineData = [], stelleId) =>
+    (termineData || [])
+      .filter((t) => t && t.datum)
+      .map((t) => {
+        const plaetze = Number(t.plaetze ?? t.freie_plaetze ?? t.gesamt_plaetze ?? 5);
+        return {
+          stelle_id: stelleId,
+          datum: t.datum,
+          startzeit: t.startzeit || null,
+          endzeit: t.endzeit || null,
+          freie_plaetze: plaetze,
+          gesamt_plaetze: Number(t.gesamt_plaetze ?? t.plaetze ?? plaetze),
+          abgesagt: Boolean(t.abgesagt),
+        };
+      });
+
   const loadStellen = async (
     gemeinde_id = null,
     plz = null,
@@ -1068,59 +1067,6 @@ export default function App() {
       .eq("id", stelleId)
       .single();
     if (data) setSelected(data);
-  };
-
-  const resolveSessionUser = async (sessionUserId) => {
-    const preferredRole = getLastRolePreference();
-    const roleLoaders = {
-      freiwilliger: async () => {
-        const { data, error } = await supabase
-          .from("freiwillige")
-          .select("*")
-          .eq("auth_id", sessionUserId)
-          .maybeSingle();
-        if (error) throw error;
-        return data ? { type: "freiwilliger", data } : null;
-      },
-      verein: async () => {
-        const { data, error } = await supabase
-          .from("vereine")
-          .select("*")
-          .eq("auth_id", sessionUserId)
-          .maybeSingle();
-        if (error) throw error;
-        return data ? { type: "verein", data } : null;
-      },
-      gemeinde: async () => {
-        const { data, error } = await supabase
-          .from("gemeinden")
-          .select("*")
-          .eq("auth_id", sessionUserId)
-          .maybeSingle();
-        if (error) throw error;
-        return data ? { type: "gemeinde", data } : null;
-      },
-      admin: async () => {
-        const { data, error } = await supabase
-          .from("admins")
-          .select("*")
-          .eq("auth_id", sessionUserId)
-          .maybeSingle();
-        if (error) throw error;
-        return data ? { type: "admin", data } : null;
-      },
-    };
-
-    const orderedRoles = [preferredRole, "verein", "gemeinde", "admin", "freiwilliger"]
-      .filter(Boolean)
-      .filter((role, index, arr) => arr.indexOf(role) === index);
-
-    for (const role of orderedRoles) {
-      const result = await roleLoaders[role]();
-      if (result) return result;
-    }
-
-    return null;
   };
 
   const autoArchivieren = async (vereinId) => {
@@ -1214,69 +1160,110 @@ export default function App() {
           ? sessionStorage.getItem("civico_auth_flow")
           : null;
 
-      // Normale Redirects im Passwort-Flow komplett blockieren
       if (activeFlowLock === "set-password") {
         setScreen("set-password");
         return;
       }
 
-      if (session) {
-        try {
-          const resolvedUser = await resolveSessionUser(session.user.id);
+      if (!session) return;
 
-          if (!resolvedUser) {
-            return;
-          }
+      const preferredRole =
+        typeof window !== "undefined"
+          ? sessionStorage.getItem("civico_preferred_role")
+          : null;
 
-          setLastRolePreference(resolvedUser.type);
+      const loaders = {
+        freiwilliger: async () => {
+          const { data } = await supabase
+            .from("freiwillige")
+            .select("*")
+            .eq("auth_id", session.user.id)
+            .maybeSingle();
+          return data ? { type: "freiwilliger", data } : null;
+        },
+        verein: async () => {
+          const { data } = await supabase
+            .from("vereine")
+            .select("*")
+            .eq("auth_id", session.user.id)
+            .maybeSingle();
+          return data ? { type: "verein", data } : null;
+        },
+        gemeinde: async () => {
+          const { data } = await supabase
+            .from("gemeinden")
+            .select("*")
+            .eq("auth_id", session.user.id)
+            .maybeSingle();
+          return data ? { type: "gemeinde", data } : null;
+        },
+        admin: async () => {
+          const { data } = await supabase
+            .from("admins")
+            .select("*")
+            .eq("auth_id", session.user.id)
+            .maybeSingle();
+          return data ? { type: "admin", data } : null;
+        },
+      };
 
-          if (resolvedUser.type === "freiwilliger") {
-            const profil = resolvedUser.data;
-            setUser({ type: "freiwilliger", data: profil });
-            setGemeindeId(profil.gemeinde_id);
-            loadStellen(profil.gemeinde_id, profil.plz, profil.umkreis);
-            loadVereine(profil.gemeinde_id);
-            loadFollows(profil.id);
-            loadNotifications(profil.auth_id);
-            registerPush(profil.id);
-            setScreen("home");
-            return;
-          }
+      const orderedRoles = [
+        ...(preferredRole ? [preferredRole] : []),
+        "verein",
+        "gemeinde",
+        "admin",
+        "freiwilliger",
+      ].filter((role, index, arr) => arr.indexOf(role) === index);
 
-          if (resolvedUser.type === "verein") {
-            const verein = resolvedUser.data;
-            setUser({ type: "verein", data: verein });
-            setGemeindeId(verein.gemeinde_id);
-            loadStellen(verein.gemeinde_id);
-            loadVereine(verein.gemeinde_id);
-            setScreen("dashboard");
-            autoArchivieren(verein.id);
-            loadVereinFollowers(verein.id);
-            loadVereinNotifications(verein.id);
-            return;
-          }
+      let resolvedUser = null;
+      for (const role of orderedRoles) {
+        resolvedUser = await loaders[role]();
+        if (resolvedUser) break;
+      }
 
-          if (resolvedUser.type === "gemeinde") {
-            const gemeinde = resolvedUser.data;
-            setUser({ type: "gemeinde", data: gemeinde });
-            setGemeindeId(gemeinde.id);
-            loadStellen(gemeinde.id);
-            loadVereine(gemeinde.id);
-            setScreen("gemeinde-dashboard");
-            return;
-          }
+      if (!resolvedUser) return;
 
-          if (resolvedUser.type === "admin") {
-            const admin = resolvedUser.data;
-            setUser({ type: "admin", data: admin });
-            loadStellen();
-            loadVereine();
-            setScreen("admin-dashboard");
-            return;
-          }
-        } catch (restoreError) {
-          console.error("Session-Restore fehlgeschlagen:", restoreError);
-        }
+      rememberPreferredRole(resolvedUser.type);
+      setUser(resolvedUser);
+
+      if (resolvedUser.type === "freiwilliger") {
+        setGemeindeId(resolvedUser.data.gemeinde_id);
+        loadStellen(
+          resolvedUser.data.gemeinde_id,
+          resolvedUser.data.plz,
+          resolvedUser.data.umkreis
+        );
+        loadVereine(resolvedUser.data.gemeinde_id);
+        loadFollows(resolvedUser.data.id);
+        loadNotifications(resolvedUser.data.auth_id);
+        registerPush(resolvedUser.data.id);
+        setScreen("home");
+        return;
+      }
+
+      if (resolvedUser.type === "verein") {
+        setGemeindeId(resolvedUser.data.gemeinde_id);
+        loadStellen(resolvedUser.data.gemeinde_id);
+        loadVereine(resolvedUser.data.gemeinde_id);
+        setScreen("dashboard");
+        autoArchivieren(resolvedUser.data.id);
+        loadVereinFollowers(resolvedUser.data.id);
+        loadVereinNotifications(resolvedUser.data.id);
+        return;
+      }
+
+      if (resolvedUser.type === "gemeinde") {
+        setGemeindeId(resolvedUser.data.id);
+        loadStellen(resolvedUser.data.id);
+        loadVereine(resolvedUser.data.id);
+        setScreen("gemeinde-dashboard");
+        return;
+      }
+
+      if (resolvedUser.type === "admin") {
+        loadStellen();
+        loadVereine();
+        setScreen("admin-dashboard");
       }
     });
   }, []);
@@ -1533,18 +1520,25 @@ export default function App() {
 
   const handleAbmelden = async (bewId, terminId) => {
     try {
-      const { error: deleteBewError } = await supabase.from("bewerbungen").delete().eq("id", bewId);
+      const { error: deleteBewError } = await supabase
+        .from("bewerbungen")
+        .delete()
+        .eq("id", bewId);
       if (deleteBewError) throw deleteBewError;
 
-      const { error: incrementError } = await supabase.rpc("increment_plaetze", { termin_id: terminId });
+      const { error: incrementError } = await supabase.rpc("increment_plaetze", {
+        termin_id: terminId,
+      });
       if (incrementError) throw incrementError;
-      await supabase
+
+      const { error: freiwilligeUpdateError } = await supabase
         .from("freiwillige")
         .update({
           punkte: Math.max(0, (user.data.punkte || 0) - 10),
           aktionen: Math.max(0, (user.data.aktionen || 0) - 1),
         })
         .eq("id", user.data.id);
+      if (freiwilligeUpdateError) throw freiwilligeUpdateError;
       setUser((prev) => ({
         ...prev,
         data: {
@@ -2360,37 +2354,38 @@ export default function App() {
       {screen === "login" && (
         <LoginScreen
           onLogin={(type, data, gid) => {
-                        if (typeof window !== "undefined") {
+            if (typeof window !== "undefined") {
               sessionStorage.removeItem("civico_auth_flow");
             }
-            setLastRolePreference(type);
+            rememberPreferredRole(type === "organisation" ? "verein" : type);
             setUser({ type, data });
             setGemeindeId(gid);
-            if (type === "freiwilliger") {
-              loadStellen(gid, data?.plz, data?.umkreis);
-            } else {
-              loadStellen(gid);
-            }
-            loadVereine(gid);
             setHistory([]);
+
+            if (type === "freiwilliger") {
+              loadStellen(gid, data.plz, data.umkreis);
+              loadVereine(gid);
+              loadFollows(data.id);
+              loadNotifications(data.auth_id);
+              registerPush(data.id);
+              setScreen("home");
+              return;
+            }
+
+            loadStellen(gid);
+            loadVereine(gid);
+
             if (type === "verein" || type === "organisation") {
               setScreen("dashboard");
+              autoArchivieren(data.id);
+              loadVereinFollowers(data.id);
+              loadVereinNotifications(data.id);
             } else if (type === "gemeinde") {
               setScreen("gemeinde-dashboard");
             } else if (type === "admin") {
               setScreen("admin-dashboard");
             } else {
               setScreen("home");
-            }
-            if (type === "freiwilliger") {
-              loadFollows(data.id);
-              loadNotifications(data.auth_id);
-              registerPush(data.id);
-            }
-            if (type === "verein") {
-              autoArchivieren(data.id);
-              loadVereinFollowers(data.id);
-              loadVereinNotifications(data.id);
             }
           }}
           onBack={goBack}
@@ -2895,13 +2890,7 @@ export default function App() {
           onBack={goBack}
           onSave={async (stelleData, termineData) => {
             try {
-              const cleanStelle = buildCleanStellePayload(stelleData, {
-                verein_id: user.data.id,
-                gemeinde_id: user.data.gemeinde_id || null,
-                created_by_type: "verein",
-                archiviert: false,
-                aufrufe: 0,
-              });
+              const cleanStelle = buildCleanStellePayload(stelleData, user.data);
 
               const { data: stelle, error: stelleError } = await supabase
                 .from("stellen")
@@ -2909,23 +2898,32 @@ export default function App() {
                 .select()
                 .single();
 
-              if (stelleError) throw stelleError;
+              if (stelleError) {
+                console.error("Stelle fehlgeschlagen:", stelleError);
+                showToast("Fehler beim Speichern der Stelle.", "#E85C5C");
+                return;
+              }
 
-              const cleanTermine = buildCleanTerminPayloads(termineData, stelle?.id);
-              if (stelle && cleanTermine.length > 0) {
+              const cleanTermine = buildCleanTerminePayload(termineData, stelle.id);
+
+              if (cleanTermine.length > 0) {
                 const { error: termineError } = await supabase
                   .from("termine")
                   .insert(cleanTermine);
 
-                if (termineError) throw termineError;
+                if (termineError) {
+                  console.error("Termine fehlgeschlagen:", termineError);
+                  showToast("Stelle gespeichert, aber Termine nicht.", "#E85C5C");
+                  return;
+                }
               }
 
               showToast("✓ Stelle veröffentlicht!");
-              await loadStellen(gemeindeId);
+              await loadStellen(gemeindeId, user?.data?.plz, user?.data?.umkreis);
               goBack();
-            } catch (error) {
-              console.error("Stelle erstellen fehlgeschlagen:", error);
-              showToast(error?.message || "Fehler beim Speichern der Stelle.", "#E85C5C");
+            } catch (err) {
+              console.error("Unerwarteter Fehler beim Stelle speichern:", err);
+              showToast("Fehler beim Speichern.", "#E85C5C");
             }
           }}
         />
