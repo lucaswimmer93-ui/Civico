@@ -2130,7 +2130,7 @@ function VereinProfilEdit({
                   kontakt_email: kontaktEmail,
                   mitglieder: parseInt(mitglieder) || 0,
                   gegruendet: parseInt(gegruendet) || 0,
-                  logo: logoUrl || null,
+                  logo_url: logoUrl || null,
                 })
               }
               green
@@ -2762,11 +2762,19 @@ function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
   const [snapshots, setSnapshots] = useState([]);
   const [followerAnalyse, setFollowerAnalyse] = useState(null);
   const [stelleFollower, setStelleFollower] = useState([]);
+  const [wochenanalyse, setWochenanalyse] = useState([]);
+  const [wochenInsights, setWochenInsights] = useState({
+    besterTag: null,
+    besteQuote: 0,
+    schwaechsterTag: null,
+    schwaechsteQuote: 0,
+    topZusageTag: null,
+    topZusagen: 0,
+  });
   const [activeTab, setActiveTab] = useState("uebersicht");
 
   useEffect(() => {
     if (!vereinId) return;
-    // Snapshots
     supabase
       .from("analyse_snapshots")
       .select("*")
@@ -2775,7 +2783,7 @@ function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
       .then(({ data }) => {
         if (data) setSnapshots(data);
       });
-    // Follower Analyse
+
     supabase
       .from("verein_follower_analyse")
       .select("*")
@@ -2784,7 +2792,7 @@ function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
       .then(({ data }) => {
         if (data) setFollowerAnalyse(data);
       });
-    // Pro Stelle Follower
+
     supabase
       .from("stelle_follower_analyse")
       .select("*")
@@ -2792,50 +2800,114 @@ function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
       .then(({ data }) => {
         if (data) setStelleFollower(data);
       });
+
+    supabase.rpc("get_verein_wochenanalyse", {
+      p_verein_id: vereinId,
+      p_monate: 12,
+    }).then(({ data, error }) => {
+      if (error) {
+        console.error("Wochenanalyse konnte nicht geladen werden:", error);
+        return;
+      }
+
+      const rows = Array.isArray(data) ? data : [];
+      setWochenanalyse(rows);
+
+      if (!rows.length) {
+        setWochenInsights({
+          besterTag: null,
+          besteQuote: 0,
+          schwaechsterTag: null,
+          schwaechsteQuote: 0,
+          topZusageTag: null,
+          topZusagen: 0,
+        });
+        return;
+      }
+
+      const bestaRow = [...rows].sort((a, b) => {
+        if ((b.quote || 0) !== (a.quote || 0)) return (b.quote || 0) - (a.quote || 0);
+        return (b.erschienen || 0) - (a.erschienen || 0);
+      })[0];
+
+      const schwachRow = [...rows].sort((a, b) => {
+        if ((a.quote || 0) !== (b.quote || 0)) return (a.quote || 0) - (b.quote || 0);
+        return (b.no_show || 0) - (a.no_show || 0);
+      })[0];
+
+      const topZusageRow = [...rows].sort((a, b) => {
+        if ((b.zusagen || 0) !== (a.zusagen || 0)) return (b.zusagen || 0) - (a.zusagen || 0);
+        return (b.erschienen || 0) - (a.erschienen || 0);
+      })[0];
+
+      setWochenInsights({
+        besterTag: bestaRow?.wochentag || null,
+        besteQuote: Number(bestaRow?.quote || 0),
+        schwaechsterTag: schwachRow?.wochentag || null,
+        schwaechsteQuote: Number(schwachRow?.quote || 0),
+        topZusageTag: topZusageRow?.wochentag || null,
+        topZusagen: Number(topZusageRow?.zusagen || 0),
+      });
+    });
   }, [vereinId]);
+
+  const aktiveBewerbungen = (bewerbungen = []) =>
+    bewerbungen.filter((b) => {
+      const status = String(b?.status || "").toLowerCase();
+      return !["storniert", "abgesagt", "cancelled", "canceled"].includes(status);
+    });
 
   const gesamtAufrufe =
     stellen.reduce((s, x) => s + (x.aufrufe || 0), 0) +
     snapshots.reduce((s, x) => s + (x.aufrufe || 0), 0);
+
   const gesamtAnmeldungen =
     stellen.reduce(
-      (s, x) =>
-        s +
-        (x.termine || []).reduce((a, t) => a + (t.bewerbungen?.length || 0), 0),
+      (summe, stelle) =>
+        summe +
+        (stelle.termine || []).reduce(
+          (terminSumme, termin) => terminSumme + aktiveBewerbungen(termin.bewerbungen || []).length,
+          0
+        ),
       0
     ) + snapshots.reduce((s, x) => s + (x.anmeldungen || 0), 0);
+
   const gesamtErschienen =
     stellen.reduce(
-      (s, x) =>
-        s +
-        (x.termine || []).reduce(
-          (a, t) =>
-            a + (t.bewerbungen || []).filter((b) => bewerbungIstErschienen(b)).length,
+      (summe, stelle) =>
+        summe +
+        (stelle.termine || []).reduce(
+          (terminSumme, termin) =>
+            terminSumme + (termin.bewerbungen || []).filter((b) => bewerbungIstErschienen(b)).length,
           0
         ),
       0
     ) + snapshots.reduce((s, x) => s + (x.erschienen || 0), 0);
+
   const gesamtNichtErschienen =
     stellen.reduce(
-      (s, x) =>
-        s +
-        (x.termine || []).reduce(
-          (a, t) =>
-            a + (t.bewerbungen || []).filter((b) => bewerbungIstNoShow(b)).length,
+      (summe, stelle) =>
+        summe +
+        (stelle.termine || []).reduce(
+          (terminSumme, termin) =>
+            terminSumme + (termin.bewerbungen || []).filter((b) => bewerbungIstNoShow(b)).length,
           0
         ),
       0
     ) + snapshots.reduce((s, x) => s + (x.nicht_erschienen || 0), 0);
+
   const erscheinenQuote =
-    gesamtAnmeldungen > 0
-      ? Math.round((gesamtErschienen / gesamtAnmeldungen) * 100)
-      : 0;
+    gesamtAnmeldungen > 0 ? Math.round((gesamtErschienen / gesamtAnmeldungen) * 100) : 0;
+
+  const noShowQuote =
+    gesamtAnmeldungen > 0 ? Math.round((gesamtNichtErschienen / gesamtAnmeldungen) * 100) : 0;
+
+  const liveStellen = stellen.filter((stelle) => (stelle.termine || []).length > 0);
 
   return (
     <div>
       <Header title="Analyse" onBack={onBack} onLogout={logout} />
       <div style={{ padding: "16px 16px 100px" }}>
-        {/* Tab Bar */}
         <div
           style={{
             display: "flex",
@@ -2874,27 +2946,18 @@ function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
           ))}
         </div>
 
-        {/* ── ÜBERSICHT TAB ── */}
         {activeTab === "uebersicht" && (
           <div>
-            <SectionLabel>
-              Gesamtübersicht (inkl. gelöschte Stellen)
-            </SectionLabel>
+            <SectionLabel>Verlässlichkeit & Nachfrage</SectionLabel>
             <div
               style={{
                 display: "grid",
                 gridTemplateColumns: "1fr 1fr",
                 gap: 10,
-                marginBottom: 20,
+                marginBottom: 18,
               }}
             >
               {[
-                {
-                  label: "Aufrufe",
-                  val: gesamtAufrufe,
-                  icon: "👁️",
-                  color: "#5B9BD5",
-                },
                 {
                   label: "Anmeldungen",
                   val: gesamtAnmeldungen,
@@ -2908,10 +2971,16 @@ function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
                   color: "#6BAF7A",
                 },
                 {
-                  label: "Nicht erschienen",
+                  label: "No-Show",
                   val: gesamtNichtErschienen,
                   icon: "❌",
                   color: "#E85C5C",
+                },
+                {
+                  label: "Aufrufe",
+                  val: gesamtAufrufe,
+                  icon: "👁️",
+                  color: "#5B9BD5",
                 },
               ].map((item) => (
                 <div
@@ -2942,7 +3011,6 @@ function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
               ))}
             </div>
 
-            {/* Erschein-Quote Balken */}
             <div
               style={{
                 background: "#FAF7F2",
@@ -2959,10 +3027,8 @@ function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
                   marginBottom: 8,
                 }}
               >
-                <div
-                  style={{ fontSize: 13, fontWeight: "bold", color: "#2C2416" }}
-                >
-                  🎯 Erscheinensquote
+                <div style={{ fontSize: 13, fontWeight: "bold", color: "#2C2416" }}>
+                  🎯 Erscheinungsquote
                 </div>
                 <div
                   style={{
@@ -2979,9 +3045,7 @@ function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
                   {erscheinenQuote}%
                 </div>
               </div>
-              <div
-                style={{ height: 10, background: "#EDE8DE", borderRadius: 5 }}
-              >
+              <div style={{ height: 10, background: "#EDE8DE", borderRadius: 5 }}>
                 <div
                   style={{
                     height: "100%",
@@ -2999,136 +3063,197 @@ function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
               </div>
               <div style={{ fontSize: 11, color: "#8B7355", marginTop: 6 }}>
                 {erscheinenQuote >= 70
-                  ? "🌟 Sehr gut! Deine Freiwilligen sind zuverlässig."
+                  ? "🌟 Stark – deine Zusagen sind zuverlässig."
                   : erscheinenQuote >= 40
-                  ? "👍 Gut – noch Luft nach oben."
-                  : "⚠️ Viele Angemeldete erscheinen nicht."}
+                  ? "👍 Solide – aber da geht noch mehr."
+                  : "⚠️ Viele Zusagen werden nicht eingehalten."}
               </div>
             </div>
 
-            {/* Archivierte Stellen */}
-            {snapshots.length > 0 && (
-              <>
-                <SectionLabel>Gelöschte Stellen (Archiv)</SectionLabel>
-                {snapshots.map((s) => {
-                  const auslastung =
-                    s.anmeldungen > 0
-                      ? Math.round((s.erschienen / s.anmeldungen) * 100)
-                      : 0;
+            <div
+              style={{
+                background: "#FAF7F2",
+                borderRadius: 14,
+                padding: "16px",
+                marginBottom: 18,
+                border: "1px solid #E0D8C8",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  marginBottom: 8,
+                }}
+              >
+                <div style={{ fontSize: 13, fontWeight: "bold", color: "#2C2416" }}>
+                  ❌ No-Show-Quote
+                </div>
+                <div
+                  style={{
+                    fontSize: 16,
+                    fontWeight: "bold",
+                    color:
+                      noShowQuote <= 15
+                        ? "#3A7D44"
+                        : noShowQuote <= 35
+                        ? "#E8A87C"
+                        : "#E85C5C",
+                  }}
+                >
+                  {noShowQuote}%
+                </div>
+              </div>
+              <div style={{ height: 10, background: "#EDE8DE", borderRadius: 5 }}>
+                <div
+                  style={{
+                    height: "100%",
+                    width: `${Math.min(noShowQuote, 100)}%`,
+                    background:
+                      noShowQuote <= 15
+                        ? "#3A7D44"
+                        : noShowQuote <= 35
+                        ? "#E8A87C"
+                        : "#E85C5C",
+                    borderRadius: 5,
+                    transition: "width 0.5s",
+                  }}
+                />
+              </div>
+              <div style={{ fontSize: 11, color: "#8B7355", marginTop: 6 }}>
+                {noShowQuote <= 15
+                  ? "✅ Sehr wenig Ausfälle."
+                  : noShowQuote <= 35
+                  ? "⚠️ Ein paar Ausfälle – beobachte die Muster."
+                  : "🚨 Viele Ausfälle – hier lohnt sich Gegensteuerung."}
+              </div>
+            </div>
+
+            <SectionLabel>Durchschnittliche Woche (letzte 12 Monate)</SectionLabel>
+            <div
+              style={{
+                background: "#FAF7F2",
+                borderRadius: 14,
+                padding: "16px",
+                marginBottom: 16,
+                border: "1px solid #E0D8C8",
+              }}
+            >
+              {wochenanalyse.length === 0 ? (
+                <EmptyState
+                  icon="📅"
+                  text="Noch keine Wochenmuster verfügbar"
+                  sub="Sobald Termine bestätigt oder ausgewertet wurden, siehst du hier deine stärksten Tage."
+                />
+              ) : (
+                wochenanalyse.map((row) => {
+                  const quoteColor =
+                    row.quote >= 70 ? "#3A7D44" : row.quote >= 40 ? "#E8A87C" : "#E85C5C";
                   return (
                     <div
-                      key={s.id}
+                      key={row.wochentag_num}
                       style={{
-                        background: "#F0EBE0",
-                        borderRadius: 14,
-                        padding: "14px",
-                        marginBottom: 10,
-                        border: "1px solid #E0D8C8",
-                        opacity: 0.8,
+                        padding: "10px 0",
+                        borderBottom: row.wochentag_num === 7 ? "none" : "1px solid #F0EBE0",
                       }}
                     >
                       <div
                         style={{
                           display: "flex",
                           justifyContent: "space-between",
-                          marginBottom: 8,
+                          alignItems: "center",
+                          gap: 10,
+                          marginBottom: 6,
                         }}
                       >
-                        <div
-                          style={{
-                            fontWeight: "bold",
-                            fontSize: 14,
-                            color: "#8B7355",
-                          }}
-                        >
-                          {s.stelle_titel}
+                        <div style={{ fontSize: 13, fontWeight: "bold", color: "#2C2416", minWidth: 84 }}>
+                          {row.wochentag}
                         </div>
-                        <div style={{ fontSize: 10, color: "#C4B89A" }}>
-                          📦{" "}
-                          {new Date(s.erstellt_am).toLocaleDateString("de-DE")}
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                          <span style={{ fontSize: 11, background: "#EDE8DE", padding: "4px 8px", borderRadius: 6, color: "#2C2416" }}>
+                            ✅ {row.zusagen} Zusagen
+                          </span>
+                          <span style={{ fontSize: 11, background: "#E8F3EA", padding: "4px 8px", borderRadius: 6, color: "#3A7D44" }}>
+                            🎯 {row.erschienen} erschienen
+                          </span>
+                          <span style={{ fontSize: 11, background: "#FFF0F0", padding: "4px 8px", borderRadius: 6, color: "#E85C5C" }}>
+                            ❌ {row.no_show} No-Show
+                          </span>
+                          <span style={{ fontSize: 11, background: "#F0EBE0", padding: "4px 8px", borderRadius: 6, color: quoteColor, fontWeight: "bold" }}>
+                            📊 {Number(row.quote || 0).toFixed(0)}%
+                          </span>
                         </div>
                       </div>
-                      <div
-                        style={{ display: "flex", gap: 8, flexWrap: "wrap" }}
-                      >
-                        <span
+                      <div style={{ height: 8, background: "#EDE8DE", borderRadius: 4, overflow: "hidden" }}>
+                        <div
                           style={{
-                            fontSize: 11,
-                            background: "#EDE8DE",
-                            padding: "3px 8px",
-                            borderRadius: 6,
-                            color: "#5B9BD5",
+                            height: "100%",
+                            width: `${Math.min(Number(row.quote || 0), 100)}%`,
+                            background: quoteColor,
+                            borderRadius: 4,
                           }}
-                        >
-                          👁️ {s.aufrufe}
-                        </span>
-                        <span
-                          style={{
-                            fontSize: 11,
-                            background: "#EDE8DE",
-                            padding: "3px 8px",
-                            borderRadius: 6,
-                            color: "#3A7D44",
-                          }}
-                        >
-                          ✅ {s.anmeldungen}
-                        </span>
-                        <span
-                          style={{
-                            fontSize: 11,
-                            background: "#EDE8DE",
-                            padding: "3px 8px",
-                            borderRadius: 6,
-                            color: "#6BAF7A",
-                          }}
-                        >
-                          🎯 {s.erschienen}
-                        </span>
-                        <span
-                          style={{
-                            fontSize: 11,
-                            background: "#EDE8DE",
-                            padding: "3px 8px",
-                            borderRadius: 6,
-                            color: auslastung > 70 ? "#3A7D44" : "#E8A87C",
-                          }}
-                        >
-                          📊 {auslastung}%
-                        </span>
+                        />
                       </div>
                     </div>
                   );
-                })}
-              </>
-            )}
-          </div>
-        )}
+                })
+              )}
+            </div>
 
-        {/* ── FOLLOWER TAB ── */}
-        {activeTab === "follower" && (
-          <div>
-            {/* Gesamt Follower Stats */}
             <div
               style={{
-                background: "linear-gradient(135deg,#2C2416,#4A3C28)",
-                borderRadius: 16,
-                padding: "20px",
+                background: "#FAF7F2",
+                borderRadius: 14,
+                padding: "16px",
                 marginBottom: 16,
-                color: "#F4F0E8",
-                textAlign: "center",
+                border: "1px solid #E0D8C8",
               }}
             >
               <div
-                style={{ fontSize: 48, fontWeight: "bold", color: "#C8A96E" }}
+                style={{
+                  fontSize: 11,
+                  color: "#8B7355",
+                  letterSpacing: 2,
+                  textTransform: "uppercase",
+                  marginBottom: 10,
+                }}
               >
+                INSIGHTS
+              </div>
+              <div style={{ fontSize: 13, color: "#2C2416", lineHeight: 1.9 }}>
+                🥇 <b>{wochenInsights.besterTag || "-"}</b>
+                {wochenInsights.besterTag ? ` ist dein verlässlichster Tag (${Number(wochenInsights.besteQuote || 0).toFixed(0)}% Quote).` : ""}
+                <br />
+                📅 <b>{wochenInsights.topZusageTag || "-"}</b>
+                {wochenInsights.topZusageTag ? ` bringt dir die meiste Nachfrage (${wochenInsights.topZusagen} Zusagen).` : ""}
+                <br />
+                ⚠️ <b>{wochenInsights.schwaechsterTag || "-"}</b>
+                {wochenInsights.schwaechsterTag ? ` ist aktuell dein schwächster Tag (${Number(wochenInsights.schwaechsteQuote || 0).toFixed(0)}% Quote).` : ""}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === "follower" && (
+          <div>
+            <div
+              style={{
+                background: "linear-gradient(135deg,#2C2416,#4A3C28)",
+                borderRadius: 18,
+                padding: "28px 20px",
+                textAlign: "center",
+                color: "#F4F0E8",
+                marginBottom: 18,
+              }}
+            >
+              <div style={{ fontSize: 38, fontWeight: "bold", color: "#C8A96E", marginBottom: 4 }}>
                 {followerAnalyse?.gesamt_follower || 0}
               </div>
-              <div style={{ fontSize: 14, color: "#8B7355" }}>
+              <div style={{ fontSize: 14, color: "#C4B89A" }}>
                 Freiwillige folgen deinem Verein
               </div>
             </div>
 
-            {/* Follower vs Angemeldete */}
             <div
               style={{
                 background: "#FAF7F2",
@@ -3144,105 +3269,46 @@ function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
                   color: "#8B7355",
                   letterSpacing: 2,
                   textTransform: "uppercase",
-                  marginBottom: 12,
+                  marginBottom: 10,
                 }}
               >
                 ANGEMELDETE & FOLLOWER
               </div>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 1fr",
-                  gap: 10,
-                  marginBottom: 14,
-                }}
-              >
-                <div
-                  style={{
-                    background: "#3A7D4418",
-                    borderRadius: 10,
-                    padding: "12px",
-                    textAlign: "center",
-                  }}
-                >
-                  <div
-                    style={{
-                      fontSize: 22,
-                      fontWeight: "bold",
-                      color: "#3A7D44",
-                    }}
-                  >
-                    {followerAnalyse?.angemeldete_die_folgen || 0}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
+                <div style={{ background: "#E8F3EA", borderRadius: 12, padding: "14px", textAlign: "center" }}>
+                  <div style={{ fontSize: 30, fontWeight: "bold", color: "#3A7D44" }}>
+                    {followerAnalyse?.gesamt_follower || 0}
                   </div>
-                  <div style={{ fontSize: 11, color: "#8B7355", marginTop: 4 }}>
-                    Angemeldete die folgen
-                  </div>
+                  <div style={{ fontSize: 12, color: "#5C4A2A" }}>Angemeldete die folgen</div>
                 </div>
-                <div
-                  style={{
-                    background: "#E85C5C18",
-                    borderRadius: 10,
-                    padding: "12px",
-                    textAlign: "center",
-                  }}
-                >
-                  <div
-                    style={{
-                      fontSize: 22,
-                      fontWeight: "bold",
-                      color: "#E85C5C",
-                    }}
-                  >
-                    {followerAnalyse?.angemeldete_die_nicht_folgen || 0}
+                <div style={{ background: "#FFF0F0", borderRadius: 12, padding: "14px", textAlign: "center" }}>
+                  <div style={{ fontSize: 30, fontWeight: "bold", color: "#E85C5C" }}>
+                    {Math.max(0, (followerAnalyse?.gesamt_angemeldete || 0) - (followerAnalyse?.gesamt_follower || 0))}
                   </div>
-                  <div style={{ fontSize: 11, color: "#8B7355", marginTop: 4 }}>
-                    Angemeldete ohne Follow
-                  </div>
+                  <div style={{ fontSize: 12, color: "#5C4A2A" }}>Angemeldete ohne Follow</div>
                 </div>
               </div>
-              {/* Balken */}
+
               {(() => {
-                const gesamt =
-                  (followerAnalyse?.angemeldete_die_folgen || 0) +
-                  (followerAnalyse?.angemeldete_die_nicht_folgen || 0);
                 const quote =
-                  gesamt > 0
+                  followerAnalyse?.gesamt_angemeldete > 0
                     ? Math.round(
-                        ((followerAnalyse?.angemeldete_die_folgen || 0) /
-                          gesamt) *
+                        ((followerAnalyse?.gesamt_follower || 0) /
+                          followerAnalyse.gesamt_angemeldete) *
                           100
                       )
                     : 0;
                 return (
                   <div>
-                    <div
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        marginBottom: 4,
-                      }}
-                    >
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4 }}>
                       <div style={{ fontSize: 12, color: "#8B7355" }}>
                         Follow-Quote deiner Teilnehmer
                       </div>
-                      <div
-                        style={{
-                          fontSize: 14,
-                          fontWeight: "bold",
-                          color: quote >= 50 ? "#3A7D44" : "#E8A87C",
-                        }}
-                      >
+                      <div style={{ fontSize: 14, fontWeight: "bold", color: quote >= 50 ? "#3A7D44" : "#E8A87C" }}>
                         {quote}%
                       </div>
                     </div>
-                    <div
-                      style={{
-                        height: 10,
-                        background: "#EDE8DE",
-                        borderRadius: 5,
-                        overflow: "hidden",
-                      }}
-                    >
+                    <div style={{ height: 10, background: "#EDE8DE", borderRadius: 5, overflow: "hidden" }}>
                       <div
                         style={{
                           height: "100%",
@@ -3252,9 +3318,7 @@ function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
                         }}
                       />
                     </div>
-                    <div
-                      style={{ fontSize: 11, color: "#8B7355", marginTop: 6 }}
-                    >
+                    <div style={{ fontSize: 11, color: "#8B7355", marginTop: 6 }}>
                       {quote >= 70
                         ? "🌟 Super – die meisten Teilnehmer folgen dir!"
                         : quote >= 40
@@ -3266,7 +3330,6 @@ function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
               })()}
             </div>
 
-            {/* Gesamt Angemeldete */}
             <div
               style={{
                 background: "#FAF7F2",
@@ -3288,167 +3351,82 @@ function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
                 REICHWEITE
               </div>
               <div style={{ fontSize: 13, color: "#2C2416", lineHeight: 1.8 }}>
-                👥 <b>{followerAnalyse?.gesamt_angemeldete || 0}</b>{" "}
-                verschiedene Freiwillige haben sich je angemeldet
+                👥 <b>{followerAnalyse?.gesamt_angemeldete || 0}</b> verschiedene Freiwillige haben sich je angemeldet
                 <br />
-                💛 <b>{followerAnalyse?.gesamt_follower || 0}</b> davon folgen
-                deinem Verein
+                💛 <b>{followerAnalyse?.gesamt_follower || 0}</b> davon folgen deinem Verein
                 <br />
-                📣{" "}
-                <b>
-                  {Math.max(
-                    0,
-                    (followerAnalyse?.gesamt_angemeldete || 0) -
-                      (followerAnalyse?.gesamt_follower || 0)
-                  )}
-                </b>{" "}
-                erreichst du noch nicht über Follows
+                📣 <b>{Math.max(0, (followerAnalyse?.gesamt_angemeldete || 0) - (followerAnalyse?.gesamt_follower || 0))}</b> erreichst du noch nicht über Follows
               </div>
             </div>
           </div>
         )}
 
-        {/* ── STELLEN TAB ── */}
         {activeTab === "stellen" && (
           <div>
             <SectionLabel>Aktive Stellen</SectionLabel>
-            {stellen.length === 0 ? (
+            {liveStellen.length === 0 ? (
               <EmptyState
-                icon="📊"
-                text="Noch keine Daten"
-                sub="Erstelle Stellen um Statistiken zu sehen"
+                icon="🌱"
+                text="Noch keine aktiven Stellen"
+                sub="Sobald dein Verein neue Termine veröffentlicht, erscheinen sie hier mit Quote und Reichweite."
               />
             ) : (
-              stellen.map((s) => {
-                const anmeldungen = (s.termine || []).reduce(
-                  (a, t) => a + (t.bewerbungen?.length || 0),
+              liveStellen.map((stelle) => {
+                const anmeldungen = (stelle.termine || []).reduce(
+                  (summe, termin) => summe + aktiveBewerbungen(termin.bewerbungen || []).length,
                   0
                 );
-                const erschienen = (s.termine || []).reduce(
-                  (a, t) =>
-                    a +
-                    (t.bewerbungen || []).filter((b) => bewerbungIstErschienen(b)).length,
+                const erschienen = (stelle.termine || []).reduce(
+                  (summe, termin) => summe + (termin.bewerbungen || []).filter((b) => bewerbungIstErschienen(b)).length,
                   0
                 );
-                const auslastung =
-                  anmeldungen > 0
-                    ? Math.round((erschienen / anmeldungen) * 100)
-                    : 0;
-                const sfData = stelleFollower.find(
-                  (sf) => sf.stelle_id === s.id
-                );
-                const followQuote = sfData?.follow_quote_prozent || 0;
+                const auslastung = anmeldungen > 0 ? Math.round((erschienen / anmeldungen) * 100) : 0;
+                const sfData = stelleFollower.find((row) => row.stelle_id === stelle.id);
+                const followQuote = anmeldungen > 0 ? Math.round(((sfData?.anmeldungen_mit_follow || 0) / anmeldungen) * 100) : 0;
                 return (
                   <div
-                    key={s.id}
+                    key={stelle.id}
                     style={{
                       background: "#FAF7F2",
                       borderRadius: 14,
-                      padding: "14px",
+                      padding: "16px",
                       marginBottom: 12,
                       border: "1px solid #E0D8C8",
                     }}
                   >
-                    <div
-                      style={{
-                        fontWeight: "bold",
-                        fontSize: 14,
-                        marginBottom: 10,
-                      }}
-                    >
-                      {s.titel}
+                    <div style={{ fontSize: 18, fontWeight: "bold", color: "#2C2416", marginBottom: 10 }}>
+                      {stelle.titel}
                     </div>
-                    <div
-                      style={{
-                        display: "flex",
-                        gap: 8,
-                        flexWrap: "wrap",
-                        marginBottom: 10,
-                      }}
-                    >
-                      <span
-                        style={{
-                          fontSize: 11,
-                          background: "#EDE8DE",
-                          padding: "3px 8px",
-                          borderRadius: 6,
-                          color: "#5B9BD5",
-                        }}
-                      >
-                        👁️ {s.aufrufe || 0} Aufrufe
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+                      <span style={{ fontSize: 11, background: "#EDE8DE", padding: "3px 8px", borderRadius: 6, color: "#5B9BD5" }}>
+                        👁️ {stelle.aufrufe || 0} Aufrufe
                       </span>
-                      <span
-                        style={{
-                          fontSize: 11,
-                          background: "#EDE8DE",
-                          padding: "3px 8px",
-                          borderRadius: 6,
-                          color: "#3A7D44",
-                        }}
-                      >
+                      <span style={{ fontSize: 11, background: "#EDE8DE", padding: "3px 8px", borderRadius: 6, color: "#3A7D44" }}>
                         ✅ {anmeldungen} Anmeldungen
                       </span>
-                      <span
-                        style={{
-                          fontSize: 11,
-                          background: "#EDE8DE",
-                          padding: "3px 8px",
-                          borderRadius: 6,
-                          color: "#6BAF7A",
-                        }}
-                      >
+                      <span style={{ fontSize: 11, background: "#EDE8DE", padding: "3px 8px", borderRadius: 6, color: "#6BAF7A" }}>
                         🎯 {erschienen} Erschienen
                       </span>
-                      <span
-                        style={{
-                          fontSize: 11,
-                          background: "#EDE8DE",
-                          padding: "3px 8px",
-                          borderRadius: 6,
-                          color: auslastung > 70 ? "#3A7D44" : "#E8A87C",
-                        }}
-                      >
+                      <span style={{ fontSize: 11, background: "#EDE8DE", padding: "3px 8px", borderRadius: 6, color: auslastung > 70 ? "#3A7D44" : "#E8A87C" }}>
                         📊 {auslastung}% Quote
                       </span>
                     </div>
-                    {/* Follow Quote pro Stelle */}
                     {anmeldungen > 0 && (
                       <div>
-                        <div
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            marginBottom: 3,
-                          }}
-                        >
+                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
                           <div style={{ fontSize: 11, color: "#8B7355" }}>
-                            👥 {sfData?.anmeldungen_mit_follow || 0} von{" "}
-                            {anmeldungen} Teilnehmern folgen dir
+                            👥 {sfData?.anmeldungen_mit_follow || 0} von {anmeldungen} Teilnehmern folgen dir
                           </div>
-                          <div
-                            style={{
-                              fontSize: 11,
-                              fontWeight: "bold",
-                              color: followQuote >= 50 ? "#3A7D44" : "#E8A87C",
-                            }}
-                          >
+                          <div style={{ fontSize: 11, fontWeight: "bold", color: followQuote >= 50 ? "#3A7D44" : "#E8A87C" }}>
                             {followQuote}%
                           </div>
                         </div>
-                        <div
-                          style={{
-                            height: 6,
-                            background: "#EDE8DE",
-                            borderRadius: 3,
-                            overflow: "hidden",
-                          }}
-                        >
+                        <div style={{ height: 6, background: "#EDE8DE", borderRadius: 3, overflow: "hidden" }}>
                           <div
                             style={{
                               height: "100%",
                               width: `${followQuote}%`,
-                              background:
-                                "linear-gradient(90deg,#C8A96E,#E8A87C)",
+                              background: "linear-gradient(90deg,#C8A96E,#E8A87C)",
                               borderRadius: 3,
                             }}
                           />
