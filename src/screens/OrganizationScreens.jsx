@@ -13,12 +13,6 @@ const bewerbungIstNoShow = (bewerbung) =>
 const bewerbungIstOffen = (bewerbung) =>
   !bewerbungIstErschienen(bewerbung) && !bewerbungIstNoShow(bewerbung);
 
-const bewerbungIstAktiv = (bewerbung) => {
-  if (!bewerbung) return false;
-  const status = String(bewerbung.status || "").toLowerCase();
-  return !["storniert", "abgesagt", "cancelled", "canceled"].includes(status);
-};
-
 
 function VereinDashboard({
   user,
@@ -467,7 +461,7 @@ function VereinDashboard({
         ) : (
           meineStellen.map((s) => {
             const gesamtAnmeldungen = (s.termine || []).reduce(
-              (sum, t) => sum + ((t.bewerbungen || []).filter(bewerbungIstAktiv).length || 0),
+              (sum, t) => sum + (t.bewerbungen?.length || 0),
               0
             );
             return (
@@ -857,14 +851,14 @@ function VereinStelleDetail({
 
               {/* Angemeldete */}
               <SectionLabel>
-                Angemeldete ({(t.bewerbungen || []).filter(bewerbungIstAktiv).length})
+                Angemeldete ({(t.bewerbungen || []).length})
               </SectionLabel>
-              {(t.bewerbungen || []).filter(bewerbungIstAktiv).length === 0 ? (
+              {(t.bewerbungen || []).length === 0 ? (
                 <div style={{ fontSize: 12, color: "#8B7355" }}>
                   Noch niemand angemeldet.
                 </div>
               ) : (
-                (t.bewerbungen || []).filter(bewerbungIstAktiv).map((b) => (
+                (t.bewerbungen || []).map((b) => (
                   <div
                     key={b.id}
                     style={{
@@ -2777,7 +2771,7 @@ function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
       .from("analyse_snapshots")
       .select("*")
       .eq("verein_id", vereinId)
-      .order("erstellt_am", { ascending: false })
+      .order("created_at", { ascending: false })
       .then(({ data }) => {
         if (data) setSnapshots(data);
       });
@@ -3051,7 +3045,7 @@ function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
                         </div>
                         <div style={{ fontSize: 10, color: "#C4B89A" }}>
                           📦{" "}
-                          {new Date(s.created_at || s.erstellt_am).toLocaleDateString("de-DE")}
+                          {new Date(s.erstellt_am).toLocaleDateString("de-DE")}
                         </div>
                       </div>
                       <div
