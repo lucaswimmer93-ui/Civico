@@ -93,6 +93,24 @@ const getInitialScreenFromPath = () => {
   return "home";
 };
 
+const LAST_ROLE_STORAGE_KEY = "civico_last_role";
+
+const setStoredLastRole = (role) => {
+  if (typeof window === "undefined") return;
+  if (!role) return;
+  window.localStorage.setItem(LAST_ROLE_STORAGE_KEY, role);
+};
+
+const getStoredLastRole = () => {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(LAST_ROLE_STORAGE_KEY);
+};
+
+const clearStoredLastRole = () => {
+  if (typeof window === "undefined") return;
+  window.localStorage.removeItem(LAST_ROLE_STORAGE_KEY);
+};
+
 function AuthCallbackScreen() {
   useEffect(() => {
     const handleAuth = async () => {
@@ -699,6 +717,7 @@ export default function App() {
     if (typeof window !== "undefined") {
       sessionStorage.removeItem("civico_auth_flow");
     }
+    clearStoredLastRole();
     setUser(null);
     setHistory([]);
     setScreen("home");
@@ -1109,69 +1128,97 @@ export default function App() {
       }
 
       if (session) {
-        const { data: profil } = await supabase
-          .from("freiwillige")
-          .select("*")
-          .eq("auth_id", session.user.id)
-          .maybeSingle();
+        const preferredRole = getStoredLastRole();
+        const roleLoaders = {
+          freiwilliger: async () => {
+            const { data } = await supabase
+              .from("freiwillige")
+              .select("*")
+              .eq("auth_id", session.user.id)
+              .maybeSingle();
+            return data ? { type: "freiwilliger", data } : null;
+          },
+          verein: async () => {
+            const { data } = await supabase
+              .from("vereine")
+              .select("*")
+              .eq("auth_id", session.user.id)
+              .maybeSingle();
+            return data ? { type: "verein", data } : null;
+          },
+          gemeinde: async () => {
+            const { data } = await supabase
+              .from("gemeinden")
+              .select("*")
+              .eq("auth_id", session.user.id)
+              .maybeSingle();
+            return data ? { type: "gemeinde", data } : null;
+          },
+          admin: async () => {
+            const { data } = await supabase
+              .from("admins")
+              .select("*")
+              .eq("auth_id", session.user.id)
+              .maybeSingle();
+            return data ? { type: "admin", data } : null;
+          },
+        };
 
-        if (profil) {
-          setUser({ type: "freiwilliger", data: profil });
-          setGemeindeId(profil.gemeinde_id);
-          loadStellen(profil.gemeinde_id, profil.plz, profil.umkreis);
-          loadVereine(profil.gemeinde_id);
-          loadFollows(profil.id);
-          loadNotifications(profil.auth_id);
-          registerPush(profil.id);
-          setScreen("home");
-          return;
+        const orderedRoles = [
+          ...(preferredRole && roleLoaders[preferredRole] ? [preferredRole] : []),
+          ...["verein", "gemeinde", "admin", "freiwilliger"].filter((role) => role !== preferredRole),
+        ];
+
+        let resolvedUser = null;
+
+        for (const role of orderedRoles) {
+          resolvedUser = await roleLoaders[role]();
+          if (resolvedUser) break;
         }
 
-        const { data: verein } = await supabase
-          .from("vereine")
-          .select("*")
-          .eq("auth_id", session.user.id)
-          .maybeSingle();
+        if (resolvedUser) {
+          setStoredLastRole(resolvedUser.type);
+          setUser(resolvedUser);
 
-        if (verein) {
-          setUser({ type: "verein", data: verein });
-          setGemeindeId(verein.gemeinde_id);
-          loadStellen(verein.gemeinde_id);
-          loadVereine(verein.gemeinde_id);
-          setScreen("dashboard");
-          autoArchivieren(verein.id);
-          loadVereinFollowers(verein.id);
-          loadVereinNotifications(verein.id);
-          return;
-        }
+          if (resolvedUser.type === "freiwilliger") {
+            const profil = resolvedUser.data;
+            setGemeindeId(profil.gemeinde_id);
+            loadStellen(profil.gemeinde_id, profil.plz, profil.umkreis);
+            loadVereine(profil.gemeinde_id);
+            loadFollows(profil.id);
+            loadNotifications(profil.auth_id);
+            registerPush(profil.id);
+            setScreen("home");
+            return;
+          }
 
-        const { data: gemeinde } = await supabase
-          .from("gemeinden")
-          .select("*")
-          .eq("auth_id", session.user.id)
-          .maybeSingle();
+          if (resolvedUser.type === "verein") {
+            const verein = resolvedUser.data;
+            setGemeindeId(verein.gemeinde_id);
+            loadStellen(verein.gemeinde_id);
+            loadVereine(verein.gemeinde_id);
+            setScreen("dashboard");
+            autoArchivieren(verein.id);
+            loadVereinFollowers(verein.id);
+            loadVereinNotifications(verein.id);
+            return;
+          }
 
-        if (gemeinde) {
-          setUser({ type: "gemeinde", data: gemeinde });
-          setGemeindeId(gemeinde.id);
-          loadStellen(gemeinde.id);
-          loadVereine(gemeinde.id);
-          setScreen("gemeinde-dashboard");
-          return;
-        }
+          if (resolvedUser.type === "gemeinde") {
+            const gemeinde = resolvedUser.data;
+            setGemeindeId(gemeinde.id);
+            loadStellen(gemeinde.id);
+            loadVereine(gemeinde.id);
+            setScreen("gemeinde-dashboard");
+            return;
+          }
 
-        const { data: admin } = await supabase
-          .from("admins")
-          .select("*")
-          .eq("auth_id", session.user.id)
-          .maybeSingle();
-
-        if (admin) {
-          setUser({ type: "admin", data: admin });
-          loadStellen();
-          loadVereine();
-          setScreen("admin-dashboard");
-          return;
+          if (resolvedUser.type === "admin") {
+            loadStellen();
+            loadVereine();
+            setScreen("admin-dashboard");
+            return;
+          }
         }
       }
     });
@@ -1411,7 +1458,7 @@ export default function App() {
           }
         }
       }
-      await loadStellen(gemeindeId);
+      await loadStellen(gemeindeId, user?.data?.plz, user?.data?.umkreis);
       await reloadSelected(stelleId);
     } catch (err) {
       showToast("Fehler beim Buchen.", "#E85C5C");
@@ -2256,6 +2303,7 @@ export default function App() {
                         if (typeof window !== "undefined") {
               sessionStorage.removeItem("civico_auth_flow");
             }
+            setStoredLastRole(type);
             setUser({ type, data });
             setGemeindeId(gid);
             if (type === "freiwilliger") {
