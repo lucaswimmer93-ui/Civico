@@ -2782,64 +2782,19 @@ export default function App() {
           verein={user.data}
           onBack={goBack}
           onSave={async (stelleData, termineData) => {
-            try {
-              const cleanStelle = {
-                titel: stelleData.titel,
-                beschreibung: stelleData.beschreibung,
-                kategorie: stelleData.kategorie,
-                ort: stelleData.ort ?? stelleData.standort ?? null,
-                plz: stelleData.plz ?? null,
-                standort: stelleData.standort ?? null,
-                treffpunkt: stelleData.treffpunkt ?? stelleData.standort ?? null,
-                required_skills: stelleData.required_skills ?? [],
-                verein_id: user.data.id,
-                gemeinde_id: user.data.gemeinde_id ?? null,
-                archiviert: false,
-                aufrufe: 0,
-              };
-
-              const { data: stelle, error: stelleError } = await supabase
-                .from("stellen")
-                .insert(cleanStelle)
-                .select()
-                .single();
-
-              if (stelleError) {
-                console.error("STELLE INSERT FEHLER:", stelleError, cleanStelle);
-                showToast(`Fehler beim Speichern: ${stelleError.message}`, "#E85C5C");
-                return;
-              }
-
-              if (stelle && termineData.length > 0) {
-                const cleanTermine = termineData
-                  .filter((t) => t.datum)
-                  .map((t) => ({
-                    stelle_id: stelle.id,
-                    datum: t.datum,
-                    startzeit: t.startzeit,
-                    endzeit: t.endzeit || null,
-                    freie_plaetze: t.freie_plaetze ?? t.gesamt_plaetze ?? t.plaetze ?? 0,
-                    gesamt_plaetze: t.gesamt_plaetze ?? t.freie_plaetze ?? t.plaetze ?? 0,
-                  }));
-
-                const { error: termineError } = await supabase
-                  .from("termine")
-                  .insert(cleanTermine);
-
-                if (termineError) {
-                  console.error("TERMINE INSERT FEHLER:", termineError, cleanTermine);
-                  showToast(`Termine konnten nicht gespeichert werden: ${termineError.message}`, "#E85C5C");
-                  return;
-                }
-              }
-
-              showToast("✓ Stelle veröffentlicht!");
-              await loadStellen(gemeindeId);
-              goBack();
-            } catch (err) {
-              console.error("SAVE ERROR:", err);
-              showToast("Fehler beim Speichern.", "#E85C5C");
-            }
+            const { data: stelle } = await supabase
+              .from("stellen")
+              .insert({ ...stelleData, verein_id: user.data.id, aufrufe: 0 })
+              .select()
+              .single();
+            if (stelle && termineData.length > 0)
+              await supabase
+                .from("termine")
+                .insert(
+                  termineData.map((t) => ({ ...t, stelle_id: stelle.id }))
+                );
+            showToast("✓ Stelle veröffentlicht!");            await loadStellen(gemeindeId);
+            goBack();
           }}
         />
       )}
