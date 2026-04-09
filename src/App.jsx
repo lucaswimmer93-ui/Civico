@@ -952,6 +952,51 @@ export default function App() {
     setTimeout(() => setToast(null), 3000);
   };
 
+  const sanitizeStellePayload = (raw = {}, extras = {}) => {
+    const clean = {
+      titel: raw.titel ?? null,
+      beschreibung: raw.beschreibung ?? null,
+      kategorie: raw.kategorie ?? null,
+      ort: raw.ort ?? raw.standort ?? null,
+      treffpunkt: raw.treffpunkt ?? raw.standort ?? raw.ort ?? null,
+      plz: raw.plz ?? null,
+      verein_id: raw.verein_id ?? null,
+      gemeinde_id: raw.gemeinde_id ?? null,
+      created_by_type: raw.created_by_type ?? null,
+      archiviert: typeof raw.archiviert === "boolean" ? raw.archiviert : false,
+      aufrufe: typeof raw.aufrufe === "number" ? raw.aufrufe : 0,
+    };
+
+    return Object.fromEntries(
+      Object.entries({ ...clean, ...extras }).filter(([, value]) => value !== undefined)
+    );
+  };
+
+  const sanitizeTerminePayload = (termine = [], stelleId) =>
+    (termine || [])
+      .filter((t) => t?.datum && t?.startzeit)
+      .map((t) =>
+        Object.fromEntries(
+          Object.entries({
+            stelle_id: stelleId,
+            datum: t.datum,
+            startzeit: t.startzeit,
+            endzeit: t.endzeit || null,
+            freie_plaetze:
+              t.freie_plaetze ??
+              t.gesamt_plaetze ??
+              t.plaetze ??
+              5,
+            gesamt_plaetze:
+              t.gesamt_plaetze ??
+              t.freie_plaetze ??
+              t.plaetze ??
+              5,
+          }).filter(([, value]) => value !== undefined)
+        )
+      );
+
+
   const loadStellen = async (
     gemeinde_id = null,
     plz = null,
@@ -2782,19 +2827,48 @@ export default function App() {
           verein={user.data}
           onBack={goBack}
           onSave={async (stelleData, termineData) => {
-            const { data: stelle } = await supabase
-              .from("stellen")
-              .insert({ ...stelleData, verein_id: user.data.id, aufrufe: 0 })
-              .select()
-              .single();
-            if (stelle && termineData.length > 0)
-              await supabase
-                .from("termine")
-                .insert(
-                  termineData.map((t) => ({ ...t, stelle_id: stelle.id }))
-                );
-            showToast("✓ Stelle veröffentlicht!");            await loadStellen(gemeindeId);
-            goBack();
+            try {
+              const cleanStelle = sanitizeStellePayload(stelleData, {
+                verein_id: user.data.id,
+                gemeinde_id: user?.data?.gemeinde_id ?? null,
+                created_by_type: "verein",
+                archiviert: false,
+                aufrufe: 0,
+              });
+
+              console.log("cleanStelle insert:", cleanStelle);
+
+              const { data: stelle, error: stelleError } = await supabase
+                .from("stellen")
+                .insert(cleanStelle)
+                .select()
+                .single();
+
+              if (stelleError) {
+                console.error("stellen insert failed:", stelleError, cleanStelle);
+                throw stelleError;
+              }
+
+              const cleanTermine = sanitizeTerminePayload(termineData, stelle.id);
+
+              if (cleanTermine.length > 0) {
+                const { error: termineError } = await supabase
+                  .from("termine")
+                  .insert(cleanTermine);
+
+                if (termineError) {
+                  console.error("termine insert failed:", termineError, cleanTermine);
+                  throw termineError;
+                }
+              }
+
+              showToast("✓ Stelle veröffentlicht!");
+              await loadStellen(gemeindeId, user?.data?.plz, user?.data?.umkreis);
+              goBack();
+            } catch (error) {
+              console.error("Stelle erstellen fehlgeschlagen:", error);
+              showToast("Fehler beim Speichern der Stelle.", "#E85C5C");
+            }
           }}
         />
       )}
@@ -2856,10 +2930,24 @@ export default function App() {
             verein={user.data}
             onBack={goBack}
             onSave={async (stelleData, termineData) => {
-              await supabase
+              const cleanStelleUpdate = sanitizeStellePayload(stelleData, {
+                verein_id: selected.verein_id,
+                gemeinde_id: selected.gemeinde_id ?? null,
+                created_by_type: selected.created_by_type ?? "verein",
+                archiviert:
+                  typeof stelleData?.archiviert === "boolean"
+                    ? stelleData.archiviert
+                    : selected.archiviert ?? false,
+                aufrufe:
+                  typeof selected.aufrufe === "number" ? selected.aufrufe : 0,
+              });
+
+              const { error: stelleUpdateError } = await supabase
                 .from("stellen")
-                .update(stelleData)
+                .update(cleanStelleUpdate)
                 .eq("id", selected.id);
+
+              if (stelleUpdateError) throw stelleUpdateError;
               // Abgesagte Termine löschen + Freiwillige benachrichtigen
               const abgesagt = termineData.filter((t) => t.absagen && t.id);
               for (const t of abgesagt) {
