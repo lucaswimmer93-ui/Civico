@@ -13,6 +13,12 @@ const bewerbungIstNoShow = (bewerbung) =>
 const bewerbungIstOffen = (bewerbung) =>
   !bewerbungIstErschienen(bewerbung) && !bewerbungIstNoShow(bewerbung);
 
+const bewerbungIstAktiv = (bewerbung) => {
+  if (!bewerbung) return false;
+  const status = String(bewerbung.status || "").toLowerCase();
+  return !["storniert", "abgesagt", "cancelled", "canceled"].includes(status);
+};
+
 
 function VereinDashboard({
   user,
@@ -461,7 +467,8 @@ function VereinDashboard({
         ) : (
           meineStellen.map((s) => {
             const gesamtAnmeldungen = (s.termine || []).reduce(
-              (sum, t) => sum + (t.bewerbungen?.length || 0),
+              (sum, t) =>
+                sum + ((t.bewerbungen || []).filter(bewerbungIstAktiv).length || 0),
               0
             );
             return (
@@ -765,6 +772,7 @@ function VereinStelleDetail({
         {alleTermine.map((t) => {
           const istVergangen = !isTerminAktuell(t);
           const nochNichtGestartet = isTerminNochNichtGestartet(t);
+          const aktiveBewerbungen = (t.bewerbungen || []).filter(bewerbungIstAktiv);
 
           return (
             <div
@@ -851,14 +859,14 @@ function VereinStelleDetail({
 
               {/* Angemeldete */}
               <SectionLabel>
-                Angemeldete ({(t.bewerbungen || []).length})
+                Angemeldete ({aktiveBewerbungen.length})
               </SectionLabel>
-              {(t.bewerbungen || []).length === 0 ? (
+              {aktiveBewerbungen.length === 0 ? (
                 <div style={{ fontSize: 12, color: "#8B7355" }}>
                   Noch niemand angemeldet.
                 </div>
               ) : (
-                (t.bewerbungen || []).map((b) => (
+                aktiveBewerbungen.map((b) => (
                   <div
                     key={b.id}
                     style={{
