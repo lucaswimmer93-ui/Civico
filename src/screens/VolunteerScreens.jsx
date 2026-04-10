@@ -1167,21 +1167,64 @@ function FreiwilligerProfil({
   const jetzt = new Date();
 
   useEffect(() => {
-    supabase
-      .from("warteliste")
-      .select(
-        "*, stellen(titel, kategorie, ort), termine(datum, startzeit, endzeit)"
-      )
-      .eq("freiwilliger_id", user.data.id)
-      .order("created_at", { ascending: true })
-      .then(({ data }) => {
-        if (data) setMeineWarteliste(data);
+    let active = true;
+
+    const loadMeineWarteliste = async () => {
+      const { data, error } = await supabase
+        .from("warteliste")
+        .select("*")
+        .eq("freiwilliger_id", user.data.id)
+        .order("created_at", { ascending: true });
+
+      if (error) {
+        console.error("Warteliste laden fehlgeschlagen:", error);
+        if (active) setMeineWarteliste([]);
+        return;
+      }
+
+      if (!active) return;
+
+      const enriched = (data || []).map((entry) => {
+        const stelle = stellen.find((s) => s.id === entry.stelle_id) || null;
+        const termin =
+          stelle?.termine?.find((t) => t.id === entry.termin_id) || null;
+
+        return {
+          ...entry,
+          stellen: stelle
+            ? {
+                titel: stelle.titel,
+                kategorie: stelle.kategorie,
+                ort: stelle.ort,
+              }
+            : null,
+          termine: termin
+            ? {
+                datum: termin.datum,
+                startzeit: termin.startzeit,
+                endzeit: termin.endzeit,
+              }
+            : null,
+        };
       });
-  }, []);
+
+      setMeineWarteliste(enriched);
+    };
+
+    loadMeineWarteliste();
+
+    return () => {
+      active = false;
+    };
+  }, [user.data.id, stellen]);
 
   const meineStellen = stellen.filter((s) =>
     (s.termine || []).some((t) =>
-      (t.bewerbungen || []).some((b) => b.freiwilliger_id === user.data.id)
+      (t.bewerbungen || []).some(
+        (b) =>
+          b.freiwilliger_id === user.data.id &&
+          bewerbungIstAktiv(b)
+      )
     )
   );
 
@@ -1219,7 +1262,9 @@ function FreiwilligerProfil({
   const aktiveStellen = meineStellen.filter((s) =>
     (s.termine || []).some((t) => {
       const hatBew = (t.bewerbungen || []).some(
-        (b) => b.freiwilliger_id === user.data.id
+        (b) =>
+          b.freiwilliger_id === user.data.id &&
+          bewerbungIstAktiv(b)
       );
       return hatBew && isTerminAktuell(t);
     })
@@ -1655,7 +1700,22 @@ function FreiwilligerProfil({
                           gap: 6,
                         }}
                       >
-                        {verein.logo || "🏢"} {verein.name}
+                        {getVereinLogoSrc(verein) ? (
+                          <img
+                            src={getVereinLogoSrc(verein)}
+                            alt={verein.name || "Verein"}
+                            style={{
+                              width: 18,
+                              height: 18,
+                              borderRadius: "50%",
+                              objectFit: "cover",
+                              flexShrink: 0,
+                            }}
+                          />
+                        ) : (
+                          <span style={{ flexShrink: 0 }}>🏢</span>
+                        )}{" "}
+                        {verein.name}
                         <span
                           onClick={(e) => {
                             e.stopPropagation();
@@ -1740,7 +1800,11 @@ function FreiwilligerProfil({
               const meinTermin = (s.termine || [])
                 .flatMap((t) =>
                   (t.bewerbungen || [])
-                    .filter((b) => b.freiwilliger_id === user.data.id)
+                    .filter(
+                      (b) =>
+                        b.freiwilliger_id === user.data.id &&
+                        bewerbungIstAktiv(b)
+                    )
                     .map((b) => ({ ...b, termin: t }))
                 )
                 .find(Boolean);
@@ -2123,7 +2187,9 @@ function FreiwilligerProfil({
             {(terminWechselStelle.termine || [])
               .filter((t) => {
                 const meinTermin = (t.bewerbungen || []).find(
-                  (b) => b.freiwilliger_id === user.data.id
+                  (b) =>
+                    b.freiwilliger_id === user.data.id &&
+                    bewerbungIstAktiv(b)
                 );
                 return (
                   !meinTermin &&
@@ -2138,7 +2204,11 @@ function FreiwilligerProfil({
                     const meinAlterTermin = (terminWechselStelle.termine || [])
                       .flatMap((x) =>
                         (x.bewerbungen || [])
-                          .filter((b) => b.freiwilliger_id === user.data.id)
+                          .filter(
+                            (b) =>
+                              b.freiwilliger_id === user.data.id &&
+                              bewerbungIstAktiv(b)
+                          )
                           .map((b) => ({ ...b, termin: x }))
                       )
                       .find(Boolean);
