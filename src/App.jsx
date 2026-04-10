@@ -2608,8 +2608,8 @@ export default function App() {
                   p_stelle_id: nextOnList.stelle_id,
                   p_termin_id: terminId,
                   p_freiwilliger_id: nextOnList.freiwilliger_id,
-                  p_name: nextOnList.freiwilliger_name,
-                  p_email: nextOnList.freiwilliger_email,
+                  p_name: nextOnList.name,
+                  p_email: nextOnList.email,
                 });
 
                 if (erfolg) {
