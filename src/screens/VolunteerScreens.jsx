@@ -40,9 +40,11 @@ const getTerminPlaetze = (termin) => {
   const aktiveBewerbungen = (termin?.bewerbungen || []).filter(bewerbungIstAktiv).length;
   const freiePlaetzeAusDb = termin?.freie_plaetze;
 
-  const freiePlaetze = Number.isFinite(Number(freiePlaetzeAusDb))
-    ? Math.max(0, Number(freiePlaetzeAusDb))
-    : Math.max(0, gesamtPlaetze - aktiveBewerbungen);
+  const freiePlaetze = gesamtPlaetze > 0
+    ? Math.max(0, gesamtPlaetze - aktiveBewerbungen)
+    : Number.isFinite(Number(freiePlaetzeAusDb))
+      ? Math.max(0, Number(freiePlaetzeAusDb))
+      : 0;
 
   const angemeldet = gesamtPlaetze > 0
     ? Math.min(gesamtPlaetze, aktiveBewerbungen)
@@ -52,7 +54,7 @@ const getTerminPlaetze = (termin) => {
     gesamtPlaetze,
     freiePlaetze,
     angemeldet,
-    belegt: freiePlaetze <= 0,
+    belegt: gesamtPlaetze > 0 ? angemeldet >= gesamtPlaetze : freiePlaetze <= 0,
   };
 };
 
@@ -1270,6 +1272,37 @@ function FreiwilligerProfil({
     })
   );
 
+  const getMeineBewerbungenFuerStelle = (stelle) =>
+    (stelle?.termine || []).flatMap((termin) =>
+      (termin?.bewerbungen || [])
+        .filter((bewerbung) => bewerbung?.freiwilliger_id === user.data.id)
+        .map((bewerbung) => ({ ...bewerbung, termin }))
+    );
+
+  const getMeineAktiveBewerbungFuerStelle = (stelle) =>
+    getMeineBewerbungenFuerStelle(stelle).find((bewerbung) =>
+      bewerbungIstAktiv(bewerbung)
+    ) || null;
+
+  const terminHatIrgendeineMeineBewerbung = (stelle, terminId) =>
+    getMeineBewerbungenFuerStelle(stelle).some(
+      (bewerbung) => bewerbung?.termin?.id === terminId
+    );
+
+  const getWechselbareTermine = (stelle) => {
+    const aktuellerTermin = getMeineAktiveBewerbungFuerStelle(stelle)?.termin?.id;
+
+    return (stelle?.termine || []).filter((termin) => {
+      const { freiePlaetze } = getTerminPlaetze(termin);
+      return (
+        termin?.id !== aktuellerTermin &&
+        freiePlaetze > 0 &&
+        isTerminNochNichtGestartet(termin) &&
+        !terminHatIrgendeineMeineBewerbung(stelle, termin.id)
+      );
+    });
+  };
+
   return (
     <div>
       <div
@@ -1857,12 +1890,7 @@ function FreiwilligerProfil({
                       )}
                     </div>
                   </div>
-                  {(s.termine || []).filter(
-                    (t) =>
-                      t.id !== meinTermin?.termin?.id &&
-                      (t.freie_plaetze || 0) > 0 &&
-                      isTerminNochNichtGestartet(t)
-                  ).length > 0 && (
+                  {getWechselbareTermine(s).length > 0 && (
                     <button
                       onClick={() => setTerminWechselStelle(s)}
                       style={{
@@ -2184,34 +2212,14 @@ function FreiwilligerProfil({
             >
               {t.neuenTerminWaehlen}
             </div>
-            {(terminWechselStelle.termine || [])
-              .filter((t) => {
-                const meinTermin = (t.bewerbungen || []).find(
-                  (b) =>
-                    b.freiwilliger_id === user.data.id &&
-                    bewerbungIstAktiv(b)
-                );
-                return (
-                  !meinTermin &&
-                  (t.freie_plaetze || 0) > 0 &&
-                  isTerminNochNichtGestartet(t)
-                );
-              })
-              .map((t) => (
+            {getWechselbareTermine(terminWechselStelle).map((terminOption) => {
+              const { freiePlaetze } = getTerminPlaetze(terminOption);
+              const meinAlterTermin = getMeineAktiveBewerbungFuerStelle(terminWechselStelle);
+
+              return (
                 <button
-                  key={t.id}
+                  key={terminOption.id}
                   onClick={async () => {
-                    const meinAlterTermin = (terminWechselStelle.termine || [])
-                      .flatMap((x) =>
-                        (x.bewerbungen || [])
-                          .filter(
-                            (b) =>
-                              b.freiwilliger_id === user.data.id &&
-                              bewerbungIstAktiv(b)
-                          )
-                          .map((b) => ({ ...b, termin: x }))
-                      )
-                      .find(Boolean);
                     if (meinAlterTermin) {
                       await supabase
                         .from("bewerbungen")
@@ -2226,7 +2234,7 @@ function FreiwilligerProfil({
                     }
                     await supabase.rpc("book_slot", {
                       p_stelle_id: terminWechselStelle.id,
-                      p_termin_id: t.id,
+                      p_termin_id: terminOption.id,
                       p_freiwilliger_id: user.data.id,
                       p_name: user.data.name,
                       p_email: user.data.email,
@@ -2249,13 +2257,14 @@ function FreiwilligerProfil({
                     color: "#2C2416",
                   }}
                 >
-                  📅 {formatDate(t.datum)} · 🕐 {t.startzeit}
-                  {t.endzeit ? ` – ${t.endzeit}` : ""} ·{" "}
+                  📅 {formatDate(terminOption.datum)} · 🕐 {terminOption.startzeit}
+                  {terminOption.endzeit ? ` – ${terminOption.endzeit}` : ""} ·{" "}
                   <span style={{ color: "#3A7D44" }}>
-                    Noch {t.freie_plaetze} Helfer gesucht
+                    Noch {freiePlaetze} Helfer gesucht
                   </span>
                 </button>
-              ))}
+              );
+            })}
             <button
               onClick={() => setTerminWechselStelle(null)}
               style={{
