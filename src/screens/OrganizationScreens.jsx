@@ -13,6 +13,12 @@ const bewerbungIstNoShow = (bewerbung) =>
 const bewerbungIstOffen = (bewerbung) =>
   !bewerbungIstErschienen(bewerbung) && !bewerbungIstNoShow(bewerbung);
 
+const bewerbungIstAktiv = (bewerbung) => {
+  if (!bewerbung) return false;
+  const status = String(bewerbung.status || "").toLowerCase();
+  return !["storniert", "abgesagt", "cancelled", "canceled"].includes(status);
+};
+
 
 function VereinDashboard({
   user,
@@ -765,6 +771,16 @@ function VereinStelleDetail({
         {alleTermine.map((t) => {
           const istVergangen = !isTerminAktuell(t);
           const nochNichtGestartet = isTerminNochNichtGestartet(t);
+          const aktiveBewerbungen = (t.bewerbungen || []).filter(bewerbungIstAktiv);
+          const gesamtPlaetze = Number(
+            t.gesamt_plaetze ??
+              t.max_helfer ??
+              t.plaetze ??
+              (Number.isFinite(Number(t.freie_plaetze))
+                ? Number(t.freie_plaetze) + aktiveBewerbungen.length
+                : 0)
+          );
+          const freiePlaetze = Math.max(0, gesamtPlaetze - aktiveBewerbungen.length);
 
           return (
             <div
@@ -801,7 +817,7 @@ function VereinStelleDetail({
                 </div>
               </div>
               <div style={{ fontSize: 12, color: "#3A7D44", marginBottom: 10 }}>
-                {t.freie_plaetze} Plätze frei
+                {freiePlaetze} Plätze frei
               </div>
 
               {/* Termin-Aktionen für bevorstehende Termine */}
@@ -851,14 +867,14 @@ function VereinStelleDetail({
 
               {/* Angemeldete */}
               <SectionLabel>
-                Angemeldete ({(t.bewerbungen || []).length})
+                Angemeldete ({aktiveBewerbungen.length})
               </SectionLabel>
-              {(t.bewerbungen || []).length === 0 ? (
+              {aktiveBewerbungen.length === 0 ? (
                 <div style={{ fontSize: 12, color: "#8B7355" }}>
                   Noch niemand angemeldet.
                 </div>
               ) : (
-                (t.bewerbungen || []).map((b) => (
+                aktiveBewerbungen.map((b) => (
                   <div
                     key={b.id}
                     style={{

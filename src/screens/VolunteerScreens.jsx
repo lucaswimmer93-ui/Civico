@@ -34,18 +34,17 @@ const getVereinLogoSrc = (verein) => {
 };
 
 const getTerminPlaetze = (termin) => {
-  const gesamtPlaetze = Number(
-    termin?.gesamt_plaetze ?? termin?.max_helfer ?? termin?.plaetze ?? 0
-  );
   const aktiveBewerbungen = (termin?.bewerbungen || []).filter(bewerbungIstAktiv).length;
-  const freiePlaetzeAusDb = termin?.freie_plaetze;
+  const gesamtPlaetze = Number(
+    termin?.gesamt_plaetze ??
+      termin?.max_helfer ??
+      termin?.plaetze ??
+      (Number.isFinite(Number(termin?.freie_plaetze))
+        ? Number(termin.freie_plaetze) + aktiveBewerbungen
+        : 0)
+  );
 
-  const freiePlaetze = gesamtPlaetze > 0
-    ? Math.max(0, gesamtPlaetze - aktiveBewerbungen)
-    : Number.isFinite(Number(freiePlaetzeAusDb))
-      ? Math.max(0, Number(freiePlaetzeAusDb))
-      : 0;
-
+  const freiePlaetze = Math.max(0, gesamtPlaetze - aktiveBewerbungen);
   const angemeldet = gesamtPlaetze > 0
     ? Math.min(gesamtPlaetze, aktiveBewerbungen)
     : aktiveBewerbungen;
@@ -54,7 +53,7 @@ const getTerminPlaetze = (termin) => {
     gesamtPlaetze,
     freiePlaetze,
     angemeldet,
-    belegt: gesamtPlaetze > 0 ? angemeldet >= gesamtPlaetze : freiePlaetze <= 0,
+    belegt: freiePlaetze <= 0,
   };
 };
 
@@ -1169,63 +1168,20 @@ function FreiwilligerProfil({
   const jetzt = new Date();
 
   useEffect(() => {
-    let active = true;
-
-    const loadMeineWarteliste = async () => {
-      const { data, error } = await supabase
-        .from("warteliste")
-        .select("*")
-        .eq("freiwilliger_id", user.data.id)
-        .order("created_at", { ascending: true });
-
-      if (error) {
-        console.error("Warteliste laden fehlgeschlagen:", error);
-        if (active) setMeineWarteliste([]);
-        return;
-      }
-
-      if (!active) return;
-
-      const enriched = (data || []).map((entry) => {
-        const stelle = stellen.find((s) => s.id === entry.stelle_id) || null;
-        const termin =
-          stelle?.termine?.find((t) => t.id === entry.termin_id) || null;
-
-        return {
-          ...entry,
-          stellen: stelle
-            ? {
-                titel: stelle.titel,
-                kategorie: stelle.kategorie,
-                ort: stelle.ort,
-              }
-            : null,
-          termine: termin
-            ? {
-                datum: termin.datum,
-                startzeit: termin.startzeit,
-                endzeit: termin.endzeit,
-              }
-            : null,
-        };
+    supabase
+      .from("warteliste")
+      .select("*")
+      .eq("freiwilliger_id", user.data.id)
+      .order("created_at", { ascending: true })
+      .then(({ data }) => {
+        if (data) setMeineWarteliste(data);
       });
-
-      setMeineWarteliste(enriched);
-    };
-
-    loadMeineWarteliste();
-
-    return () => {
-      active = false;
-    };
-  }, [user.data.id, stellen]);
+  }, []);
 
   const meineStellen = stellen.filter((s) =>
     (s.termine || []).some((t) =>
       (t.bewerbungen || []).some(
-        (b) =>
-          b.freiwilliger_id === user.data.id &&
-          bewerbungIstAktiv(b)
+        (b) => b.freiwilliger_id === user.data.id && bewerbungIstAktiv(b)
       )
     )
   );
@@ -1264,44 +1220,11 @@ function FreiwilligerProfil({
   const aktiveStellen = meineStellen.filter((s) =>
     (s.termine || []).some((t) => {
       const hatBew = (t.bewerbungen || []).some(
-        (b) =>
-          b.freiwilliger_id === user.data.id &&
-          bewerbungIstAktiv(b)
+        (b) => b.freiwilliger_id === user.data.id && bewerbungIstAktiv(b)
       );
       return hatBew && isTerminAktuell(t);
     })
   );
-
-  const getMeineBewerbungenFuerStelle = (stelle) =>
-    (stelle?.termine || []).flatMap((termin) =>
-      (termin?.bewerbungen || [])
-        .filter((bewerbung) => bewerbung?.freiwilliger_id === user.data.id)
-        .map((bewerbung) => ({ ...bewerbung, termin }))
-    );
-
-  const getMeineAktiveBewerbungFuerStelle = (stelle) =>
-    getMeineBewerbungenFuerStelle(stelle).find((bewerbung) =>
-      bewerbungIstAktiv(bewerbung)
-    ) || null;
-
-  const terminHatIrgendeineMeineBewerbung = (stelle, terminId) =>
-    getMeineBewerbungenFuerStelle(stelle).some(
-      (bewerbung) => bewerbung?.termin?.id === terminId
-    );
-
-  const getWechselbareTermine = (stelle) => {
-    const aktuellerTermin = getMeineAktiveBewerbungFuerStelle(stelle)?.termin?.id;
-
-    return (stelle?.termine || []).filter((termin) => {
-      const { freiePlaetze } = getTerminPlaetze(termin);
-      return (
-        termin?.id !== aktuellerTermin &&
-        freiePlaetze > 0 &&
-        isTerminNochNichtGestartet(termin) &&
-        !terminHatIrgendeineMeineBewerbung(stelle, termin.id)
-      );
-    });
-  };
 
   return (
     <div>
@@ -1736,19 +1659,12 @@ function FreiwilligerProfil({
                         {getVereinLogoSrc(verein) ? (
                           <img
                             src={getVereinLogoSrc(verein)}
-                            alt={verein.name || "Verein"}
-                            style={{
-                              width: 18,
-                              height: 18,
-                              borderRadius: "50%",
-                              objectFit: "cover",
-                              flexShrink: 0,
-                            }}
+                            alt="Logo"
+                            style={{ width: 16, height: 16, borderRadius: "50%", objectFit: "cover" }}
                           />
                         ) : (
-                          <span style={{ flexShrink: 0 }}>🏢</span>
-                        )}{" "}
-                        {verein.name}
+                          <span>{typeof verein.logo === "string" && !getVereinLogoSrc(verein) && !verein.logo.startsWith("http") ? verein.logo : "🏢"}</span>
+                        )} {verein.name}
                         <span
                           onClick={(e) => {
                             e.stopPropagation();
@@ -1834,9 +1750,7 @@ function FreiwilligerProfil({
                 .flatMap((t) =>
                   (t.bewerbungen || [])
                     .filter(
-                      (b) =>
-                        b.freiwilliger_id === user.data.id &&
-                        bewerbungIstAktiv(b)
+                      (b) => b.freiwilliger_id === user.data.id && bewerbungIstAktiv(b)
                     )
                     .map((b) => ({ ...b, termin: t }))
                 )
@@ -1890,7 +1804,12 @@ function FreiwilligerProfil({
                       )}
                     </div>
                   </div>
-                  {getWechselbareTermine(s).length > 0 && (
+                  {(s.termine || []).filter(
+                    (terminOption) =>
+                      terminOption.id !== meinTermin?.termin?.id &&
+                      getTerminPlaetze(terminOption).freiePlaetze > 0 &&
+                      isTerminNochNichtGestartet(terminOption)
+                  ).length > 0 && (
                     <button
                       onClick={() => setTerminWechselStelle(s)}
                       style={{
@@ -1911,18 +1830,21 @@ function FreiwilligerProfil({
                   )}
                   <button
                     onClick={async () => {
-                      if (meinTermin) {
-                        await supabase
+                      try {
+                        if (!meinTermin) return;
+                        const { error: stornoError } = await supabase
                           .from("bewerbungen")
                           .update({
                             status: "storniert",
                             cancelled_at: new Date().toISOString(),
                           })
                           .eq("id", meinTermin.id);
-                        await supabase.rpc("increment_plaetze", {
+                        if (stornoError) throw stornoError;
+                        const { error: plaetzeError } = await supabase.rpc("increment_plaetze", {
                           termin_id: meinTermin.termin.id,
                         });
-                        await supabase
+                        if (plaetzeError) throw plaetzeError;
+                        const { error: freiwilligeError } = await supabase
                           .from("freiwillige")
                           .update({
                             punkte: Math.max(0, (user.data.punkte || 0) - 10),
@@ -1932,6 +1854,7 @@ function FreiwilligerProfil({
                             ),
                           })
                           .eq("id", user.data.id);
+                        if (freiwilligeError) throw freiwilligeError;
                         setUser((prev) => ({
                           ...prev,
                           data: {
@@ -1944,7 +1867,10 @@ function FreiwilligerProfil({
                           },
                         }));
                         showToast("Schade, dass du dieses Mal nicht dabei bist.", "#E85C5C");
-                        await loadStellen(gemeindeId);
+                        await loadStellen(gemeindeId, user.data.plz, user.data.umkreis);
+                      } catch (err) {
+                        console.error("Abmeldung im Profil fehlgeschlagen:", err);
+                        showToast(err?.message || "Fehler beim Abmelden.", "#E85C5C");
                       }
                     }}
                     style={{
@@ -2212,59 +2138,92 @@ function FreiwilligerProfil({
             >
               {t.neuenTerminWaehlen}
             </div>
-            {getWechselbareTermine(terminWechselStelle).map((terminOption) => {
-              const { freiePlaetze } = getTerminPlaetze(terminOption);
-              const meinAlterTermin = getMeineAktiveBewerbungFuerStelle(terminWechselStelle);
+            {(terminWechselStelle.termine || [])
+              .filter((terminOption) => {
+                const meineAktiveBewerbung = (terminOption.bewerbungen || []).find(
+                  (b) => b.freiwilliger_id === user.data.id && bewerbungIstAktiv(b)
+                );
+                return (
+                  !meineAktiveBewerbung &&
+                  getTerminPlaetze(terminOption).freiePlaetze > 0 &&
+                  isTerminNochNichtGestartet(terminOption)
+                );
+              })
+              .map((terminOption) => {
+                const { freiePlaetze } = getTerminPlaetze(terminOption);
+                return (
+                  <button
+                    key={terminOption.id}
+                    onClick={async () => {
+                      try {
+                        const meinAlterTermin = (terminWechselStelle.termine || [])
+                          .flatMap((x) =>
+                            (x.bewerbungen || [])
+                              .filter(
+                                (b) =>
+                                  b.freiwilliger_id === user.data.id &&
+                                  bewerbungIstAktiv(b)
+                              )
+                              .map((b) => ({ ...b, termin: x }))
+                          )
+                          .find(Boolean);
 
-              return (
-                <button
-                  key={terminOption.id}
-                  onClick={async () => {
-                    if (meinAlterTermin) {
-                      await supabase
-                        .from("bewerbungen")
-                        .update({
-                          status: "storniert",
-                          cancelled_at: new Date().toISOString(),
-                        })
-                        .eq("id", meinAlterTermin.id);
-                      await supabase.rpc("increment_plaetze", {
-                        termin_id: meinAlterTermin.termin.id,
-                      });
-                    }
-                    await supabase.rpc("book_slot", {
-                      p_stelle_id: terminWechselStelle.id,
-                      p_termin_id: terminOption.id,
-                      p_freiwilliger_id: user.data.id,
-                      p_name: user.data.name,
-                      p_email: user.data.email,
-                    });
-                    showToast("✓ Termin geändert!");
-                    await loadStellen(gemeindeId);
-                    setTerminWechselStelle(null);
-                  }}
-                  style={{
-                    width: "100%",
-                    padding: "14px",
-                    borderRadius: 12,
-                    border: "1px solid #E0D8C8",
-                    background: "#FAF7F2",
-                    marginBottom: 10,
-                    textAlign: "left",
-                    cursor: "pointer",
-                    fontFamily: "inherit",
-                    fontSize: 14,
-                    color: "#2C2416",
-                  }}
-                >
-                  📅 {formatDate(terminOption.datum)} · 🕐 {terminOption.startzeit}
-                  {terminOption.endzeit ? ` – ${terminOption.endzeit}` : ""} ·{" "}
-                  <span style={{ color: "#3A7D44" }}>
-                    Noch {freiePlaetze} Helfer gesucht
-                  </span>
-                </button>
-              );
-            })}
+                        if (meinAlterTermin) {
+                          const { error: stornoError } = await supabase
+                            .from("bewerbungen")
+                            .update({
+                              status: "storniert",
+                              cancelled_at: new Date().toISOString(),
+                            })
+                            .eq("id", meinAlterTermin.id);
+                          if (stornoError) throw stornoError;
+
+                          const { error: plaetzeError } = await supabase.rpc("increment_plaetze", {
+                            termin_id: meinAlterTermin.termin.id,
+                          });
+                          if (plaetzeError) throw plaetzeError;
+                        }
+
+                        const { data: erfolg, error: buchungError } = await supabase.rpc("book_slot", {
+                          p_stelle_id: terminWechselStelle.id,
+                          p_termin_id: terminOption.id,
+                          p_freiwilliger_id: user.data.id,
+                          p_name: user.data.name,
+                          p_email: user.data.email,
+                        });
+                        if (buchungError) throw buchungError;
+                        if (!erfolg) throw new Error("Termin konnte nicht gebucht werden.");
+
+                        showToast("✓ Termin geändert!");
+                        await loadStellen(gemeindeId, user.data.plz, user.data.umkreis);
+                        setTerminWechselStelle(null);
+                      } catch (err) {
+                        console.error("Terminwechsel fehlgeschlagen:", err);
+                        showToast(err?.message || "Fehler beim Terminwechsel.", "#E85C5C");
+                      }
+                    }}
+                    style={{
+                      width: "100%",
+                      padding: "14px",
+                      borderRadius: 12,
+                      border: "1px solid #E0D8C8",
+                      background: "#FAF7F2",
+                      marginBottom: 10,
+                      textAlign: "left",
+                      cursor: "pointer",
+                      fontFamily: "inherit",
+                      fontSize: 14,
+                      color: "#2C2416",
+                    }}
+                  >
+                    📅 {formatDate(terminOption.datum)} · 🕐 {terminOption.startzeit}
+                    {terminOption.endzeit ? ` – ${terminOption.endzeit}` : ""} ·{" "}
+                    <span style={{ color: "#3A7D44" }}>
+                      Noch {freiePlaetze} Helfer gesucht
+                    </span>
+                  </button>
+                );
+              })}
             <button
               onClick={() => setTerminWechselStelle(null)}
               style={{
