@@ -43,8 +43,8 @@ const getTerminPlaetze = (termin) => {
         ? Number(termin.freie_plaetze) + aktiveBewerbungen
         : 0)
   );
-
   const freiePlaetze = Math.max(0, gesamtPlaetze - aktiveBewerbungen);
+
   const angemeldet = gesamtPlaetze > 0
     ? Math.min(gesamtPlaetze, aktiveBewerbungen)
     : aktiveBewerbungen;
@@ -1180,9 +1180,7 @@ function FreiwilligerProfil({
 
   const meineStellen = stellen.filter((s) =>
     (s.termine || []).some((t) =>
-      (t.bewerbungen || []).some(
-        (b) => b.freiwilliger_id === user.data.id && bewerbungIstAktiv(b)
-      )
+      (t.bewerbungen || []).some((b) => b.freiwilliger_id === user.data.id && bewerbungIstAktiv(b))
     )
   );
 
@@ -1210,10 +1208,15 @@ function FreiwilligerProfil({
       .from("avatars")
       .getPublicUrl(path);
     const avatar_url = urlData.publicUrl + "?t=" + Date.now();
-    await supabase
+    const { error: profilErr } = await supabase
       .from("freiwillige")
       .update({ avatar_url })
       .eq("id", user.data.id);
+    if (profilErr) {
+      console.error("Profilbild speichern fehlgeschlagen:", profilErr);
+      showToast(profilErr.message || "Profilbild konnte nicht gespeichert werden.", "#E85C5C");
+      return;
+    }
     setUser((prev) => ({ ...prev, data: { ...prev.data, avatar_url } }));
     showToast("✓ Foto gespeichert!");
   };
@@ -1749,9 +1752,7 @@ function FreiwilligerProfil({
               const meinTermin = (s.termine || [])
                 .flatMap((t) =>
                   (t.bewerbungen || [])
-                    .filter(
-                      (b) => b.freiwilliger_id === user.data.id && bewerbungIstAktiv(b)
-                    )
+                    .filter((b) => b.freiwilliger_id === user.data.id && bewerbungIstAktiv(b))
                     .map((b) => ({ ...b, termin: t }))
                 )
                 .find(Boolean);
@@ -1805,10 +1806,10 @@ function FreiwilligerProfil({
                     </div>
                   </div>
                   {(s.termine || []).filter(
-                    (terminOption) =>
-                      terminOption.id !== meinTermin?.termin?.id &&
-                      getTerminPlaetze(terminOption).freiePlaetze > 0 &&
-                      isTerminNochNichtGestartet(terminOption)
+                    (t) =>
+                      t.id !== meinTermin?.termin?.id &&
+                      getTerminPlaetze(t).freiePlaetze > 0 &&
+                      isTerminNochNichtGestartet(t)
                   ).length > 0 && (
                     <button
                       onClick={() => setTerminWechselStelle(s)}
@@ -1830,21 +1831,18 @@ function FreiwilligerProfil({
                   )}
                   <button
                     onClick={async () => {
-                      try {
-                        if (!meinTermin) return;
-                        const { error: stornoError } = await supabase
+                      if (meinTermin) {
+                        await supabase
                           .from("bewerbungen")
                           .update({
                             status: "storniert",
                             cancelled_at: new Date().toISOString(),
                           })
                           .eq("id", meinTermin.id);
-                        if (stornoError) throw stornoError;
-                        const { error: plaetzeError } = await supabase.rpc("increment_plaetze", {
+                        await supabase.rpc("increment_plaetze", {
                           termin_id: meinTermin.termin.id,
                         });
-                        if (plaetzeError) throw plaetzeError;
-                        const { error: freiwilligeError } = await supabase
+                        await supabase
                           .from("freiwillige")
                           .update({
                             punkte: Math.max(0, (user.data.punkte || 0) - 10),
@@ -1854,7 +1852,6 @@ function FreiwilligerProfil({
                             ),
                           })
                           .eq("id", user.data.id);
-                        if (freiwilligeError) throw freiwilligeError;
                         setUser((prev) => ({
                           ...prev,
                           data: {
@@ -1867,10 +1864,7 @@ function FreiwilligerProfil({
                           },
                         }));
                         showToast("Schade, dass du dieses Mal nicht dabei bist.", "#E85C5C");
-                        await loadStellen(gemeindeId, user.data.plz, user.data.umkreis);
-                      } catch (err) {
-                        console.error("Abmeldung im Profil fehlgeschlagen:", err);
-                        showToast(err?.message || "Fehler beim Abmelden.", "#E85C5C");
+                        await loadStellen(gemeindeId);
                       }
                     }}
                     style={{

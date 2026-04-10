@@ -12,14 +12,31 @@ const bewerbungIstNoShow = (bewerbung) =>
 
 const bewerbungIstOffen = (bewerbung) =>
   !bewerbungIstErschienen(bewerbung) && !bewerbungIstNoShow(bewerbung);
-
 const bewerbungIstAktiv = (bewerbung) => {
   if (!bewerbung) return false;
   const status = String(bewerbung.status || "").toLowerCase();
   return !["storniert", "abgesagt", "cancelled", "canceled"].includes(status);
 };
 
+const aktiveBewerbungen = (bewerbungen = []) =>
+  (bewerbungen || []).filter(bewerbungIstAktiv);
 
+const getTerminPlaetze = (termin) => {
+  const aktive = aktiveBewerbungen(termin?.bewerbungen || []);
+  const gesamtPlaetze = Number(
+    termin?.gesamt_plaetze ??
+      termin?.max_helfer ??
+      termin?.plaetze ??
+      (Number.isFinite(Number(termin?.freie_plaetze))
+        ? Number(termin.freie_plaetze) + aktive.length
+        : 0)
+  );
+  const freiePlaetze = Math.max(0, gesamtPlaetze - aktive.length);
+  return {
+    freiePlaetze,
+    angemeldet: gesamtPlaetze > 0 ? Math.min(gesamtPlaetze, aktive.length) : aktive.length,
+  };
+};
 function VereinDashboard({
   user,
   stellen,
@@ -467,7 +484,7 @@ function VereinDashboard({
         ) : (
           meineStellen.map((s) => {
             const gesamtAnmeldungen = (s.termine || []).reduce(
-              (sum, t) => sum + (t.bewerbungen?.length || 0),
+              (sum, t) => sum + aktiveBewerbungen(t.bewerbungen || []).length,
               0
             );
             return (
@@ -771,16 +788,6 @@ function VereinStelleDetail({
         {alleTermine.map((t) => {
           const istVergangen = !isTerminAktuell(t);
           const nochNichtGestartet = isTerminNochNichtGestartet(t);
-          const aktiveBewerbungen = (t.bewerbungen || []).filter(bewerbungIstAktiv);
-          const gesamtPlaetze = Number(
-            t.gesamt_plaetze ??
-              t.max_helfer ??
-              t.plaetze ??
-              (Number.isFinite(Number(t.freie_plaetze))
-                ? Number(t.freie_plaetze) + aktiveBewerbungen.length
-                : 0)
-          );
-          const freiePlaetze = Math.max(0, gesamtPlaetze - aktiveBewerbungen.length);
 
           return (
             <div
@@ -817,7 +824,7 @@ function VereinStelleDetail({
                 </div>
               </div>
               <div style={{ fontSize: 12, color: "#3A7D44", marginBottom: 10 }}>
-                {freiePlaetze} Plätze frei
+                {getTerminPlaetze(t).freiePlaetze} Plätze frei
               </div>
 
               {/* Termin-Aktionen für bevorstehende Termine */}
@@ -867,14 +874,14 @@ function VereinStelleDetail({
 
               {/* Angemeldete */}
               <SectionLabel>
-                Angemeldete ({aktiveBewerbungen.length})
+                Angemeldete ({aktiveBewerbungen(t.bewerbungen || []).length})
               </SectionLabel>
-              {aktiveBewerbungen.length === 0 ? (
+              {aktiveBewerbungen(t.bewerbungen || []).length === 0 ? (
                 <div style={{ fontSize: 12, color: "#8B7355" }}>
                   Noch niemand angemeldet.
                 </div>
               ) : (
-                aktiveBewerbungen.map((b) => (
+                aktiveBewerbungen(t.bewerbungen || []).map((b) => (
                   <div
                     key={b.id}
                     style={{
