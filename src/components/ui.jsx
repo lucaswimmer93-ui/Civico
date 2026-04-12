@@ -291,19 +291,59 @@ function VereineListe({
                   overflow: "hidden",
                 }}
               >
-                {v.logo_url ? (
-                  <img
-                    src={v.logo_url}
-                    alt="Logo"
-                    style={{
-                      width: "100%",
-                      height: "100%",
-                      objectFit: "cover",
-                    }}
-                  />
-                ) : (
-                  v.logo || "🏢"
-                )}
+                {(() => {
+                  const rawLogoUrl =
+                    typeof v.logo_url === "string" ? v.logo_url.trim() : "";
+                  const logoUrlIstBild =
+                    rawLogoUrl &&
+                    (rawLogoUrl.startsWith("http://") ||
+                      rawLogoUrl.startsWith("https://") ||
+                      rawLogoUrl.startsWith("data:image/") ||
+                      rawLogoUrl.startsWith("blob:"));
+
+                  if (logoUrlIstBild) {
+                    return (
+                      <img
+                        src={rawLogoUrl}
+                        alt={v.name || "Logo"}
+                        style={{
+                          width: "100%",
+                          height: "100%",
+                          objectFit: "cover",
+                        }}
+                      />
+                    );
+                  }
+
+                  const rawLogo =
+                    typeof v.logo === "string" ? v.logo.trim() : "";
+
+                  if (
+                    rawLogo &&
+                    (rawLogo.startsWith("http://") ||
+                      rawLogo.startsWith("https://") ||
+                      rawLogo.startsWith("data:image/") ||
+                      rawLogo.startsWith("blob:"))
+                  ) {
+                    return (
+                      <img
+                        src={rawLogo}
+                        alt={v.name || "Logo"}
+                        style={{
+                          width: "100%",
+                          height: "100%",
+                          objectFit: "cover",
+                        }}
+                      />
+                    );
+                  }
+
+                  if (rawLogo && rawLogo.length <= 3) {
+                    return rawLogo;
+                  }
+
+                  return "🏢";
+                })()}
               </div>
               <div style={{ flex: 1 }}>
                 <div
