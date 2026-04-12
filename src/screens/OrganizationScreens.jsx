@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import MeineGemeindePanel from "../components/messages/MeineGemeindePanel";
 import MessageThreadView from '../components/messages/MessageThreadView';
 import { getOrCreateTerminThread } from '../services/messages';
-import MessageThreadView from "../components/messages/MessageThreadView";
 import { supabase, T, KATEGORIEN, SKILLS, getSkillLabel, getKat, getMedaille, getNextMedaille, getMedailleName, IMPRESSUM_TEXT, DATENSCHUTZ_TEXT, AGB_TEXT, formatDate, getGemeindeByPlz, isKlarname, isTerminNochNichtGestartet, isTerminAktuell } from '../core/shared';
 import { Header, StelleCard, VereineListe, BottomBar, DatenschutzBox, Input, BigButton, Chip, InfoChip, SectionLabel, RoleCard, EmptyState, ErrorMsg } from '../components/ui';
 
@@ -904,7 +903,7 @@ function VereinStelleDetail({
                 </div>
               )}
 
-              {{(() => {
+              {(() => {
                 const activeTab = terminTabs[t.id] || "teilnehmer";
                 const thread = terminThreads[t.id];
                 const loadingThread = Boolean(terminThreadLoading[t.id]);
