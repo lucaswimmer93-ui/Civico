@@ -38,7 +38,7 @@ import {
 import RechtlicheSeite from './screens/LegalScreens';
 import GemeindeDashboard from './screens/GemeindeDashboard';
 import AdminDashboard from './screens/AdminDashboard';
-import { Chip, SectionLabel, EmptyState, BottomBar, StelleCard, VereineListe } from './components/ui';
+import { Chip, SectionLabel, EmptyState, BottomBar, StelleCard, VereineListe, getStelleHighlightState } from './components/ui';
 
 const detectAuthRedirectState = () => {
   if (typeof window === "undefined") {
@@ -971,6 +971,26 @@ export default function App() {
     setTimeout(() => setToast(null), 3000);
   };
 
+  const sortStellenNachHighlight = (items = []) =>
+    [...items].sort((a, b) => {
+      const aState = getStelleHighlightState(a);
+      const bState = getStelleHighlightState(b);
+
+      if (bState.priority !== aState.priority) {
+        return bState.priority - aState.priority;
+      }
+
+      const aTime = aState.naechsterTermin?.datum
+        ? new Date(`${aState.naechsterTermin.datum}T${aState.naechsterTermin.startzeit || "00:00"}`).getTime()
+        : Number.MAX_SAFE_INTEGER;
+      const bTime = bState.naechsterTermin?.datum
+        ? new Date(`${bState.naechsterTermin.datum}T${bState.naechsterTermin.startzeit || "00:00"}`).getTime()
+        : Number.MAX_SAFE_INTEGER;
+
+      return aTime - bTime;
+    });
+
+
   const loadStellen = async (
     gemeinde_id = null,
     plz = null,
@@ -1476,63 +1496,28 @@ export default function App() {
 
   const handleAbmelden = async (bewId, terminId) => {
     try {
-      if (!bewId || !terminId || !user?.data?.id) {
-        throw new Error("Fehlende Abmeldedaten.");
-      }
-
-      const { data: bestehendeBewerbung, error: bestehendeBewerbungError } = await supabase
-        .from("bewerbungen")
-        .select("id, stelle_id")
-        .eq("id", bewId)
-        .maybeSingle();
-
-      if (bestehendeBewerbungError) throw bestehendeBewerbungError;
-      if (!bestehendeBewerbung) throw new Error("Bewerbung nicht gefunden.");
-
-      const { error: deleteError } = await supabase
-        .from("bewerbungen")
-        .delete()
-        .eq("id", bewId);
-      if (deleteError) throw deleteError;
-
-      const { data: deletedCheck, error: deletedCheckError } = await supabase
-        .from("bewerbungen")
-        .select("id")
-        .eq("id", bewId)
-        .maybeSingle();
-      if (deletedCheckError) throw deletedCheckError;
-      if (deletedCheck) throw new Error("Bewerbung konnte nicht entfernt werden.");
-
-      const { error: incError } = await supabase.rpc("increment_plaetze", { termin_id: terminId });
-      if (incError) throw incError;
-
-      const neuePunkte = Math.max(0, (user.data.punkte || 0) - 10);
-      const neueAktionen = Math.max(0, (user.data.aktionen || 0) - 1);
-
-      const { error: freiwilligeUpdateError } = await supabase
+      await supabase.from("bewerbungen").delete().eq("id", bewId);
+      await supabase.rpc("increment_plaetze", { termin_id: terminId });
+      await supabase
         .from("freiwillige")
         .update({
-          punkte: neuePunkte,
-          aktionen: neueAktionen,
+          punkte: Math.max(0, (user.data.punkte || 0) - 10),
+          aktionen: Math.max(0, (user.data.aktionen || 0) - 1),
         })
         .eq("id", user.data.id);
-      if (freiwilligeUpdateError) throw freiwilligeUpdateError;
-
       setUser((prev) => ({
         ...prev,
         data: {
           ...prev.data,
-          punkte: neuePunkte,
-          aktionen: neueAktionen,
+          punkte: Math.max(0, (prev.data.punkte || 0) - 10),
+          aktionen: Math.max(0, (prev.data.aktionen || 0) - 1),
         },
       }));
-
       showToast("Schade, dass du dieses Mal nicht dabei bist.", "#E85C5C");
-
+      // Verein benachrichtigen
       const abmeldeStelle = stellen.find((s) =>
         (s.termine || []).some((t) => t.id === terminId)
       );
-
       if (abmeldeStelle) {
         const { error: vereinNotifError } = await supabase
           .from("verein_notifications")
@@ -1543,10 +1528,7 @@ export default function App() {
             typ: "abmeldung",
             gelesen: false,
           });
-        if (vereinNotifError) {
-          console.log("verein_notifications abmeldung failed:", vereinNotifError);
-        }
-
+        if (vereinNotifError) console.log("verein_notifications abmeldung failed:", vereinNotifError);
         await loadVereinNotifications(abmeldeStelle.verein_id);
         await sendVereinPush({
           vereinId: abmeldeStelle.verein_id,
@@ -1556,36 +1538,34 @@ export default function App() {
           url: "/",
         });
       }
-
-      const { data: nextOnList, error: nextOnListError } = await supabase
+      // Warteliste prüfen
+      const { data: nextOnList } = await supabase
         .from("warteliste")
         .select("*")
         .eq("termin_id", terminId)
-        .neq("freiwilliger_id", user.data.id)
         .order("created_at", { ascending: true })
         .limit(1)
         .maybeSingle();
-      if (nextOnListError) throw nextOnListError;
-
       if (nextOnList) {
-        const { data: erfolg, error: nachrueckError } = await supabase.rpc("book_slot", {
+        // Automatisch nachbuchen
+        const { data: erfolg } = await supabase.rpc("book_slot", {
           p_stelle_id: nextOnList.stelle_id,
           p_termin_id: terminId,
           p_freiwilliger_id: nextOnList.freiwilliger_id,
-          p_name: nextOnList.name,
-          p_email: nextOnList.email,
+          p_name: nextOnList.freiwilliger_name,
+          p_email: nextOnList.freiwilliger_email,
         });
-        if (nachrueckError) throw nachrueckError;
-
         if (erfolg) {
+          // Freiwilligen benachrichtigen
           await supabase.from("notifications").insert({
             user_id: nextOnList.freiwilliger_id,
             titel: "🎉 Du wurdest nachgerückt!",
-            text: `Ein Platz bei "${selected?.titel || "einer Stelle"}" ist frei geworden – du wurdest automatisch angemeldet! +10 Punkte`,
+            text: `Ein Platz bei "${
+              selected?.titel || "einer Stelle"
+            }" ist frei geworden – du wurdest automatisch angemeldet! +10 Punkte`,
             typ: "platz_frei",
             gelesen: false,
           });
-
           await sendVolunteerPush({
             gemeindeId,
             notificationType: "freie_plaetze",
@@ -1594,13 +1574,12 @@ export default function App() {
             body: `Ein Platz bei "${selected?.titel || "einer Stelle"}" ist frei geworden – du wurdest automatisch angemeldet!`,
             url: "/",
           });
-
+          // Punkte vergeben
           const { data: nextFw, error: nextFwError } = await supabase
             .from("freiwillige")
             .select("punkte, aktionen")
             .eq("id", nextOnList.freiwilliger_id)
             .maybeSingle();
-
           if (!nextFwError && nextFw) {
             const { error: updateNextFwError } = await supabase
               .from("freiwillige")
@@ -1609,18 +1588,16 @@ export default function App() {
                 aktionen: (nextFw.aktionen || 0) + 1,
               })
               .eq("id", nextOnList.freiwilliger_id);
-            if (updateNextFwError) {
-              console.log("update next volunteer points failed:", updateNextFwError);
-            }
+            if (updateNextFwError) console.log("update next volunteer points failed:", updateNextFwError);
           }
-
+          // Verein benachrichtigen
           if (selected?.verein_id) {
             await supabase
               .from("verein_notifications")
               .insert({
                 verein_id: selected.verein_id,
                 titel: "🔄 Warteliste nachgerückt",
-                text: `${nextOnList.name || "Ein Freiwilliger"} ist automatisch von der Warteliste nachgerückt.`,
+                text: `${nextOnList.freiwilliger_name} ist automatisch von der Warteliste nachgerückt.`,
                 typ: "warteliste",
                 gelesen: false,
               })
@@ -1630,50 +1607,43 @@ export default function App() {
               vereinId: selected.verein_id,
               notificationType: "warteliste",
               title: "🔄 Warteliste nachgerückt",
-              body: `${nextOnList.name || "Ein Freiwilliger"} ist automatisch von der Warteliste nachgerückt.`,
+              body: `${nextOnList.freiwilliger_name} ist automatisch von der Warteliste nachgerückt.`,
               url: "/",
             });
           }
         } else {
+          // Falls book_slot fehlschlägt - nur Benachrichtigung
           await supabase.from("notifications").insert({
             user_id: nextOnList.freiwilliger_id,
             titel: "🎉 Platz frei geworden!",
-            text: `Ein Platz bei "${selected?.titel || "einer Stelle"}" ist frei – jetzt schnell anmelden!`,
+            text: `Ein Platz bei "${
+              selected?.titel || "einer Stelle"
+            }" ist frei – jetzt schnell anmelden!`,
             typ: "platz_frei",
             gelesen: false,
           });
         }
-
-        const { error: waitlistDeleteError } = await supabase
-          .from("warteliste")
-          .delete()
-          .eq("id", nextOnList.id);
-        if (waitlistDeleteError) throw waitlistDeleteError;
-
-        const { data: restListe, error: restListeError } = await supabase
+        await supabase.from("warteliste").delete().eq("id", nextOnList.id);
+        // Positionen der restlichen Warteliste aktualisieren
+        const { data: restListe } = await supabase
           .from("warteliste")
           .select("id")
           .eq("termin_id", terminId)
           .order("created_at", { ascending: true });
-        if (restListeError) throw restListeError;
-
         if (restListe) {
-          for (let i = 0; i < restListe.length; i += 1) {
-            const { error: restUpdateError } = await supabase
+          for (let i = 0; i < restListe.length; i++) {
+            await supabase
               .from("warteliste")
               .update({ position: i + 1 })
               .eq("id", restListe[i].id);
-            if (restUpdateError) throw restUpdateError;
           }
         }
       }
-
       await loadStellen(gemeindeId, user?.data?.plz, user?.data?.umkreis);
       if (selected?.id) await reloadSelected(selected.id);
       goBack();
     } catch (err) {
-      console.error("handleAbmelden failed:", err);
-      showToast(err?.message || "Fehler beim Abmelden.", "#E85C5C");
+      showToast("Fehler beim Abmelden.", "#E85C5C");
     }
   };
 
@@ -2304,26 +2274,92 @@ export default function App() {
                     />
                   ))}
                 </div>
-                <SectionLabel>
-                  {gefilterteStellen.length} Stellen gefunden
-                </SectionLabel>
-                {gefilterteStellen.length === 0 ? (
-                  <EmptyState
-                    icon="🔍"
-                    text="Keine Stellen gefunden"
-                    sub="Ändere den Filter oder PLZ"
-                  />
-                ) : (
-                  gefilterteStellen.map((s) => (
-                    <StelleCard
-                      key={s.id}
-                      stelle={s}
-                      verein={s.vereine}
-                      onClick={() => openDetail(s)}
-                      user={user}
-                    />
-                  ))
-                )}
+                {(() => {
+                  const sortierteStellen = sortStellenNachHighlight(gefilterteStellen);
+                  const direktHelfenStellen = sortierteStellen.filter(
+                    (stelle) => getStelleHighlightState(stelle).isHighlight
+                  );
+                  const restlicheStellen = sortierteStellen.filter(
+                    (stelle) => !getStelleHighlightState(stelle).isHighlight
+                  );
+
+                  if (sortierteStellen.length === 0) {
+                    return (
+                      <EmptyState
+                        icon="🔍"
+                        text="Keine Stellen gefunden"
+                        sub="Ändere den Filter oder PLZ"
+                      />
+                    );
+                  }
+
+                  return (
+                    <>
+                      {direktHelfenStellen.length > 0 && (
+                        <>
+                          <SectionLabel>🚀 Direkt helfen</SectionLabel>
+                          <div
+                            style={{
+                              background: "linear-gradient(135deg, #FFF7E8, #FAF1DE)",
+                              border: "1px solid #E6D2AB",
+                              borderRadius: 16,
+                              padding: "12px",
+                              marginBottom: 16,
+                            }}
+                          >
+                            <div
+                              style={{
+                                fontSize: 13,
+                                fontWeight: "bold",
+                                color: "#2C2416",
+                                marginBottom: 10,
+                              }}
+                            >
+                              Diese Einsätze brauchen gerade besonders schnell Unterstützung.
+                            </div>
+                            {direktHelfenStellen.map((s) => (
+                              <StelleCard
+                                key={s.id}
+                                stelle={s}
+                                verein={s.vereine}
+                                onClick={() => openDetail(s)}
+                                user={user}
+                                highlight
+                              />
+                            ))}
+                          </div>
+                        </>
+                      )}
+
+                      <SectionLabel>
+                        {restlicheStellen.length > 0
+                          ? `📋 Alle Stellen (${sortierteStellen.length})`
+                          : `📋 Alle Stellen (${sortierteStellen.length})`}
+                      </SectionLabel>
+                      {restlicheStellen.length === 0 ? (
+                        <div
+                          style={{
+                            fontSize: 13,
+                            color: "#8B7355",
+                            marginBottom: 8,
+                          }}
+                        >
+                          Aktuell liegen alle sichtbaren Stellen im Bereich „Direkt helfen“.
+                        </div>
+                      ) : (
+                        restlicheStellen.map((s) => (
+                          <StelleCard
+                            key={s.id}
+                            stelle={s}
+                            verein={s.vereine}
+                            onClick={() => openDetail(s)}
+                            user={user}
+                          />
+                        ))
+                      )}
+                    </>
+                  );
+                })()}
               </>
             )}
 
