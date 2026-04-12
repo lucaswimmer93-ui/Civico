@@ -79,6 +79,38 @@ function DetailScreen({
   const kat = getKat(stelle.kategorie);
   const lang = "de";
   const termine = (stelle.termine || []).filter((t) => isTerminAktuell(t));
+  const [detailTerminTabs, setDetailTerminTabs] = useState({});
+  const [detailTerminThreads, setDetailTerminThreads] = useState({});
+  const [detailTerminThreadLoading, setDetailTerminThreadLoading] = useState({});
+  const [detailTerminThreadErrors, setDetailTerminThreadErrors] = useState({});
+
+  const setDetailTerminTab = (terminId, tab) => {
+    if (!terminId) return;
+    setDetailTerminTabs((prev) => ({ ...prev, [terminId]: tab }));
+  };
+
+  const loadDetailTerminThread = async (terminId) => {
+    if (!terminId) return null;
+    if (detailTerminThreads[terminId]?.id) return detailTerminThreads[terminId];
+
+    setDetailTerminThreadLoading((prev) => ({ ...prev, [terminId]: true }));
+    setDetailTerminThreadErrors((prev) => ({ ...prev, [terminId]: "" }));
+
+    try {
+      const thread = await getOrCreateTerminThread(terminId);
+      setDetailTerminThreads((prev) => ({ ...prev, [terminId]: thread }));
+      return thread;
+    } catch (err) {
+      console.error("Fehler beim Laden des Termin-Chats im DetailScreen:", err);
+      setDetailTerminThreadErrors((prev) => ({
+        ...prev,
+        [terminId]: err?.message || "Termin-Chat konnte nicht geladen werden.",
+      }));
+      return null;
+    } finally {
+      setDetailTerminThreadLoading((prev) => ({ ...prev, [terminId]: false }));
+    }
+  };
 
   return (
     <div>
@@ -370,64 +402,136 @@ function DetailScreen({
                     </div>
                   </div>
                 </div>
-                {meineBew ? (
-                  <div
-                    style={{ display: "flex", flexDirection: "column", gap: 8 }}
-                  >
-                    <div
-                      style={{
-                        padding: "8px",
-                        background: "#3A7D4418",
-                        borderRadius: 8,
-                        fontSize: 12,
-                        color: "#3A7D44",
-                        fontWeight: "bold",
-                        textAlign: "center",
-                      }}
-                    >
-                      ✓ Du bist für diesen Termin angemeldet
-                    </div>
-                    <div style={{ display: "flex", gap: 8 }}>
-                      {termine.filter((x) => {
-                        if (x.id === t.id) return false;
-                        return getTerminPlaetze(x).freiePlaetze > 0;
-                      }).length > 0 && (
+                {meineBew ? (() => {
+                  const activeTab = detailTerminTabs[t.id] || "mein-termin";
+                  const detailThread = detailTerminThreads[t.id];
+                  const detailLoadingThread = Boolean(detailTerminThreadLoading[t.id]);
+                  const detailThreadError = detailTerminThreadErrors[t.id] || "";
+
+                  return (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      <div
+                        style={{
+                          padding: "8px",
+                          background: "#3A7D4418",
+                          borderRadius: 8,
+                          fontSize: 12,
+                          color: "#3A7D44",
+                          fontWeight: "bold",
+                          textAlign: "center",
+                        }}
+                      >
+                        ✓ Du bist für diesen Termin angemeldet
+                      </div>
+
+                      <div style={{ display: "flex", gap: 8 }}>
                         <button
-                          onClick={() => onTerminWechsel(meineBew.id, t.id)}
+                          onClick={() => setDetailTerminTab(t.id, "mein-termin")}
                           style={{
                             flex: 1,
                             padding: "8px",
-                            borderRadius: 8,
-                            border: "1px solid #2C2416",
-                            background: "transparent",
-                            color: "#2C2416",
+                            borderRadius: 10,
+                            border: activeTab === "mein-termin" ? "none" : "1px solid #E0D8C8",
+                            background: activeTab === "mein-termin" ? "#2C2416" : "transparent",
+                            color: activeTab === "mein-termin" ? "#FAF7F2" : "#2C2416",
                             fontSize: 12,
                             cursor: "pointer",
                             fontFamily: "inherit",
+                            fontWeight: "bold",
                           }}
                         >
-                          📅 Termin ändern
+                          📅 Mein Termin
                         </button>
+                        <button
+                          onClick={async () => {
+                            setDetailTerminTab(t.id, "chat");
+                            await loadDetailTerminThread(t.id);
+                          }}
+                          style={{
+                            flex: 1,
+                            padding: "8px",
+                            borderRadius: 10,
+                            border: activeTab === "chat" ? "none" : "1px solid #E0D8C8",
+                            background: activeTab === "chat" ? "#2C2416" : "transparent",
+                            color: activeTab === "chat" ? "#FAF7F2" : "#2C2416",
+                            fontSize: 12,
+                            cursor: "pointer",
+                            fontFamily: "inherit",
+                            fontWeight: "bold",
+                          }}
+                        >
+                          💬 Chat
+                        </button>
+                      </div>
+
+                      {activeTab === "chat" ? (
+                        <div style={{ marginTop: 2 }}>
+                          {detailLoadingThread ? (
+                            <div style={{ fontSize: 12, color: "#8B7355" }}>
+                              Termin-Chat wird geladen …
+                            </div>
+                          ) : detailThreadError ? (
+                            <div style={{ fontSize: 12, color: "#B53A2D", fontWeight: "bold" }}>
+                              {detailThreadError}
+                            </div>
+                          ) : detailThread?.id ? (
+                            <MessageThreadView
+                              threadId={detailThread.id}
+                              title="Termin-Chat"
+                              emptyText="Noch keine Nachrichten zu diesem Termin vorhanden."
+                              height={280}
+                              onMessageSent={() => loadDetailTerminThread(t.id)}
+                            />
+                          ) : (
+                            <div style={{ fontSize: 12, color: "#8B7355" }}>
+                              Noch kein Termin-Chat vorhanden.
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <div style={{ display: "flex", gap: 8 }}>
+                          {termine.filter((x) => {
+                            if (x.id === t.id) return false;
+                            return getTerminPlaetze(x).freiePlaetze > 0;
+                          }).length > 0 && (
+                            <button
+                              onClick={() => onTerminWechsel(meineBew.id, t.id)}
+                              style={{
+                                flex: 1,
+                                padding: "8px",
+                                borderRadius: 8,
+                                border: "1px solid #2C2416",
+                                background: "transparent",
+                                color: "#2C2416",
+                                fontSize: 12,
+                                cursor: "pointer",
+                                fontFamily: "inherit",
+                              }}
+                            >
+                              📅 Termin ändern
+                            </button>
+                          )}
+                          <button
+                            onClick={() => onAbmelden(meineBew.id, t.id)}
+                            style={{
+                              flex: 1,
+                              padding: "8px",
+                              borderRadius: 8,
+                              border: "1px solid #E85C5C",
+                              background: "transparent",
+                              color: "#E85C5C",
+                              fontSize: 12,
+                              cursor: "pointer",
+                              fontFamily: "inherit",
+                            }}
+                          >
+                            Abmelden
+                          </button>
+                        </div>
                       )}
-                      <button
-                        onClick={() => onAbmelden(meineBew.id, t.id)}
-                        style={{
-                          flex: 1,
-                          padding: "8px",
-                          borderRadius: 8,
-                          border: "1px solid #E85C5C",
-                          background: "transparent",
-                          color: "#E85C5C",
-                          fontSize: 12,
-                          cursor: "pointer",
-                          fontFamily: "inherit",
-                        }}
-                      >
-                        Abmelden
-                      </button>
                     </div>
-                  </div>
-                ) : !belegt && isTerminNochNichtGestartet(t) ? (
+                  );
+                })() : !belegt && isTerminNochNichtGestartet(t) ? (
                   <button
                     onClick={() => {
                       if (user?.type === "verein") return;
