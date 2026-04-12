@@ -1,6 +1,79 @@
 import React, { useState, useEffect } from 'react';
 import { T, KATEGORIEN, SKILLS, getSkillLabel, getKat, getMedaille, getNextMedaille, getMedailleName, IMPRESSUM_TEXT, DATENSCHUTZ_TEXT, AGB_TEXT, formatDate, isTerminNochNichtGestartet, isTerminAktuell, supabase } from '../core/shared';
 
+
+const BEWERBUNG_INAKTIV_STATUS = ["storniert", "abgesagt", "cancelled", "canceled"];
+
+function bewerbungIstAktiv(bewerbung) {
+  const status = String(bewerbung?.status || "").toLowerCase();
+  return !BEWERBUNG_INAKTIV_STATUS.includes(status);
+}
+
+function getTerminFreiePlaetze(termin) {
+  const gesamtPlaetze = Number(
+    termin?.gesamt_plaetze ?? termin?.max_helfer ?? termin?.plaetze ?? 0
+  );
+  const aktiveBewerbungen = (termin?.bewerbungen || []).filter(bewerbungIstAktiv).length;
+  return Math.max(0, gesamtPlaetze - aktiveBewerbungen);
+}
+
+function parseTerminStart(termin) {
+  if (!termin?.datum) return null;
+  const time = termin?.startzeit || "00:00";
+  const value = new Date(`${termin.datum}T${time}`);
+  return Number.isNaN(value.getTime()) ? null : value;
+}
+
+function getNaechstenAktivenTermin(stelle) {
+  return (stelle?.termine || [])
+    .filter((termin) => isTerminAktuell(termin))
+    .sort((a, b) => {
+      const aTime = parseTerminStart(a)?.getTime() || Number.MAX_SAFE_INTEGER;
+      const bTime = parseTerminStart(b)?.getTime() || Number.MAX_SAFE_INTEGER;
+      return aTime - bTime;
+    })[0] || null;
+}
+
+function getStelleHighlightState(stelle) {
+  const naechsterTermin = getNaechstenAktivenTermin(stelle);
+  const isDringend = Boolean(stelle?.dringend);
+
+  let isBald = false;
+  let isFastVoll = false;
+  let freiePlaetze = null;
+  let stundenBisStart = null;
+
+  if (naechsterTermin) {
+    const start = parseTerminStart(naechsterTermin);
+    if (start) {
+      stundenBisStart = (start.getTime() - Date.now()) / (1000 * 60 * 60);
+      isBald = stundenBisStart >= 0 && stundenBisStart <= 48
+    }
+    freiePlaetze = getTerminFreiePlaetze(naechsterTermin);
+    isFastVoll = freiePlaetze > 0 && freiePlaetze <= 2
+  }
+
+  const badges = [];
+  if (isDringend) badges.push({ "label": "🔴 Dringend", "bg": "#FDECEC", "color": "#B53A2D", "border": "#F3C4BD" })
+  if (isBald) badges.push({ "label": "⏰ Bald", "bg": "#FFF3E6", "color": "#A85A14", "border": "#F1D1A6" })
+  if (isFastVoll) badges.push({ "label": "🔥 Fast voll", "bg": "#ECF8EF", "color": "#2C6B36", "border": "#BFE2C8" })
+
+  const priority = isDringend ? 3 : isBald ? 2 : isFastVoll ? 1 : 0
+
+  return {
+    isDringend,
+    isBald,
+    isFastVoll,
+    isHighlight: priority > 0,
+    priority,
+    badges,
+    naechsterTermin,
+    freiePlaetze,
+    stundenBisStart,
+  };
+}
+
+
 function Header({ title, subtitle, onLogout, onBack }) {
   return (
     <div
@@ -56,27 +129,29 @@ function Header({ title, subtitle, onLogout, onBack }) {
   );
 }
 
-function StelleCard({ stelle, verein, onClick, user }) {
+function StelleCard({ stelle, verein, onClick, user, highlight = false }) {
   const kat = getKat(stelle.kategorie);
-  const jetzt = new Date();
-  const freieTermine = (stelle.termine || []).filter(
-    (t) => (t.freie_plaetze || 0) > 0 && isTerminAktuell(t)
-  ).length;
+  const highlightState = getStelleHighlightState(stelle);
+  const aktiveTermine = (stelle.termine || []).filter((t) => isTerminAktuell(t));
+  const freieTermine = aktiveTermine.filter((t) => getTerminFreiePlaetze(t) > 0).length;
+  const showHighlight = highlight || highlightState.isHighlight;
+
   return (
     <div
       onClick={onClick}
       style={{
-        background: "#FAF7F2",
+        background: showHighlight ? "#FFF9F0" : "#FAF7F2",
         borderRadius: 14,
         padding: "14px",
         marginBottom: 10,
-        border: "1px solid #E0D8C8",
+        border: showHighlight ? "2px solid #E6D2AB" : "1px solid #E0D8C8",
         cursor: "pointer",
         position: "relative",
         overflow: "hidden",
+        boxShadow: showHighlight ? "0 8px 22px rgba(200,169,110,0.14)" : "none",
       }}
     >
-      {stelle.dringend && (
+      {highlightState.isDringend && (
         <div
           style={{
             position: "absolute",
@@ -117,6 +192,28 @@ function StelleCard({ stelle, verein, onClick, user }) {
           <div style={{ color: "#8B7355", fontSize: 12, marginBottom: 6 }}>
             {verein?.name}
           </div>
+
+          {highlightState.badges.length > 0 && (
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
+              {highlightState.badges.map((badge) => (
+                <span
+                  key={badge.label}
+                  style={{
+                    fontSize: 10,
+                    color: badge.color,
+                    background: badge.bg,
+                    border: `1px solid ${badge.border}`,
+                    padding: "3px 8px",
+                    borderRadius: 999,
+                    fontWeight: "bold",
+                  }}
+                >
+                  {badge.label}
+                </span>
+              ))}
+            </div>
+          )}
+
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             <span
               style={{
@@ -152,10 +249,22 @@ function StelleCard({ stelle, verein, onClick, user }) {
             >
               {stelle.typ === "dauerhaft"
                 ? "🔄 Dauerhaft"
-                : `📅 ${freieTermine} Termin${
-                    freieTermine !== 1 ? "e" : ""
-                  } frei`}
+                : `📅 ${freieTermine} Termin${freieTermine !== 1 ? "e" : ""} frei`}
             </span>
+            {highlightState.isFastVoll && Number.isFinite(highlightState.freiePlaetze) && (
+              <span
+                style={{
+                  fontSize: 10,
+                  color: "#2C6B36",
+                  background: "#ECF8EF",
+                  padding: "2px 7px",
+                  borderRadius: 5,
+                  fontWeight: "bold",
+                }}
+              >
+                Noch {highlightState.freiePlaetze} Helfer gesucht
+              </span>
+            )}
           </div>
         </div>
       </div>
@@ -740,5 +849,6 @@ export {
   SectionLabel,
   RoleCard,
   EmptyState,
-  ErrorMsg
+  ErrorMsg,
+  getStelleHighlightState
 };
