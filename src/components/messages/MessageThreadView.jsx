@@ -25,6 +25,8 @@ function roleLabel(role) {
       return "Gemeinde";
     case "admin":
       return "Support";
+    case "freiwilliger":
+      return "Freiwilliger";
     default:
       return role || "Unbekannt";
   }
