@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import MeineGemeindePanel from "../components/messages/MeineGemeindePanel";
-import MessageThreadView from '../components/messages/MessageThreadView';
-import { getOrCreateTerminThread } from '../services/messages';
+import MessageThreadView from "../components/messages/MessageThreadView";
 import { supabase, T, KATEGORIEN, SKILLS, getSkillLabel, getKat, getMedaille, getNextMedaille, getMedailleName, IMPRESSUM_TEXT, DATENSCHUTZ_TEXT, AGB_TEXT, formatDate, getGemeindeByPlz, isKlarname, isTerminNochNichtGestartet, isTerminAktuell } from '../core/shared';
 import { Header, StelleCard, VereineListe, BottomBar, DatenschutzBox, Input, BigButton, Chip, InfoChip, SectionLabel, RoleCard, EmptyState, ErrorMsg } from '../components/ui';
 
@@ -665,6 +664,7 @@ function VereinDashboard({
   );
 }
 
+
 function VereinStelleDetail({
   stelle,
   onBack,
@@ -681,11 +681,18 @@ function VereinStelleDetail({
   const alleTermine = stelle.termine || [];
   const [verschiebeTermin, setVerschiebeTermin] = useState(null);
   const [wartelisten, setWartelisten] = useState({});
+  const [neuesDatum, setNeuesDatum] = useState("");
+  const [neueStartzeit, setNeueStartzeit] = useState("");
+  const [neueEndzeit, setNeueEndzeit] = useState("");
+  const [terminTabs, setTerminTabs] = useState({});
+  const [terminThreads, setTerminThreads] = useState({});
+  const [terminThreadLoading, setTerminThreadLoading] = useState({});
+  const [terminThreadErrors, setTerminThreadErrors] = useState({});
 
   useEffect(() => {
-    // Warteliste für alle Termine laden
     const terminIds = alleTermine.map((t) => t.id).filter(Boolean);
     if (terminIds.length === 0) return;
+
     supabase
       .from("warteliste")
       .select("*")
@@ -701,20 +708,15 @@ function VereinStelleDetail({
         setWartelisten(grouped);
       });
   }, [stelle]);
-  const [neuesDatum, setNeuesDatum] = useState("");
-  const [neueStartzeit, setNeueStartzeit] = useState("");
-  const [neueEndzeit, setNeueEndzeit] = useState("");
-  const [terminTabs, setTerminTabs] = useState({});
-  const [terminThreads, setTerminThreads] = useState({});
-  const [terminThreadLoading, setTerminThreadLoading] = useState({});
-  const [terminThreadErrors, setTerminThreadErrors] = useState({});
 
   const openTerminChat = async (terminId) => {
-    if (!terminId) return;
+    if (!terminId) return null;
 
     setTerminTabs((prev) => ({ ...prev, [terminId]: "chat" }));
 
-    if (terminThreads[terminId]?.id) return terminThreads[terminId];
+    if (terminThreads[terminId]?.id) {
+      return terminThreads[terminId];
+    }
 
     setTerminThreadLoading((prev) => ({ ...prev, [terminId]: true }));
     setTerminThreadErrors((prev) => ({ ...prev, [terminId]: "" }));
@@ -819,6 +821,11 @@ function VereinStelleDetail({
         {alleTermine.map((t) => {
           const istVergangen = !isTerminAktuell(t);
           const nochNichtGestartet = isTerminNochNichtGestartet(t);
+          const activeTab = terminTabs[t.id] || "teilnehmer";
+          const thread = terminThreads[t.id];
+          const loadingThread = Boolean(terminThreadLoading[t.id]);
+          const threadError = terminThreadErrors[t.id] || "";
+          const aktiveTeilnehmer = aktiveBewerbungen(t.bewerbungen || []);
 
           return (
             <div
@@ -831,7 +838,6 @@ function VereinStelleDetail({
                 border: `1px solid ${istVergangen ? "#E0D8C8" : "#C8D8E8"}`,
               }}
             >
-              {/* Termin Header */}
               <div
                 style={{
                   display: "flex",
@@ -854,11 +860,11 @@ function VereinStelleDetail({
                   {istVergangen ? "Vergangen" : "Bevorstehend"}
                 </div>
               </div>
+
               <div style={{ fontSize: 12, color: "#3A7D44", marginBottom: 10 }}>
                 {getTerminPlaetze(t).freiePlaetze} Plätze frei
               </div>
 
-              {/* Termin-Aktionen für bevorstehende Termine */}
               {nochNichtGestartet && (
                 <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
                   <button
@@ -903,203 +909,198 @@ function VereinStelleDetail({
                 </div>
               )}
 
-              {(() => {
-                const activeTab = terminTabs[t.id] || "teilnehmer";
-                const thread = terminThreads[t.id];
-                const loadingThread = Boolean(terminThreadLoading[t.id]);
-                const threadError = terminThreadErrors[t.id] || "";
-                const aktiveTeilnehmer = aktiveBewerbungen(t.bewerbungen || []);
+              <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                <button
+                  onClick={() =>
+                    setTerminTabs((prev) => ({ ...prev, [t.id]: "teilnehmer" }))
+                  }
+                  style={{
+                    flex: 1,
+                    padding: "8px",
+                    borderRadius: 10,
+                    border: activeTab === "teilnehmer" ? "none" : "1px solid #E0D8C8",
+                    background: activeTab === "teilnehmer" ? "#2C2416" : "transparent",
+                    color: activeTab === "teilnehmer" ? "#FAF7F2" : "#2C2416",
+                    fontSize: 12,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    fontWeight: "bold",
+                  }}
+                >
+                  👥 Teilnehmer
+                </button>
 
-                return (
-                  <>
-                    <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-                      <button
-                        onClick={() =>
-                          setTerminTabs((prev) => ({ ...prev, [t.id]: "teilnehmer" }))
-                        }
-                        style={{
-                          flex: 1,
-                          padding: "8px",
-                          borderRadius: 10,
-                          border: activeTab === "teilnehmer" ? "none" : "1px solid #E0D8C8",
-                          background: activeTab === "teilnehmer" ? "#2C2416" : "transparent",
-                          color: activeTab === "teilnehmer" ? "#FAF7F2" : "#2C2416",
-                          fontSize: 12,
-                          cursor: "pointer",
-                          fontFamily: "inherit",
-                          fontWeight: "bold",
-                        }}
-                      >
-                        👥 Teilnehmer
-                      </button>
+                <button
+                  onClick={() => openTerminChat(t.id)}
+                  style={{
+                    flex: 1,
+                    padding: "8px",
+                    borderRadius: 10,
+                    border: activeTab === "chat" ? "none" : "1px solid #E0D8C8",
+                    background: activeTab === "chat" ? "#2C2416" : "transparent",
+                    color: activeTab === "chat" ? "#FAF7F2" : "#2C2416",
+                    fontSize: 12,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    fontWeight: "bold",
+                  }}
+                >
+                  💬 Chat
+                </button>
+              </div>
 
-                      <button
-                        onClick={() => openTerminChat(t.id)}
-                        style={{
-                          flex: 1,
-                          padding: "8px",
-                          borderRadius: 10,
-                          border: activeTab === "chat" ? "none" : "1px solid #E0D8C8",
-                          background: activeTab === "chat" ? "#2C2416" : "transparent",
-                          color: activeTab === "chat" ? "#FAF7F2" : "#2C2416",
-                          fontSize: 12,
-                          cursor: "pointer",
-                          fontFamily: "inherit",
-                          fontWeight: "bold",
-                        }}
-                      >
-                        💬 Chat
-                      </button>
+              {activeTab === "chat" ? (
+                <div style={{ marginTop: 8, marginBottom: 12 }}>
+                  {loadingThread ? (
+                    <div style={{ fontSize: 12, color: "#8B7355" }}>
+                      Termin-Chat wird geladen …
                     </div>
+                  ) : threadError ? (
+                    <div style={{ fontSize: 12, color: "#B53A2D", fontWeight: "bold" }}>
+                      {threadError}
+                    </div>
+                  ) : thread?.id ? (
+                    <MessageThreadView
+                      threadId={thread.id}
+                      title="Termin-Chat"
+                      emptyText="Noch keine Nachrichten zu diesem Termin vorhanden."
+                      height={280}
+                      onMessageSent={() => openTerminChat(t.id)}
+                    />
+                  ) : (
+                    <div style={{ fontSize: 12, color: "#8B7355" }}>
+                      Noch kein Termin-Chat vorhanden.
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <>
+                  <SectionLabel>
+                    Angemeldete ({aktiveTeilnehmer.length})
+                  </SectionLabel>
+                  {aktiveTeilnehmer.length === 0 ? (
+                    <div style={{ fontSize: 12, color: "#8B7355" }}>
+                      Noch niemand angemeldet.
+                    </div>
+                  ) : (
+                    aktiveTeilnehmer.map((b) => (
+                      <div
+                        key={b.id}
+                        style={{
+                          background: "#F4F0E8",
+                          borderRadius: 10,
+                          padding: "12px",
+                          marginBottom: 8,
+                        }}
+                      >
+                        <div
+                          onClick={() => onFreiwilligerProfil({ ...b, termin: t })}
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            cursor: "pointer",
+                            marginBottom: 8,
+                          }}
+                        >
+                          <div>
+                            <div style={{ fontWeight: "bold", fontSize: 13 }}>
+                              👤 {b.freiwilliger_name}
+                            </div>
+                            <div style={{ fontSize: 12, color: "#8B7355" }}>
+                              📧 {b.freiwilliger_email}
+                            </div>
+                          </div>
+                          <div style={{ color: "#8B7355", fontSize: 18 }}>›</div>
+                        </div>
 
-                    {activeTab === "chat" ? (
-                      <div style={{ marginTop: 8, marginBottom: 12 }}>
-                        {loadingThread ? (
-                          <div style={{ fontSize: 12, color: "#8B7355" }}>
-                            Termin-Chat wird geladen …
+                        {nochNichtGestartet && (
+                          <button
+                            onClick={() => onStornieren && onStornieren(b.id, t.id)}
+                            style={{
+                              width: "100%",
+                              padding: "7px",
+                              borderRadius: 8,
+                              border: "1px solid #E85C5C",
+                              background: "transparent",
+                              color: "#E85C5C",
+                              fontSize: 12,
+                              cursor: "pointer",
+                              fontFamily: "inherit",
+                            }}
+                          >
+                            🗑 Anmeldung stornieren
+                          </button>
+                        )}
+
+                        {istVergangen && bewerbungIstOffen(b) && (
+                          <div style={{ display: "flex", gap: 8 }}>
+                            <button
+                              onClick={() => onBestaetigen(b.id, true)}
+                              style={{
+                                flex: 1,
+                                padding: "8px",
+                                borderRadius: 8,
+                                border: "none",
+                                background: "#3A7D44",
+                                color: "#fff",
+                                fontSize: 12,
+                                fontFamily: "inherit",
+                                cursor: "pointer",
+                                fontWeight: "bold",
+                              }}
+                            >
+                              ✓ Erschienen (+5)
+                            </button>
+                            <button
+                              onClick={() => onBestaetigen(b.id, false)}
+                              style={{
+                                flex: 1,
+                                padding: "8px",
+                                borderRadius: 8,
+                                border: "none",
+                                background: "#E85C5C",
+                                color: "#fff",
+                                fontSize: 12,
+                                fontFamily: "inherit",
+                                cursor: "pointer",
+                                fontWeight: "bold",
+                              }}
+                            >
+                              ✗ Nicht erschienen
+                            </button>
                           </div>
-                        ) : threadError ? (
-                          <div style={{ fontSize: 12, color: "#B53A2D", fontWeight: "bold" }}>
-                            {threadError}
+                        )}
+
+                        {istVergangen && bewerbungIstErschienen(b) && (
+                          <div
+                            style={{
+                              fontSize: 12,
+                              color: "#3A7D44",
+                              fontWeight: "bold",
+                            }}
+                          >
+                            ✓ Erschienen bestätigt
                           </div>
-                        ) : thread?.id ? (
-                          <MessageThreadView
-                            threadId={thread.id}
-                            title="Termin-Chat"
-                            emptyText="Noch keine Nachrichten zu diesem Termin vorhanden."
-                            height={280}
-                            onMessageSent={() => openTerminChat(t.id)}
-                          />
-                        ) : (
-                          <div style={{ fontSize: 12, color: "#8B7355" }}>
-                            Noch kein Termin-Chat vorhanden.
+                        )}
+
+                        {istVergangen && bewerbungIstNoShow(b) && (
+                          <div
+                            style={{
+                              fontSize: 12,
+                              color: "#E85C5C",
+                              fontWeight: "bold",
+                            }}
+                          >
+                            ✗ Nicht erschienen
                           </div>
                         )}
                       </div>
-                    ) : (
-                      <>
-                        <SectionLabel>
-                          Angemeldete ({aktiveTeilnehmer.length})
-                        </SectionLabel>
-                        {aktiveTeilnehmer.length === 0 ? (
-                          <div style={{ fontSize: 12, color: "#8B7355" }}>
-                            Noch niemand angemeldet.
-                          </div>
-                        ) : (
-                          aktiveTeilnehmer.map((b) => (
-                            <div
-                              key={b.id}
-                              style={{
-                                background: "#F4F0E8",
-                                borderRadius: 10,
-                                padding: "12px",
-                                marginBottom: 8,
-                              }}
-                            >
-                              <div
-                                onClick={() => onFreiwilligerProfil({ ...b, termin: t })}
-                                style={{
-                                  display: "flex",
-                                  justifyContent: "space-between",
-                                  alignItems: "center",
-                                  cursor: "pointer",
-                                  marginBottom: 8,
-                                }}
-                              >
-                                <div>
-                                  <div style={{ fontWeight: "bold", fontSize: 13 }}>
-                                    👤 {b.freiwilliger_name}
-                                  </div>
-                                  <div style={{ fontSize: 12, color: "#8B7355" }}>
-                                    📧 {b.freiwilliger_email}
-                                  </div>
-                                </div>
-                                <div style={{ color: "#8B7355", fontSize: 18 }}>›</div>
-                              </div>
-                              {nochNichtGestartet && (
-                                <button
-                                  onClick={() => onStornieren && onStornieren(b.id, t.id)}
-                                  style={{
-                                    width: "100%",
-                                    padding: "7px",
-                                    borderRadius: 8,
-                                    border: "1px solid #E85C5C",
-                                    background: "transparent",
-                                    color: "#E85C5C",
-                                    fontSize: 12,
-                                    cursor: "pointer",
-                                    fontFamily: "inherit",
-                                  }}
-                                >
-                                  🗑 Anmeldung stornieren
-                                </button>
-                              )}
-                              {istVergangen && bewerbungIstOffen(b) && (
-                                <div style={{ display: "flex", gap: 8 }}>
-                                  <button
-                                    onClick={() => onBestaetigen(b.id, true)}
-                                    style={{
-                                      flex: 1,
-                                      padding: "8px",
-                                      borderRadius: 8,
-                                      border: "none",
-                                      background: "#3A7D44",
-                                      color: "#fff",
-                                      fontSize: 12,
-                                      fontFamily: "inherit",
-                                      cursor: "pointer",
-                                      fontWeight: "bold",
-                                    }}
-                                  >
-                                    ✓ Erschienen (+5)
-                                  </button>
-                                  <button
-                                    onClick={() => onBestaetigen(b.id, false)}
-                                    style={{
-                                      flex: 1,
-                                      padding: "8px",
-                                      borderRadius: 8,
-                                      border: "none",
-                                      background: "#E85C5C",
-                                      color: "#fff",
-                                      fontSize: 12,
-                                      fontFamily: "inherit",
-                                      cursor: "pointer",
-                                      fontWeight: "bold",
-                                    }}
-                                  >
-                                    ✗ Nicht erschienen
-                                  </button>
-                                </div>
-                              )}
-                              {istVergangen && bewerbungIstErschienen(b) && (
-                                <div
-                                  style={{
-                                    fontSize: 12,
-                                    color: "#3A7D44",
-                                    fontWeight: "bold",
-                                  }}
-                                >
-                                  ✓ Erschienen bestätigt
-                                </div>
-                              )}
-                              {istVergangen && bewerbungIstNoShow(b) && (
-                                <div
-                                  style={{
-                                    fontSize: 12,
-                                    color: "#E85C5C",
-                                    fontWeight: "bold",
-                                  }}
-                                >
-                                  ✗ Nicht erschienen
-                                </div>
-                              )}
-                            </div>
-                          ))
-                        )}
-                      </>
-                    )}
-/* Warteliste */}
+                    ))
+                  )}
+                </>
+              )}
+
               {(wartelisten[t.id] || []).length > 0 && (
                 <div style={{ marginTop: 8 }}>
                   <div
@@ -1163,9 +1164,6 @@ function VereinStelleDetail({
                   ))}
                 </div>
               )}
-                  </>
-                );
-              })()}
             </div>
           );
         })}
@@ -1189,7 +1187,6 @@ function VereinStelleDetail({
         </button>
       </div>
 
-      {/* Verschieben Modal */}
       {verschiebeTermin && (
         <div
           style={{
@@ -1344,6 +1341,7 @@ function VereinStelleDetail({
     </div>
   );
 }
+
 
 function StelleErstellenScreen({ verein, onBack, onSave }) {
   const [titel, setTitel] = useState("");
