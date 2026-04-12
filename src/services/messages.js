@@ -19,13 +19,7 @@ export async function getCurrentActor() {
 
   const authId = user.id;
 
-  const [freiwilligerRes, vereinRes, gemeindeRes, adminRes] = await Promise.all([
-    supabase
-      .from("freiwillige")
-      .select("id, name, email, auth_id")
-      .eq("auth_id", authId)
-      .maybeSingle(),
-
+  const [vereinRes, gemeindeRes, adminRes, freiwilligerRes] = await Promise.all([
     supabase
       .from("vereine")
       .select("id, name, gemeinde_id, auth_id")
@@ -43,21 +37,18 @@ export async function getCurrentActor() {
       .select("id, email, auth_id")
       .eq("auth_id", authId)
       .maybeSingle(),
+
+    supabase
+      .from("freiwillige")
+      .select("id, name, email, auth_id")
+      .eq("auth_id", authId)
+      .maybeSingle(),
   ]);
 
-  if (freiwilligerRes.error) throw freiwilligerRes.error;
   if (vereinRes.error) throw vereinRes.error;
   if (gemeindeRes.error) throw gemeindeRes.error;
   if (adminRes.error) throw adminRes.error;
-
-  if (freiwilligerRes.data) {
-    return {
-      role: "freiwilliger",
-      userId: authId,
-      organizationId: freiwilligerRes.data.id,
-      data: freiwilligerRes.data,
-    };
-  }
+  if (freiwilligerRes.error) throw freiwilligerRes.error;
 
   if (vereinRes.data) {
     return {
@@ -83,6 +74,15 @@ export async function getCurrentActor() {
       userId: authId,
       organizationId: adminRes.data.id,
       data: adminRes.data,
+    };
+  }
+
+  if (freiwilligerRes.data) {
+    return {
+      role: "freiwilliger",
+      userId: authId,
+      organizationId: freiwilligerRes.data.id,
+      data: freiwilligerRes.data,
     };
   }
 
