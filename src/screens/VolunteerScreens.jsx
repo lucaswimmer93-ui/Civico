@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { supabase, T, KATEGORIEN, SKILLS, MEDAILLEN, getSkillLabel, getKat, getMedaille, getNextMedaille, getMedailleName, IMPRESSUM_TEXT, DATENSCHUTZ_TEXT, AGB_TEXT, formatDate, getGemeindeByPlz, isKlarname, isTerminNochNichtGestartet, isTerminAktuell } from '../core/shared';
 import { Header, StelleCard, VereineListe, BottomBar, DatenschutzBox, Input, BigButton, Chip, InfoChip, SectionLabel, RoleCard, EmptyState, ErrorMsg } from '../components/ui';
+import MessageThreadView from '../components/messages/MessageThreadView';
+import { getOrCreateTerminThread } from '../services/messages';
 
 const bewerbungIstErschienen = (bewerbung) =>
   bewerbung?.status === "erschienen" || Boolean(bewerbung?.bestaetigt);
@@ -1165,6 +1167,10 @@ function FreiwilligerProfil({
 }) {
   const [terminWechselStelle, setTerminWechselStelle] = useState(null);
   const [meineWarteliste, setMeineWarteliste] = useState([]);
+  const [aktiveAktionTabs, setAktiveAktionTabs] = useState({});
+  const [terminThreads, setTerminThreads] = useState({});
+  const [terminThreadLoading, setTerminThreadLoading] = useState({});
+  const [terminThreadErrors, setTerminThreadErrors] = useState({});
   const jetzt = new Date();
 
   useEffect(() => {
@@ -1228,6 +1234,34 @@ function FreiwilligerProfil({
       return hatBew && isTerminAktuell(t);
     })
   );
+
+  const setAktiveAktionTab = (terminId, tab) => {
+    if (!terminId) return;
+    setAktiveAktionTabs((prev) => ({ ...prev, [terminId]: tab }));
+  };
+
+  const loadTerminThread = async (terminId) => {
+    if (!terminId) return null;
+    if (terminThreads[terminId]?.id) return terminThreads[terminId];
+
+    setTerminThreadLoading((prev) => ({ ...prev, [terminId]: true }));
+    setTerminThreadErrors((prev) => ({ ...prev, [terminId]: '' }));
+
+    try {
+      const thread = await getOrCreateTerminThread(terminId);
+      setTerminThreads((prev) => ({ ...prev, [terminId]: thread }));
+      return thread;
+    } catch (err) {
+      console.error('Fehler beim Laden des Termin-Chats:', err);
+      setTerminThreadErrors((prev) => ({
+        ...prev,
+        [terminId]: err?.message || 'Termin-Chat konnte nicht geladen werden.',
+      }));
+      return null;
+    } finally {
+      setTerminThreadLoading((prev) => ({ ...prev, [terminId]: false }));
+    }
+  };
 
   return (
     <div>
@@ -1757,6 +1791,11 @@ function FreiwilligerProfil({
                 )
                 .find(Boolean);
               const kat = getKat(s.kategorie);
+              const terminId = meinTermin?.termin?.id;
+              const activeTab = terminId ? (aktiveAktionTabs[terminId] || "mein-termin") : "mein-termin";
+              const thread = terminId ? terminThreads[terminId] : null;
+              const loadingThread = terminId ? Boolean(terminThreadLoading[terminId]) : false;
+              const threadError = terminId ? terminThreadErrors[terminId] : "";
               return (
                 <div
                   key={s.id}
@@ -1767,7 +1806,7 @@ function FreiwilligerProfil({
                       display: "flex",
                       gap: 10,
                       alignItems: "center",
-                      marginBottom: 6,
+                      marginBottom: 10,
                     }}
                   >
                     <div
@@ -1805,82 +1844,147 @@ function FreiwilligerProfil({
                       )}
                     </div>
                   </div>
-                  {(s.termine || []).filter(
-                    (t) =>
-                      t.id !== meinTermin?.termin?.id &&
-                      getTerminPlaetze(t).freiePlaetze > 0 &&
-                      isTerminNochNichtGestartet(t)
-                  ).length > 0 && (
-                    <button
-                      onClick={() => setTerminWechselStelle(s)}
-                      style={{
-                        width: "100%",
-                        marginBottom: 6,
-                        padding: "7px",
-                        borderRadius: 8,
-                        border: "1px solid #2C2416",
-                        background: "transparent",
-                        color: "#2C2416",
-                        fontSize: 12,
-                        cursor: "pointer",
-                        fontFamily: "inherit",
-                      }}
-                    >
-                      {t.terminAendern}
-                    </button>
+
+                  {terminId && (
+                    <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+                      <button
+                        onClick={() => setAktiveAktionTab(terminId, "mein-termin")}
+                        style={{
+                          flex: 1,
+                          padding: "8px",
+                          borderRadius: 10,
+                          border: activeTab === "mein-termin" ? "none" : "1px solid #E0D8C8",
+                          background: activeTab === "mein-termin" ? "#2C2416" : "transparent",
+                          color: activeTab === "mein-termin" ? "#FAF7F2" : "#2C2416",
+                          fontSize: 12,
+                          cursor: "pointer",
+                          fontFamily: "inherit",
+                          fontWeight: "bold",
+                        }}
+                      >
+                        📅 Mein Termin
+                      </button>
+                      <button
+                        onClick={async () => {
+                          setAktiveAktionTab(terminId, "chat");
+                          await loadTerminThread(terminId);
+                        }}
+                        style={{
+                          flex: 1,
+                          padding: "8px",
+                          borderRadius: 10,
+                          border: activeTab === "chat" ? "none" : "1px solid #E0D8C8",
+                          background: activeTab === "chat" ? "#2C2416" : "transparent",
+                          color: activeTab === "chat" ? "#FAF7F2" : "#2C2416",
+                          fontSize: 12,
+                          cursor: "pointer",
+                          fontFamily: "inherit",
+                          fontWeight: "bold",
+                        }}
+                      >
+                        💬 Chat
+                      </button>
+                    </div>
                   )}
-                  <button
-                    onClick={async () => {
-                      if (meinTermin) {
-                        await supabase
-                          .from("bewerbungen")
-                          .update({
-                            status: "storniert",
-                            cancelled_at: new Date().toISOString(),
-                          })
-                          .eq("id", meinTermin.id);
-                        await supabase.rpc("increment_plaetze", {
-                          termin_id: meinTermin.termin.id,
-                        });
-                        await supabase
-                          .from("freiwillige")
-                          .update({
-                            punkte: Math.max(0, (user.data.punkte || 0) - 10),
-                            aktionen: Math.max(
-                              0,
-                              (user.data.aktionen || 0) - 1
-                            ),
-                          })
-                          .eq("id", user.data.id);
-                        setUser((prev) => ({
-                          ...prev,
-                          data: {
-                            ...prev.data,
-                            punkte: Math.max(0, (prev.data.punkte || 0) - 10),
-                            aktionen: Math.max(
-                              0,
-                              (prev.data.aktionen || 0) - 1
-                            ),
-                          },
-                        }));
-                        showToast("Schade, dass du dieses Mal nicht dabei bist.", "#E85C5C");
-                        await loadStellen(gemeindeId);
-                      }
-                    }}
-                    style={{
-                      width: "100%",
-                      padding: "7px",
-                      borderRadius: 8,
-                      border: "1px solid #E85C5C",
-                      background: "transparent",
-                      color: "#E85C5C",
-                      fontSize: 12,
-                      cursor: "pointer",
-                      fontFamily: "inherit",
-                    }}
-                  >
-                    {t.abmelden}
-                  </button>
+
+                  {activeTab === "chat" && terminId ? (
+                    <div style={{ marginBottom: 6 }}>
+                      {loadingThread ? (
+                        <div style={{ fontSize: 12, color: "#8B7355" }}>Termin-Chat wird geladen …</div>
+                      ) : threadError ? (
+                        <div style={{ fontSize: 12, color: "#B53A2D", fontWeight: "bold" }}>{threadError}</div>
+                      ) : thread?.id ? (
+                        <MessageThreadView
+                          threadId={thread.id}
+                          title="Termin-Chat"
+                          emptyText="Noch keine Nachrichten zu diesem Termin vorhanden."
+                          height={280}
+                          onMessageSent={() => loadTerminThread(terminId)}
+                        />
+                      ) : (
+                        <div style={{ fontSize: 12, color: "#8B7355" }}>Noch kein Termin-Chat vorhanden.</div>
+                      )}
+                    </div>
+                  ) : (
+                    <>
+                      {(s.termine || []).filter(
+                        (t) =>
+                          t.id !== meinTermin?.termin?.id &&
+                          getTerminPlaetze(t).freiePlaetze > 0 &&
+                          isTerminNochNichtGestartet(t)
+                      ).length > 0 && (
+                        <button
+                          onClick={() => setTerminWechselStelle(s)}
+                          style={{
+                            width: "100%",
+                            marginBottom: 6,
+                            padding: "7px",
+                            borderRadius: 8,
+                            border: "1px solid #2C2416",
+                            background: "transparent",
+                            color: "#2C2416",
+                            fontSize: 12,
+                            cursor: "pointer",
+                            fontFamily: "inherit",
+                          }}
+                        >
+                          {t.terminAendern}
+                        </button>
+                      )}
+                      <button
+                        onClick={async () => {
+                          if (meinTermin) {
+                            await supabase
+                              .from("bewerbungen")
+                              .update({
+                                status: "storniert",
+                                cancelled_at: new Date().toISOString(),
+                              })
+                              .eq("id", meinTermin.id);
+                            await supabase.rpc("increment_plaetze", {
+                              termin_id: meinTermin.termin.id,
+                            });
+                            await supabase
+                              .from("freiwillige")
+                              .update({
+                                punkte: Math.max(0, (user.data.punkte || 0) - 10),
+                                aktionen: Math.max(
+                                  0,
+                                  (user.data.aktionen || 0) - 1
+                                ),
+                              })
+                              .eq("id", user.data.id);
+                            setUser((prev) => ({
+                              ...prev,
+                              data: {
+                                ...prev.data,
+                                punkte: Math.max(0, (prev.data.punkte || 0) - 10),
+                                aktionen: Math.max(
+                                  0,
+                                  (prev.data.aktionen || 0) - 1
+                                ),
+                              },
+                            }));
+                            showToast("Schade, dass du dieses Mal nicht dabei bist.", "#E85C5C");
+                            await loadStellen(gemeindeId);
+                          }
+                        }}
+                        style={{
+                          width: "100%",
+                          padding: "7px",
+                          borderRadius: 8,
+                          border: "1px solid #E85C5C",
+                          background: "transparent",
+                          color: "#E85C5C",
+                          fontSize: 12,
+                          cursor: "pointer",
+                          fontFamily: "inherit",
+                        }}
+                      >
+                        {t.abmelden}
+                      </button>
+                    </>
+                  )}
                 </div>
               );
             })
