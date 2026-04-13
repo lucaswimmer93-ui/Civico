@@ -39,6 +39,7 @@ export default function MessageThreadView({
   className = "",
   height = 420,
   onMessageSent,
+  senderLabels = {},
 }) {
   const [messages, setMessages] = useState([]);
   const [draft, setDraft] = useState("");
@@ -145,7 +146,7 @@ export default function MessageThreadView({
             >
               <div className="mb-1 flex items-center justify-between gap-3">
                 <span className="text-sm font-medium text-gray-900">
-                  {roleLabel(message.sender_role)}
+                  {senderLabels?.[message.sender_role] || roleLabel(message.sender_role)}
                 </span>
                 <span className="text-xs text-gray-500">
                   {formatDateTime(message.created_at)}
