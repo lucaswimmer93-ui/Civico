@@ -1270,6 +1270,7 @@ function FreiwilligenDashboard({
 
         let termineMap = new Map();
         let vereineMap = new Map();
+        let stellenMap = new Map();
 
         if (terminIds.length > 0) {
           const { data: termineRows, error: termineError } = await supabase
@@ -1279,6 +1280,24 @@ function FreiwilligenDashboard({
 
           if (termineError) throw termineError;
           termineMap = new Map((termineRows || []).map((t) => [t.id, t]));
+        }
+
+        const stelleIds = [
+          ...new Set(
+            Array.from(termineMap.values())
+              .map((t) => t?.stelle_id)
+              .filter(Boolean)
+          ),
+        ];
+
+        if (stelleIds.length > 0) {
+          const { data: stellenRows, error: stellenError } = await supabase
+            .from("stellen")
+            .select("id, titel")
+            .in("id", stelleIds);
+
+          if (stellenError) throw stellenError;
+          stellenMap = new Map((stellenRows || []).map((s) => [s.id, s]));
         }
 
         if (vereinIds.length > 0) {
@@ -1291,11 +1310,15 @@ function FreiwilligenDashboard({
           vereineMap = new Map((vereineRows || []).map((v) => [v.id, v]));
         }
 
-        const data = threadList.map((thread) => ({
-          ...thread,
-          termine: termineMap.get(thread.termin_id) || null,
-          vereine: vereineMap.get(thread.verein_id) || null,
-        }));
+        const data = threadList.map((thread) => {
+          const termin = termineMap.get(thread.termin_id) || null;
+          return {
+            ...thread,
+            termine: termin,
+            vereine: vereineMap.get(thread.verein_id) || null,
+            stellen: termin?.stelle_id ? stellenMap.get(termin.stelle_id) || null : null,
+          };
+        });
 
         if (!active) return;
         setMeineChats(data || []);
@@ -1700,6 +1723,7 @@ function FreiwilligenKommunikation({
 
         let termineMap = new Map();
         let vereineMap = new Map();
+        let stellenMap = new Map();
 
         if (terminIds.length > 0) {
           const { data: termineRows, error: termineError } = await supabase
@@ -1709,6 +1733,24 @@ function FreiwilligenKommunikation({
 
           if (termineError) throw termineError;
           termineMap = new Map((termineRows || []).map((t) => [t.id, t]));
+        }
+
+        const stelleIds = [
+          ...new Set(
+            Array.from(termineMap.values())
+              .map((t) => t?.stelle_id)
+              .filter(Boolean)
+          ),
+        ];
+
+        if (stelleIds.length > 0) {
+          const { data: stellenRows, error: stellenError } = await supabase
+            .from("stellen")
+            .select("id, titel")
+            .in("id", stelleIds);
+
+          if (stellenError) throw stellenError;
+          stellenMap = new Map((stellenRows || []).map((s) => [s.id, s]));
         }
 
         if (vereinIds.length > 0) {
@@ -1721,11 +1763,15 @@ function FreiwilligenKommunikation({
           vereineMap = new Map((vereineRows || []).map((v) => [v.id, v]));
         }
 
-        const data = threadList.map((thread) => ({
-          ...thread,
-          termine: termineMap.get(thread.termin_id) || null,
-          vereine: vereineMap.get(thread.verein_id) || null,
-        }));
+        const data = threadList.map((thread) => {
+          const termin = termineMap.get(thread.termin_id) || null;
+          return {
+            ...thread,
+            termine: termin,
+            vereine: vereineMap.get(thread.verein_id) || null,
+            stellen: termin?.stelle_id ? stellenMap.get(termin.stelle_id) || null : null,
+          };
+        });
 
         if (!active) return;
         setMeineChats(data || []);
@@ -1784,9 +1830,7 @@ function FreiwilligenKommunikation({
               <div style={{ display: "grid", gap: 8, marginBottom: 12 }}>
                 {meineChats.map((thread) => {
                   const termin = thread.termine;
-                  const stelleTitel = Array.isArray(termin?.stellen)
-                    ? termin?.stellen?.[0]?.titel
-                    : termin?.stellen?.titel;
+                  const stelleTitel = thread.stellen?.titel || "Stelle";
                   const vereinName = thread.vereine?.name || "Verein";
                   const isActive = selectedChat?.id === thread.id;
 
