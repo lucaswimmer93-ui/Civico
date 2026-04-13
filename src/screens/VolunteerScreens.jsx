@@ -3677,6 +3677,8 @@ function FreiwilligerProfilVerein({
 }
 
 export {
+  DetailScreen,
+  VereinProfilPublic,
   FreiwilligenDashboard,
   EinstellungenScreen,
   FreiwilligerProfilVerein
