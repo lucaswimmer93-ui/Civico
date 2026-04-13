@@ -6,55 +6,44 @@ import {
   markThreadAsRead,
 } from "../../services/messages";
 
-function formatDateTime(value) {
+function formatTime(value) {
   if (!value) return "";
   try {
-    return new Date(value).toLocaleString("de-DE", {
-      dateStyle: "short",
-      timeStyle: "short",
+    return new Date(value).toLocaleTimeString("de-DE", {
+      hour: "2-digit",
+      minute: "2-digit",
     });
   } catch {
-    return value;
-  }
-}
-
-function roleLabel(role) {
-  switch (role) {
-    case "verein":
-      return "Verein";
-    case "gemeinde":
-      return "Gemeinde";
-    case "admin":
-      return "Support";
-    case "freiwilliger":
-      return "Freiwilliger";
-    default:
-      return role || "Unbekannt";
+    return "";
   }
 }
 
 export default function MessageThreadView({
   threadId,
-  title = "Nachrichten",
+  title = "Chat",
   emptyText = "Noch keine Nachrichten vorhanden.",
   className = "",
-  height = 420,
+  height = 360,
   onMessageSent,
-  senderLabels = {},
 }) {
   const [messages, setMessages] = useState([]);
   const [draft, setDraft] = useState("");
   const [loading, setLoading] = useState(false);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
+  const [currentUserId, setCurrentUserId] = useState(null);
   const scrollRef = useRef(null);
 
   const hasThread = useMemo(() => Boolean(threadId), [threadId]);
 
-  function getSenderLabel(message) {
-    const customLabel = senderLabels?.[message?.sender_role];
-    if (customLabel && String(customLabel).trim()) return String(customLabel).trim();
-    return roleLabel(message?.sender_role);
+  async function loadCurrentUser() {
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
+
+    if (userError) throw userError;
+    setCurrentUserId(user?.id || null);
   }
 
   async function loadMessages() {
@@ -76,6 +65,12 @@ export default function MessageThreadView({
   }
 
   useEffect(() => {
+    loadCurrentUser().catch((err) => {
+      console.error("Fehler beim Laden des aktuellen Users:", err);
+    });
+  }, []);
+
+  useEffect(() => {
     loadMessages();
   }, [threadId]);
 
@@ -83,7 +78,7 @@ export default function MessageThreadView({
     if (!threadId) return;
 
     const channel = supabase
-      .channel(`thread-messages-${threadId}`)
+      .channel(`messages-thread-${threadId}`)
       .on(
         "postgres_changes",
         {
@@ -98,7 +93,7 @@ export default function MessageThreadView({
             setMessages(data || []);
             await markThreadAsRead(threadId);
           } catch (err) {
-            console.error("Realtime-Update für Nachrichten fehlgeschlagen:", err);
+            console.error("Realtime-Update fehlgeschlagen:", err);
           }
         }
       )
@@ -114,8 +109,8 @@ export default function MessageThreadView({
     scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages]);
 
-  async function handleSend(e) {
-    e.preventDefault();
+  async function handleSend(event) {
+    event.preventDefault();
 
     if (!threadId || sending) return;
     if (!draft.trim()) return;
@@ -124,7 +119,7 @@ export default function MessageThreadView({
     setError("");
 
     try {
-      const newMessage = await sendMessage(threadId, draft);
+      const newMessage = await sendMessage(threadId, draft.trim());
       setMessages((prev) => [...prev, newMessage]);
       setDraft("");
 
@@ -132,92 +127,197 @@ export default function MessageThreadView({
         onMessageSent(newMessage);
       }
     } catch (err) {
-      console.error("Fehler beim Senden der Nachricht:", err);
+      console.error("Fehler beim Senden:", err);
       setError(err?.message || "Nachricht konnte nicht gesendet werden.");
     } finally {
       setSending(false);
     }
   }
 
+  function isOwnMessage(message) {
+    return currentUserId && message?.sender_user_id === currentUserId;
+  }
+
   if (!hasThread) {
     return (
       <div
-        className={`rounded-2xl border border-gray-200 bg-white p-4 shadow-sm ${className}`}
+        className={className}
+        style={{
+          background: "#FFFDFC",
+          border: "1px solid #E0D8C8",
+          borderRadius: 14,
+          padding: 16,
+        }}
       >
-        <h3 className="mb-2 text-lg font-semibold">{title}</h3>
-        <p className="text-sm text-gray-500">
-          Es ist noch kein Nachrichtenverlauf verfügbar.
-        </p>
+        <div style={{ fontSize: 16, fontWeight: "bold", color: "#2C2416", marginBottom: 6 }}>
+          {title}
+        </div>
+        <div style={{ fontSize: 13, color: "#8B7355" }}>
+          Es ist noch kein Chat verfügbar.
+        </div>
       </div>
     );
   }
 
   return (
     <div
-      className={`rounded-2xl border border-gray-200 bg-white shadow-sm ${className}`}
+      className={className}
+      style={{
+        background: "#FFFDFC",
+        border: "1px solid #E0D8C8",
+        borderRadius: 14,
+        overflow: "hidden",
+      }}
     >
-      <div className="border-b border-gray-100 px-4 py-3">
-        <h3 className="text-lg font-semibold text-gray-900">{title}</h3>
+      <div
+        style={{
+          padding: "14px 16px",
+          borderBottom: "1px solid #F0EBE0",
+          background: "#FAF7F2",
+        }}
+      >
+        <div style={{ fontSize: 18, fontWeight: "bold", color: "#2C2416" }}>
+          {title}
+        </div>
       </div>
 
       {error ? (
-        <div className="mx-4 mt-4 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+        <div
+          style={{
+            margin: "12px 12px 0",
+            padding: "10px 12px",
+            borderRadius: 10,
+            background: "#FFF4F2",
+            border: "1px solid #F0C9C3",
+            color: "#B53A2D",
+            fontSize: 12,
+            fontWeight: "bold",
+          }}
+        >
           {error}
         </div>
       ) : null}
 
       <div
         ref={scrollRef}
-        className="space-y-3 overflow-y-auto px-4 py-4"
-        style={{ height }}
+        style={{
+          height,
+          overflowY: "auto",
+          padding: 12,
+          background: "#F7F3EC",
+          display: "flex",
+          flexDirection: "column",
+          gap: 10,
+        }}
       >
         {loading ? (
-          <div className="text-sm text-gray-500">Nachrichten werden geladen …</div>
+          <div style={{ fontSize: 13, color: "#8B7355" }}>
+            Nachrichten werden geladen …
+          </div>
         ) : messages.length === 0 ? (
-          <div className="text-sm text-gray-500">{emptyText}</div>
+          <div style={{ fontSize: 13, color: "#8B7355" }}>{emptyText}</div>
         ) : (
-          messages.map((message) => (
-            <div
-              key={message.id}
-              className="rounded-2xl border border-gray-100 bg-gray-50 px-4 py-3"
-            >
-              <div className="mb-1 flex items-center justify-between gap-3">
-                <span className="text-sm font-medium text-gray-900">
-                  {getSenderLabel(message)}
-                </span>
-                <span className="text-xs text-gray-500">
-                  {formatDateTime(message.created_at)}
-                </span>
-              </div>
+          messages.map((message) => {
+            const own = isOwnMessage(message);
 
-              <p className="whitespace-pre-wrap text-sm leading-6 text-gray-800">
-                {message.body}
-              </p>
-            </div>
-          ))
+            return (
+              <div
+                key={message.id}
+                style={{
+                  display: "flex",
+                  justifyContent: own ? "flex-end" : "flex-start",
+                }}
+              >
+                <div
+                  style={{
+                    maxWidth: "78%",
+                    padding: "10px 12px",
+                    borderRadius: 16,
+                    background: own ? "#2C2416" : "#FFFFFF",
+                    color: own ? "#FAF7F2" : "#2C2416",
+                    border: own ? "none" : "1px solid #E0D8C8",
+                    boxShadow: "0 1px 4px rgba(0,0,0,0.04)",
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize: 14,
+                      lineHeight: 1.5,
+                      whiteSpace: "pre-wrap",
+                      wordBreak: "break-word",
+                    }}
+                  >
+                    {message.body}
+                  </div>
+                  <div
+                    style={{
+                      marginTop: 6,
+                      fontSize: 10,
+                      color: own ? "#D9CDB7" : "#8B7355",
+                      textAlign: "right",
+                    }}
+                  >
+                    {formatTime(message.created_at)}
+                  </div>
+                </div>
+              </div>
+            );
+          })
         )}
       </div>
 
-      <form onSubmit={handleSend} className="border-t border-gray-100 p-4">
-        <label htmlFor="message-draft" className="mb-2 block text-sm font-medium text-gray-700">
+      <form
+        onSubmit={handleSend}
+        style={{
+          borderTop: "1px solid #F0EBE0",
+          padding: 12,
+          background: "#FAF7F2",
+        }}
+      >
+        <div style={{ fontSize: 12, color: "#8B7355", marginBottom: 6 }}>
           Neue Nachricht
-        </label>
-
+        </div>
         <textarea
-          id="message-draft"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           placeholder="Nachricht eingeben …"
-          rows={4}
+          rows={3}
           disabled={sending}
-          className="w-full rounded-xl border border-gray-300 px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-gray-500"
+          style={{
+            width: "100%",
+            resize: "none",
+            borderRadius: 12,
+            border: "1px solid #D8CFBF",
+            padding: "10px 12px",
+            fontFamily: "inherit",
+            fontSize: 14,
+            color: "#2C2416",
+            boxSizing: "border-box",
+            outline: "none",
+            background: "#FFFFFF",
+          }}
         />
-
-        <div className="mt-3 flex items-center justify-end">
+        <div
+          style={{
+            marginTop: 10,
+            display: "flex",
+            justifyContent: "flex-end",
+          }}
+        >
           <button
             type="submit"
             disabled={sending || !draft.trim()}
-            className="rounded-xl bg-gray-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-black disabled:cursor-not-allowed disabled:opacity-50"
+            style={{
+              padding: "10px 14px",
+              borderRadius: 10,
+              border: "none",
+              background: sending || !draft.trim() ? "#CBBFAE" : "#2C2416",
+              color: "#FAF7F2",
+              fontSize: 13,
+              fontWeight: "bold",
+              cursor: sending || !draft.trim() ? "not-allowed" : "pointer",
+              fontFamily: "inherit",
+            }}
           >
             {sending ? "Wird gesendet …" : "Nachricht senden"}
           </button>
