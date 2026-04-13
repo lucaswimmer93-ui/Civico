@@ -436,19 +436,41 @@ export async function getTerminDirectThreadsForVerein(terminId) {
 
   if (actor.role !== "verein") return [];
 
-  const { data, error } = await supabase
+  const { data: threads, error: threadsError } = await supabase
     .from("message_threads")
-    .select(`
-      *,
-      freiwillige ( id, name, email )
-    `)
+    .select("*")
     .eq("thread_type", "termin_direct")
     .eq("termin_id", terminId)
     .eq("verein_id", actor.organizationId)
     .order("last_message_at", { ascending: false });
 
-  if (error) throw error;
-  return data ?? [];
+  if (threadsError) throw threadsError;
+
+  const threadList = threads ?? [];
+
+  const freiwilligerIds = [
+    ...new Set(threadList.map((t) => t.freiwilliger_id).filter(Boolean)),
+  ];
+
+  if (freiwilligerIds.length === 0) {
+    return threadList;
+  }
+
+  const { data: freiwillige, error: freiwilligeError } = await supabase
+    .from("freiwillige")
+    .select("id, name, email")
+    .in("id", freiwilligerIds);
+
+  if (freiwilligeError) throw freiwilligeError;
+
+  const map = new Map(
+    (freiwillige ?? []).map((f) => [f.id, f])
+  );
+
+  return threadList.map((thread) => ({
+    ...thread,
+    freiwillige: map.get(thread.freiwilliger_id) || null,
+  }));
 }
 
 /**
