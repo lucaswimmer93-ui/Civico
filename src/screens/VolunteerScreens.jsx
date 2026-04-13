@@ -1255,7 +1255,48 @@ function FreiwilligenDashboard({
     async function loadMyChats() {
       setMeineChatsLoading(true);
       try {
-        const data = await getMyTerminDirectThreads();
+        const { data: threads, error: threadsError } = await supabase
+          .from("message_threads")
+          .select("*")
+          .eq("thread_type", "termin_direct")
+          .eq("freiwilliger_id", user.data.id)
+          .order("last_message_at", { ascending: false });
+
+        if (threadsError) throw threadsError;
+
+        const threadList = threads || [];
+        const terminIds = [...new Set(threadList.map((t) => t.termin_id).filter(Boolean))];
+        const vereinIds = [...new Set(threadList.map((t) => t.verein_id).filter(Boolean))];
+
+        let termineMap = new Map();
+        let vereineMap = new Map();
+
+        if (terminIds.length > 0) {
+          const { data: termineRows, error: termineError } = await supabase
+            .from("termine")
+            .select("id, datum, startzeit, endzeit, stelle_id")
+            .in("id", terminIds);
+
+          if (termineError) throw termineError;
+          termineMap = new Map((termineRows || []).map((t) => [t.id, t]));
+        }
+
+        if (vereinIds.length > 0) {
+          const { data: vereineRows, error: vereineError } = await supabase
+            .from("vereine")
+            .select("id, name")
+            .in("id", vereinIds);
+
+          if (vereineError) throw vereineError;
+          vereineMap = new Map((vereineRows || []).map((v) => [v.id, v]));
+        }
+
+        const data = threadList.map((thread) => ({
+          ...thread,
+          termine: termineMap.get(thread.termin_id) || null,
+          vereine: vereineMap.get(thread.verein_id) || null,
+        }));
+
         if (!active) return;
         setMeineChats(data || []);
       } catch (err) {
@@ -1644,7 +1685,48 @@ function FreiwilligenKommunikation({
       setError("");
 
       try {
-        const data = await getMyTerminDirectThreads();
+        const { data: threads, error: threadsError } = await supabase
+          .from("message_threads")
+          .select("*")
+          .eq("thread_type", "termin_direct")
+          .eq("freiwilliger_id", user.data.id)
+          .order("last_message_at", { ascending: false });
+
+        if (threadsError) throw threadsError;
+
+        const threadList = threads || [];
+        const terminIds = [...new Set(threadList.map((t) => t.termin_id).filter(Boolean))];
+        const vereinIds = [...new Set(threadList.map((t) => t.verein_id).filter(Boolean))];
+
+        let termineMap = new Map();
+        let vereineMap = new Map();
+
+        if (terminIds.length > 0) {
+          const { data: termineRows, error: termineError } = await supabase
+            .from("termine")
+            .select("id, datum, startzeit, endzeit, stelle_id")
+            .in("id", terminIds);
+
+          if (termineError) throw termineError;
+          termineMap = new Map((termineRows || []).map((t) => [t.id, t]));
+        }
+
+        if (vereinIds.length > 0) {
+          const { data: vereineRows, error: vereineError } = await supabase
+            .from("vereine")
+            .select("id, name")
+            .in("id", vereinIds);
+
+          if (vereineError) throw vereineError;
+          vereineMap = new Map((vereineRows || []).map((v) => [v.id, v]));
+        }
+
+        const data = threadList.map((thread) => ({
+          ...thread,
+          termine: termineMap.get(thread.termin_id) || null,
+          vereine: vereineMap.get(thread.verein_id) || null,
+        }));
+
         if (!active) return;
         setMeineChats(data || []);
         setSelectedChat((data || [])[0] || null);
