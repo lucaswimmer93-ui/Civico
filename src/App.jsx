@@ -23,6 +23,8 @@ import LoginScreen from './screens/LoginScreen';
 import {
   DetailScreen,
   VereinProfilPublic,
+  FreiwilligenDashboard,
+  FreiwilligenKommunikation,
   FreiwilligerProfil,
   EinstellungenScreen,
   FreiwilligerProfilVerein,
@@ -1208,6 +1210,7 @@ export default function App() {
             loadFollows(profil.id);
             loadNotifications(profil.auth_id);
             registerPush(profil.id);
+            setHomeTab("dashboard");
             setScreen("home");
             return;
           }
@@ -1361,6 +1364,18 @@ export default function App() {
         s.titel?.toLowerCase().includes(filterName.toLowerCase()) ||
         s.vereine?.name?.toLowerCase().includes(filterName.toLowerCase()))
   );
+
+  const volunteerHomeTabs = [
+    { id: "dashboard", label: "🏠 Dashboard" },
+    { id: "stellen", label: "🌱 Stellen" },
+    { id: "kommunikation", label: "💬 Kommunikation" },
+    { id: "vereine", label: "🏢 Vereine" },
+  ];
+
+  const defaultHomeTabs = [
+    { id: "stellen", label: "🌱 Stellen" },
+    { id: "vereine", label: "🏢 Vereine" },
+  ];
 
   // Handlers
   const handleBuchen = async (stelleId, terminId, isNew) => {
@@ -2116,10 +2131,7 @@ export default function App() {
               gap: 4,
             }}
           >
-            {[
-              { id: "stellen", label: "🌱 Stellen" },
-              { id: "vereine", label: "🏢 Vereine" },
-            ].map((tab) => (
+            {(user?.type === "freiwilliger" ? volunteerHomeTabs : defaultHomeTabs).map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setHomeTab(tab.id)}
@@ -2144,6 +2156,26 @@ export default function App() {
           </div>
 
           <div style={{ padding: "16px 16px 100px" }}>
+            {user?.type === "freiwilliger" && homeTab === "dashboard" && (
+              <FreiwilligenDashboard
+                user={user}
+                stellen={stellen}
+                follows={follows}
+                onOpenDetail={(stelle) => openDetail(stelle)}
+                onOpenKommunikation={() => setHomeTab("kommunikation")}
+                onOpenVerein={(verein) => {
+                  setSelectedVerein(verein);
+                  navigateTo("verein-profil");
+                }}
+                onOpenStellen={() => setHomeTab("stellen")}
+                onOpenProfil={() => navigateTo("profil")}
+              />
+            )}
+
+            {user?.type === "freiwilliger" && homeTab === "kommunikation" && (
+              <FreiwilligenKommunikation user={user} />
+            )}
+
             {/* STELLEN TAB */}
             {homeTab === "stellen" && (
               <>
@@ -2455,6 +2487,7 @@ export default function App() {
             } else if (type === "admin") {
               setScreen("admin-dashboard");
             } else {
+              setHomeTab(type === "freiwilliger" ? "dashboard" : "stellen");
               setScreen("home");
             }
             if (type === "freiwilliger") {
