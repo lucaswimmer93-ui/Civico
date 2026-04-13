@@ -1,12 +1,9 @@
 import { supabase } from "../lib/supabaseclient";
 
 /**
- * Hilfsfunktion: Rolle des aktuellen Users bestimmen
- * Erwartet, dass auth.uid() in genau einer der Tabellen existiert:
- * - freiwillige.auth_id
- * - vereine.auth_id
- * - gemeinden.auth_id
- * - admins.auth_id
+ * Aktuellen Actor bestimmen
+ * Reihenfolge bewusst: Verein -> Gemeinde -> Admin -> Freiwilliger
+ * damit Vereinslogins nicht fälschlich als Freiwillige erkannt werden.
  */
 export async function getCurrentActor() {
   const {
@@ -217,22 +214,43 @@ export async function getOrCreateSupportThread() {
 }
 
 /**
- * Termin-Chat:
- * Genau 1 Thread pro Termin
+ * Neuer Direktchat:
+ * 1 Termin + 1 Verein + 1 Freiwilliger = 1 Thread
  */
-export async function getOrCreateTerminThread(terminId) {
+export async function getOrCreateTerminDirectThread(terminId, freiwilligerId = null) {
   const actor = await getCurrentActor();
 
   if (!terminId) {
     throw new Error("terminId fehlt.");
   }
 
+  let finalFreiwilligerId = freiwilligerId;
+  let finalVereinId = null;
+
+  const { data: terminData, error: terminError } = await supabase
+    .from("termine")
+    .select("id, stelle_id, stellen!inner(id, verein_id)")
+    .eq("id", terminId)
+    .single();
+
+  if (terminError) throw terminError;
+
+  finalVereinId = Array.isArray(terminData?.stellen)
+    ? terminData.stellen[0]?.verein_id
+    : terminData?.stellen?.verein_id;
+
+  if (!finalVereinId) {
+    throw new Error("Verein für diesen Termin konnte nicht ermittelt werden.");
+  }
+
   if (actor.role === "freiwilliger") {
+    finalFreiwilligerId = actor.organizationId;
+
     const { data: bewerbung, error: bewerbungError } = await supabase
       .from("bewerbungen")
       .select("id, termin_id, status")
       .eq("termin_id", terminId)
-      .eq("freiwilliger_id", actor.organizationId)
+      .eq("freiwilliger_id", finalFreiwilligerId)
       .maybeSingle();
 
     if (bewerbungError) throw bewerbungError;
@@ -245,54 +263,145 @@ export async function getOrCreateTerminThread(terminId) {
       throw new Error("Für diesen Termin besteht keine aktive Anmeldung.");
     }
   } else if (actor.role === "verein") {
-    const { data: terminData, error: terminError } = await supabase
-      .from("termine")
-      .select("id, stelle_id, stellen!inner(id, verein_id)")
-      .eq("id", terminId)
-      .single();
-
-    if (terminError) throw terminError;
-
-    const vereinId = Array.isArray(terminData?.stellen)
-      ? terminData.stellen[0]?.verein_id
-      : terminData?.stellen?.verein_id;
-
-    if (!vereinId || vereinId !== actor.organizationId) {
+    if (finalVereinId !== actor.organizationId) {
       throw new Error("Dieser Termin gehört nicht zu deinem Verein.");
     }
-  } else if (actor.role !== "admin") {
-    throw new Error("Ungültige Rolle für Termin-Chat.");
+
+    if (!finalFreiwilligerId) {
+      throw new Error("freiwilligerId fehlt.");
+    }
+
+    const { data: bewerbung, error: bewerbungError } = await supabase
+      .from("bewerbungen")
+      .select("id, termin_id, status")
+      .eq("termin_id", terminId)
+      .eq("freiwilliger_id", finalFreiwilligerId)
+      .maybeSingle();
+
+    if (bewerbungError) throw bewerbungError;
+    if (!bewerbung) {
+      throw new Error("Dieser Freiwillige ist für den Termin nicht angemeldet.");
+    }
+
+    const status = String(bewerbung.status || "").toLowerCase();
+    if (["storniert", "abgesagt", "cancelled", "canceled"].includes(status)) {
+      throw new Error("Für diesen Freiwilligen besteht keine aktive Anmeldung.");
+    }
+  } else if (actor.role === "admin") {
+    if (!finalFreiwilligerId) {
+      throw new Error("freiwilligerId fehlt.");
+    }
+  } else {
+    throw new Error("Ungültige Rolle für Termin-Direktchat.");
   }
 
   const { data: existingThread, error: existingError } = await supabase
     .from("message_threads")
     .select("*")
-    .eq("thread_type", "termin")
+    .eq("thread_type", "termin_direct")
     .eq("termin_id", terminId)
+    .eq("verein_id", finalVereinId)
+    .eq("freiwilliger_id", finalFreiwilligerId)
     .maybeSingle();
 
   if (existingError) throw existingError;
   if (existingThread) return existingThread;
 
-  const insertPayload = {
-    thread_type: "termin",
-    termin_id: terminId,
-    created_by_user_id: actor.userId,
-  };
-
-  if (actor.role === "verein") {
-    insertPayload.verein_id = actor.organizationId;
-  }
-
   const { data: createdThread, error: createError } = await supabase
     .from("message_threads")
-    .insert([insertPayload])
+    .insert([
+      {
+        thread_type: "termin_direct",
+        termin_id: terminId,
+        verein_id: finalVereinId,
+        freiwilliger_id: finalFreiwilligerId,
+        created_by_user_id: actor.userId,
+        last_message_at: new Date().toISOString(),
+      },
+    ])
     .select()
     .single();
 
   if (createError) throw createError;
 
   return createdThread;
+}
+
+/**
+ * Threads für den Freiwilligen:
+ * nur seine eigenen Direktchats
+ */
+export async function getMyTerminDirectThreads() {
+  const actor = await getCurrentActor();
+
+  if (actor.role !== "freiwilliger") {
+    throw new Error("Nur Freiwillige dürfen eigene Termin-Chats abrufen.");
+  }
+
+  const { data, error } = await supabase
+    .from("message_threads")
+    .select(`
+      *,
+      termine (
+        id,
+        datum,
+        startzeit,
+        endzeit,
+        stelle_id
+      ),
+      vereine (
+        id,
+        name
+      )
+    `)
+    .eq("thread_type", "termin_direct")
+    .eq("freiwilliger_id", actor.organizationId)
+    .order("last_message_at", { ascending: false });
+
+  if (error) throw error;
+  return data ?? [];
+}
+
+/**
+ * Direktchats eines Vereins für einen Termin:
+ * Liste der Freiwilligen-Chats zu genau diesem Termin
+ */
+export async function getTerminDirectThreadsForVerein(terminId) {
+  const actor = await getCurrentActor();
+
+  if (actor.role !== "verein" && actor.role !== "admin") {
+    throw new Error("Nur Verein oder Admin darf Termin-Direktchats abrufen.");
+  }
+
+  let query = supabase
+    .from("message_threads")
+    .select(`
+      *,
+      freiwillige (
+        id,
+        name,
+        email
+      ),
+      termine (
+        id,
+        datum,
+        startzeit,
+        endzeit,
+        stelle_id
+      )
+    `)
+    .eq("thread_type", "termin_direct")
+    .eq("termin_id", terminId)
+    .order("last_message_at", { ascending: false });
+
+  if (actor.role === "verein") {
+    query = query.eq("verein_id", actor.organizationId);
+  }
+
+  const { data, error } = await query;
+
+  if (error) throw error;
+  return data ?? [];
 }
 
 export async function getThreadMessages(threadId) {
