@@ -24,8 +24,6 @@ import {
   DetailScreen,
   VereinProfilPublic,
   FreiwilligenDashboard,
-  FreiwilligenKommunikation,
-  FreiwilligerProfil,
   EinstellungenScreen,
   FreiwilligerProfilVerein,
 } from './screens/VolunteerScreens';
@@ -2170,10 +2168,6 @@ export default function App() {
                 onOpenStellen={() => setHomeTab("stellen")}
                 onOpenProfil={() => navigateTo("profil")}
               />
-            )}
-
-            {user?.type === "freiwilliger" && homeTab === "kommunikation" && (
-              <FreiwilligenKommunikation user={user} />
             )}
 
             {/* STELLEN TAB */}
