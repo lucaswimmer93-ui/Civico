@@ -224,3 +224,24 @@ export async function getTerminDirectThreadsForVerein(terminId) {
 
   return data ?? [];
 }
+
+export async function markThreadAsRead(threadId) {
+  const actor = await getCurrentActor();
+
+  const { error } = await supabase
+    .from("message_read_status")
+    .upsert(
+      [
+        {
+          thread_id: threadId,
+          user_id: actor.userId,
+          last_read_at: new Date().toISOString(),
+        },
+      ],
+      {
+        onConflict: "thread_id,user_id",
+      }
+    );
+
+  if (error) throw error;
+}
