@@ -973,6 +973,12 @@ export default function App() {
     setTimeout(() => setToast(null), 3000);
   };
 
+  const hasRealRoleSession = (expectedRole) => {
+    if (!user?.type || user.type !== expectedRole) return false;
+    const data = user?.data || {};
+    return Boolean(data.id && data.auth_id);
+  };
+
   const sortStellenNachHighlight = (items = []) =>
     [...items].sort((a, b) => {
       const aState = getStelleHighlightState(a);
@@ -1855,29 +1861,6 @@ export default function App() {
     ).values()
   );
 
-  const openGemeindeDashboard = () => {
-    const demoGemeinde = {
-      id: gemeindeId || 1,
-      name: 'Gemeinde Einhausen',
-      ort: 'Einhausen',
-      bundesland: 'Hessen',
-    };
-    setUser({ type: 'gemeinde', data: demoGemeinde });
-    setGemeindeId(demoGemeinde.id);
-    setScreen('gemeinde-dashboard');
-    setHistory([]);
-  };
-
-  const openAdminDashboard = () => {
-    const demoAdmin = {
-      id: 1,
-      name: 'Admin',
-      email: 'admin@civico.local',
-    };
-    setUser({ type: 'admin', data: demoAdmin });
-    setScreen('admin-dashboard');
-    setHistory([]);
-  };
 
 
   return (
@@ -2421,6 +2404,28 @@ export default function App() {
       )}
 
       {/* DETAIL */}
+      {screen === "gemeinde-dashboard" && user?.type === "gemeinde" && !hasRealRoleSession("gemeinde") && (
+        <div style={{ padding: 24 }}>
+          <div style={{ background: "#FFF8E8", border: "1px solid #E8C84A", borderRadius: 16, padding: 20, color: "#8B6800" }}>
+            <div style={{ fontSize: 20, fontWeight: "bold", marginBottom: 8 }}>Gemeinde-Vorschau deaktiviert</div>
+            <div style={{ fontSize: 14, lineHeight: 1.6 }}>
+              Dieser Bereich darf nur mit einem echten Gemeinde-Konto geöffnet werden. Bitte melde dich mit einem Gemeinde-Login an.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {screen === "admin-dashboard" && user?.type === "admin" && !hasRealRoleSession("admin") && (
+        <div style={{ padding: 24 }}>
+          <div style={{ background: "#FFF8E8", border: "1px solid #E8C84A", borderRadius: 16, padding: 20, color: "#8B6800" }}>
+            <div style={{ fontSize: 20, fontWeight: "bold", marginBottom: 8 }}>Admin-Vorschau deaktiviert</div>
+            <div style={{ fontSize: 14, lineHeight: 1.6 }}>
+              Dieser Bereich darf nur mit einem echten Admin-Konto geöffnet werden. Bitte melde dich mit einem Admin-Login an.
+            </div>
+          </div>
+        </div>
+      )}
+
       {screen === "detail" && selected && (
         <DetailScreen
           stelle={selected}
@@ -3273,7 +3278,7 @@ export default function App() {
 )}
 
 
-      {screen === "gemeinde-dashboard" && user?.type === "gemeinde" && (
+      {screen === "gemeinde-dashboard" && user?.type === "gemeinde" && hasRealRoleSession("gemeinde") && (
         <GemeindeDashboard
           user={user.data}
           stellen={stellen}
@@ -3289,7 +3294,7 @@ export default function App() {
         />
       )}
 
-      {screen === "admin-dashboard" && user?.type === "admin" && (
+      {screen === "admin-dashboard" && user?.type === "admin" && hasRealRoleSession("admin") && (
         <AdminDashboard
           gemeinden={[]}
           organisationen={derivedOrganisationen}
