@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { supabase } from "../../core/shared";
 import {
   getThreadMessages,
   sendMessage,
@@ -50,6 +51,12 @@ export default function MessageThreadView({
 
   const hasThread = useMemo(() => Boolean(threadId), [threadId]);
 
+  function getSenderLabel(message) {
+    const customLabel = senderLabels?.[message?.sender_role];
+    if (customLabel && String(customLabel).trim()) return String(customLabel).trim();
+    return roleLabel(message?.sender_role);
+  }
+
   async function loadMessages() {
     if (!threadId) return;
 
@@ -58,7 +65,7 @@ export default function MessageThreadView({
 
     try {
       const data = await getThreadMessages(threadId);
-      setMessages(data);
+      setMessages(data || []);
       await markThreadAsRead(threadId);
     } catch (err) {
       console.error("Fehler beim Laden der Nachrichten:", err);
@@ -70,6 +77,36 @@ export default function MessageThreadView({
 
   useEffect(() => {
     loadMessages();
+  }, [threadId]);
+
+  useEffect(() => {
+    if (!threadId) return;
+
+    const channel = supabase
+      .channel(`thread-messages-${threadId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "messages",
+          filter: `thread_id=eq.${threadId}`,
+        },
+        async () => {
+          try {
+            const data = await getThreadMessages(threadId);
+            setMessages(data || []);
+            await markThreadAsRead(threadId);
+          } catch (err) {
+            console.error("Realtime-Update für Nachrichten fehlgeschlagen:", err);
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [threadId]);
 
   useEffect(() => {
@@ -146,7 +183,7 @@ export default function MessageThreadView({
             >
               <div className="mb-1 flex items-center justify-between gap-3">
                 <span className="text-sm font-medium text-gray-900">
-                  {senderLabels?.[message.sender_role] || roleLabel(message.sender_role)}
+                  {getSenderLabel(message)}
                 </span>
                 <span className="text-xs text-gray-500">
                   {formatDateTime(message.created_at)}
