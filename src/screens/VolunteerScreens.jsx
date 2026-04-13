@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase, T, KATEGORIEN, SKILLS, MEDAILLEN, getSkillLabel, getKat, getMedaille, getNextMedaille, getMedailleName, IMPRESSUM_TEXT, DATENSCHUTZ_TEXT, AGB_TEXT, formatDate, getGemeindeByPlz, isKlarname, isTerminNochNichtGestartet, isTerminAktuell } from '../core/shared';
 import { Header, StelleCard, VereineListe, BottomBar, DatenschutzBox, Input, BigButton, Chip, InfoChip, SectionLabel, RoleCard, EmptyState, ErrorMsg } from '../components/ui';
 import MessageThreadView from '../components/messages/MessageThreadView';
-import { getMyTerminDirectThreads } from '../services/messages';
+import { getMyTerminDirectThreads, getOrCreateTerminDirectThread } from '../services/messages';
 
 const bewerbungIstErschienen = (bewerbung) =>
   bewerbung?.status === "erschienen" || Boolean(bewerbung?.bestaetigt);
@@ -79,6 +79,33 @@ function DetailScreen({
   const kat = getKat(stelle.kategorie);
   const lang = "de";
   const termine = (stelle.termine || []).filter((t) => isTerminAktuell(t));
+  const [detailTerminChats, setDetailTerminChats] = useState({});
+  const [detailTerminChatLoading, setDetailTerminChatLoading] = useState({});
+  const [detailTerminChatErrors, setDetailTerminChatErrors] = useState({});
+  const [detailTerminChatOpen, setDetailTerminChatOpen] = useState({});
+
+  const openDetailTerminChat = async (terminId) => {
+    if (!terminId) return null;
+
+    setDetailTerminChatOpen((prev) => ({ ...prev, [terminId]: true }));
+    setDetailTerminChatLoading((prev) => ({ ...prev, [terminId]: true }));
+    setDetailTerminChatErrors((prev) => ({ ...prev, [terminId]: "" }));
+
+    try {
+      const thread = await getOrCreateTerminDirectThread(terminId);
+      setDetailTerminChats((prev) => ({ ...prev, [terminId]: thread }));
+      return thread;
+    } catch (err) {
+      console.error("Fehler beim Laden des Direktchats im DetailScreen:", err);
+      setDetailTerminChatErrors((prev) => ({
+        ...prev,
+        [terminId]: err?.message || "Chat konnte nicht geladen werden.",
+      }));
+      return null;
+    } finally {
+      setDetailTerminChatLoading((prev) => ({ ...prev, [terminId]: false }));
+    }
+  };
 
   return (
     <div>
@@ -370,64 +397,125 @@ function DetailScreen({
                     </div>
                   </div>
                 </div>
-                {meineBew ? (
-                  <div
-                    style={{ display: "flex", flexDirection: "column", gap: 8 }}
-                  >
+                {meineBew ? (() => {
+                  const detailThread = detailTerminChats[t.id];
+                  const detailLoading = Boolean(detailTerminChatLoading[t.id]);
+                  const detailError = detailTerminChatErrors[t.id] || "";
+                  const detailOpen = Boolean(detailTerminChatOpen[t.id]);
+
+                  return (
                     <div
-                      style={{
-                        padding: "8px",
-                        background: "#3A7D4418",
-                        borderRadius: 8,
-                        fontSize: 12,
-                        color: "#3A7D44",
-                        fontWeight: "bold",
-                        textAlign: "center",
-                      }}
+                      style={{ display: "flex", flexDirection: "column", gap: 8 }}
                     >
-                      ✓ Du bist für diesen Termin angemeldet
-                    </div>
-                    <div style={{ display: "flex", gap: 8 }}>
-                      {termine.filter((x) => {
-                        if (x.id === t.id) return false;
-                        return getTerminPlaetze(x).freiePlaetze > 0;
-                      }).length > 0 && (
+                      <div
+                        style={{
+                          padding: "8px",
+                          background: "#3A7D4418",
+                          borderRadius: 8,
+                          fontSize: 12,
+                          color: "#3A7D44",
+                          fontWeight: "bold",
+                          textAlign: "center",
+                        }}
+                      >
+                        ✓ Du bist für diesen Termin angemeldet
+                      </div>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        {termine.filter((x) => {
+                          if (x.id === t.id) return false;
+                          return getTerminPlaetze(x).freiePlaetze > 0;
+                        }).length > 0 && (
+                          <button
+                            onClick={() => onTerminWechsel(meineBew.id, t.id)}
+                            style={{
+                              flex: 1,
+                              padding: "8px",
+                              borderRadius: 8,
+                              border: "1px solid #2C2416",
+                              background: "transparent",
+                              color: "#2C2416",
+                              fontSize: 12,
+                              cursor: "pointer",
+                              fontFamily: "inherit",
+                            }}
+                          >
+                            📅 Termin ändern
+                          </button>
+                        )}
                         <button
-                          onClick={() => onTerminWechsel(meineBew.id, t.id)}
+                          onClick={() => openDetailTerminChat(t.id)}
                           style={{
                             flex: 1,
                             padding: "8px",
                             borderRadius: 8,
                             border: "1px solid #2C2416",
+                            background: "#2C2416",
+                            color: "#FAF7F2",
+                            fontSize: 12,
+                            cursor: "pointer",
+                            fontFamily: "inherit",
+                            fontWeight: "bold",
+                          }}
+                        >
+                          💬 Chat
+                        </button>
+                        <button
+                          onClick={() => onAbmelden(meineBew.id, t.id)}
+                          style={{
+                            flex: 1,
+                            padding: "8px",
+                            borderRadius: 8,
+                            border: "1px solid #E85C5C",
                             background: "transparent",
-                            color: "#2C2416",
+                            color: "#E85C5C",
                             fontSize: 12,
                             cursor: "pointer",
                             fontFamily: "inherit",
                           }}
                         >
-                          📅 Termin ändern
+                          Abmelden
                         </button>
+                      </div>
+
+                      {detailOpen && (
+                        <div
+                          style={{
+                            marginTop: 4,
+                            background: "#FFFDFC",
+                            border: "1px solid #E0D8C8",
+                            borderRadius: 12,
+                            padding: 12,
+                          }}
+                        >
+                          {detailLoading ? (
+                            <div style={{ fontSize: 12, color: "#8B7355" }}>
+                              Chat wird geladen …
+                            </div>
+                          ) : detailError ? (
+                            <div style={{ fontSize: 12, color: "#B53A2D", fontWeight: "bold" }}>
+                              {detailError}
+                            </div>
+                          ) : detailThread?.id ? (
+                            <MessageThreadView
+                              threadId={detailThread.id}
+                              title="Chat mit dem Verein"
+                              emptyText="Noch keine Nachrichten vorhanden."
+                              height={260}
+                              senderLabels={{
+                                freiwilliger: user?.data?.name || "Du",
+                                verein: verein?.name || "Verein",
+                              }}
+                            />
+                          ) : (
+                            <div style={{ fontSize: 12, color: "#8B7355" }}>
+                              Kein Chat verfügbar.
+                            </div>
+                          )}
+                        </div>
                       )}
-                      <button
-                        onClick={() => onAbmelden(meineBew.id, t.id)}
-                        style={{
-                          flex: 1,
-                          padding: "8px",
-                          borderRadius: 8,
-                          border: "1px solid #E85C5C",
-                          background: "transparent",
-                          color: "#E85C5C",
-                          fontSize: 12,
-                          cursor: "pointer",
-                          fontFamily: "inherit",
-                        }}
-                      >
-                        Abmelden
-                      </button>
                     </div>
-                  </div>
-                ) : !belegt && isTerminNochNichtGestartet(t) ? (
+                  );
+                })() : !belegt && isTerminNochNichtGestartet(t) ? (
                   <button
                     onClick={() => {
                       if (user?.type === "verein") return;
