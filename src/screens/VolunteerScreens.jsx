@@ -1235,6 +1235,526 @@ function VereinProfilPublic({
   );
 }
 
+
+function FreiwilligenDashboard({
+  user,
+  stellen,
+  follows = { vereine: [], kategorien: [] },
+  onOpenDetail,
+  onOpenKommunikation,
+  onOpenVerein,
+  onOpenStellen,
+  onOpenProfil,
+}) {
+  const [meineChats, setMeineChats] = useState([]);
+  const [meineChatsLoading, setMeineChatsLoading] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadMyChats() {
+      setMeineChatsLoading(true);
+      try {
+        const data = await getMyTerminDirectThreads();
+        if (!active) return;
+        setMeineChats(data || []);
+      } catch (err) {
+        console.error("Dashboard-Chats konnten nicht geladen werden:", err);
+        if (!active) return;
+        setMeineChats([]);
+      } finally {
+        if (active) setMeineChatsLoading(false);
+      }
+    }
+
+    loadMyChats();
+    return () => {
+      active = false;
+    };
+  }, [user?.data?.id]);
+
+  const aktiveEinsaetze = (stellen || [])
+    .flatMap((stelle) =>
+      (stelle.termine || [])
+        .filter((termin) => isTerminAktuell(termin))
+        .map((termin) => {
+          const bewerbung = (termin.bewerbungen || []).find(
+            (b) => b.freiwilliger_id === user?.data?.id && bewerbungIstAktiv(b)
+          );
+          if (!bewerbung) return null;
+          return {
+            stelle,
+            termin,
+          };
+        })
+        .filter(Boolean)
+    )
+    .sort((a, b) => {
+      const aTime = new Date(`${a.termin.datum}T${a.termin.startzeit || "00:00"}`).getTime();
+      const bTime = new Date(`${b.termin.datum}T${b.termin.startzeit || "00:00"}`).getTime();
+      return aTime - bTime;
+    });
+
+  const naechsteEinsaetze = aktiveEinsaetze.slice(0, 3);
+
+  const vergangeneEinsaetze = (stellen || [])
+    .flatMap((stelle) =>
+      (stelle.termine || [])
+        .map((termin) => {
+          const bewerbung = (termin.bewerbungen || []).find(
+            (b) => b.freiwilliger_id === user?.data?.id && bewerbungIstErschienen(b)
+          );
+          if (!bewerbung) return null;
+          return { stelle, termin };
+        })
+        .filter(Boolean)
+    );
+
+  const geleisteteStunden = vergangeneEinsaetze.reduce((sum, item) => {
+    const start = item?.termin?.startzeit;
+    const end = item?.termin?.endzeit;
+    if (!start || !end) return sum;
+
+    try {
+      const startDate = new Date(`2000-01-01T${start}`);
+      const endDate = new Date(`2000-01-01T${end}`);
+      const diff = (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60);
+      return diff > 0 ? sum + diff : sum;
+    } catch {
+      return sum;
+    }
+  }, 0);
+
+  const gefolgteVereine = [...new Set(follows?.vereine || [])]
+    .map((vereinId) => (stellen || []).find((s) => s.verein_id === vereinId)?.vereine)
+    .filter(Boolean)
+    .slice(0, 3);
+
+  const gefolgteKategorien = (follows?.kategorien || [])
+    .map((katId) => KATEGORIEN.find((k) => k.id === katId))
+    .filter(Boolean)
+    .slice(0, 3);
+
+  return (
+    <div>
+      <div
+        style={{
+          background: "linear-gradient(160deg,#1A1208,#2C2416)",
+          padding: "20px 20px 18px",
+          color: "#F4F0E8",
+        }}
+      >
+        <div style={{ fontSize: 22, fontWeight: "bold", marginBottom: 4 }}>
+          Dashboard
+        </div>
+        <div style={{ fontSize: 13, color: "#C4B89A" }}>
+          Willkommen zurück, {user?.data?.name || "Helfer"} 👋
+        </div>
+      </div>
+
+      <div style={{ padding: "16px 16px 100px" }}>
+        <div
+          style={{
+            background: "linear-gradient(135deg,#2C2416,#4A3C28)",
+            borderRadius: 16,
+            padding: "18px 16px",
+            marginBottom: 16,
+            color: "#F4F0E8",
+          }}
+        >
+          <div style={{ fontSize: 13, color: "#C4B89A", marginBottom: 12 }}>
+            Dein Überblick
+          </div>
+          <div style={{ display: "flex", gap: 18, justifyContent: "space-between" }}>
+            <div style={{ textAlign: "center", flex: 1 }}>
+              <div style={{ fontSize: 24, fontWeight: "bold", color: "#E8A87C" }}>
+                {naechsteEinsaetze.length}
+              </div>
+              <div style={{ fontSize: 11, color: "#C4B89A" }}>aktive Einsätze</div>
+            </div>
+            <div style={{ textAlign: "center", flex: 1 }}>
+              <div style={{ fontSize: 24, fontWeight: "bold", color: "#6BAF7A" }}>
+                {geleisteteStunden.toFixed(1)}h
+              </div>
+              <div style={{ fontSize: 11, color: "#C4B89A" }}>geleistet</div>
+            </div>
+            <div style={{ textAlign: "center", flex: 1 }}>
+              <div style={{ fontSize: 24, fontWeight: "bold", color: "#C8A96E" }}>
+                {user?.data?.punkte || 0}
+              </div>
+              <div style={{ fontSize: 11, color: "#C4B89A" }}>Punkte</div>
+            </div>
+          </div>
+        </div>
+
+        <div
+          style={{
+            background: "#FAF7F2",
+            borderRadius: 14,
+            padding: "16px",
+            marginBottom: 14,
+            border: "1px solid #E0D8C8",
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10, alignItems: "center" }}>
+            <div style={{ fontSize: 11, color: "#8B7355", letterSpacing: 2, textTransform: "uppercase" }}>
+              🤝 HIER HELFE ICH
+            </div>
+            <button
+              onClick={onOpenStellen}
+              style={{
+                background: "none",
+                border: "none",
+                color: "#3A7D44",
+                cursor: "pointer",
+                fontSize: 12,
+                fontFamily: "inherit",
+                fontWeight: "bold",
+              }}
+            >
+              Alle Stellen →
+            </button>
+          </div>
+
+          {naechsteEinsaetze.length === 0 ? (
+            <div style={{ fontSize: 13, color: "#8B7355" }}>
+              Aktuell hast du keine aktiven Einsätze.
+            </div>
+          ) : (
+            naechsteEinsaetze.map(({ stelle, termin }) => (
+              <button
+                key={termin.id}
+                onClick={() => onOpenDetail && onOpenDetail(stelle)}
+                style={{
+                  width: "100%",
+                  textAlign: "left",
+                  padding: "12px",
+                  borderRadius: 12,
+                  border: "1px solid #E0D8C8",
+                  background: "#FFFDFC",
+                  marginBottom: 8,
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                }}
+              >
+                <div style={{ fontSize: 13, fontWeight: "bold", color: "#2C2416", marginBottom: 4 }}>
+                  {stelle.titel}
+                </div>
+                <div style={{ fontSize: 12, color: "#8B7355", marginBottom: 4 }}>
+                  {stelle.vereine?.name || "Verein"}
+                </div>
+                <div style={{ fontSize: 11, color: "#3A7D44" }}>
+                  📅 {formatDate(termin.datum)} · 🕐 {termin.startzeit}
+                  {termin.endzeit ? ` – ${termin.endzeit}` : ""}
+                </div>
+              </button>
+            ))
+          )}
+        </div>
+
+        <div
+          style={{
+            background: "#FAF7F2",
+            borderRadius: 14,
+            padding: "16px",
+            marginBottom: 14,
+            border: "1px solid #E0D8C8",
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10, alignItems: "center" }}>
+            <div style={{ fontSize: 11, color: "#8B7355", letterSpacing: 2, textTransform: "uppercase" }}>
+              💬 KOMMUNIKATION
+            </div>
+            <button
+              onClick={onOpenKommunikation}
+              style={{
+                background: "none",
+                border: "none",
+                color: "#3A7D44",
+                cursor: "pointer",
+                fontSize: 12,
+                fontFamily: "inherit",
+                fontWeight: "bold",
+              }}
+            >
+              Alle Chats →
+            </button>
+          </div>
+
+          {meineChatsLoading ? (
+            <div style={{ fontSize: 13, color: "#8B7355" }}>Chats werden geladen …</div>
+          ) : meineChats.length === 0 ? (
+            <div style={{ fontSize: 13, color: "#8B7355" }}>
+              Noch keine direkten Chats vorhanden.
+            </div>
+          ) : (
+            meineChats.slice(0, 2).map((thread) => {
+              const termin = thread.termine;
+              return (
+                <button
+                  key={thread.id}
+                  onClick={onOpenKommunikation}
+                  style={{
+                    width: "100%",
+                    textAlign: "left",
+                    padding: "12px",
+                    borderRadius: 12,
+                    border: "1px solid #E0D8C8",
+                    background: "#FFFDFC",
+                    marginBottom: 8,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                  }}
+                >
+                  <div style={{ fontSize: 13, fontWeight: "bold", color: "#2C2416", marginBottom: 4 }}>
+                    {thread.vereine?.name || "Verein"}
+                  </div>
+                  <div style={{ fontSize: 11, color: "#3A7D44" }}>
+                    📅 {termin?.datum ? formatDate(termin.datum) : "-"} · 🕐 {termin?.startzeit || "-"}
+                  </div>
+                </button>
+              );
+            })
+          )}
+        </div>
+
+        <div
+          style={{
+            background: "#FAF7F2",
+            borderRadius: 14,
+            padding: "16px",
+            marginBottom: 14,
+            border: "1px solid #E0D8C8",
+          }}
+        >
+          <div style={{ fontSize: 11, color: "#8B7355", letterSpacing: 2, textTransform: "uppercase", marginBottom: 10 }}>
+            ⭐ FOLGE ICH
+          </div>
+
+          {gefolgteVereine.length === 0 && gefolgteKategorien.length === 0 ? (
+            <div style={{ fontSize: 13, color: "#8B7355" }}>
+              Du folgst aktuell noch keinen Vereinen oder Kategorien.
+            </div>
+          ) : (
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {gefolgteVereine.map((verein) => (
+                <button
+                  key={verein.id}
+                  onClick={() => onOpenVerein && onOpenVerein(verein)}
+                  style={{
+                    padding: "6px 12px",
+                    borderRadius: 20,
+                    border: "1px solid #C8A96E",
+                    background: "#C8A96E22",
+                    color: "#8B6800",
+                    fontSize: 12,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                  }}
+                >
+                  🏢 {verein.name}
+                </button>
+              ))}
+              {gefolgteKategorien.map((kat) => (
+                <span
+                  key={kat.id}
+                  style={{
+                    padding: "6px 12px",
+                    borderRadius: 20,
+                    background: kat.color + "22",
+                    color: kat.color,
+                    fontSize: 12,
+                  }}
+                >
+                  {kat.icon} {kat.label}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div
+          style={{
+            background: "#FAF7F2",
+            borderRadius: 14,
+            padding: "16px",
+            marginBottom: 14,
+            border: "1px solid #E0D8C8",
+          }}
+        >
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 10, alignItems: "center" }}>
+            <div style={{ fontSize: 11, color: "#8B7355", letterSpacing: 2, textTransform: "uppercase" }}>
+              🏆 ERFOLGE
+            </div>
+            <button
+              onClick={onOpenProfil}
+              style={{
+                background: "none",
+                border: "none",
+                color: "#3A7D44",
+                cursor: "pointer",
+                fontSize: 12,
+                fontFamily: "inherit",
+                fontWeight: "bold",
+              }}
+            >
+              Profil →
+            </button>
+          </div>
+
+          <div style={{ display: "flex", gap: 12 }}>
+            <div style={{ flex: 1, background: "#FFFDFC", border: "1px solid #E0D8C8", borderRadius: 12, padding: "12px" }}>
+              <div style={{ fontSize: 20, fontWeight: "bold", color: "#E8A87C", marginBottom: 4 }}>
+                {vergangeneEinsaetze.length}
+              </div>
+              <div style={{ fontSize: 11, color: "#8B7355" }}>bestätigte Einsätze</div>
+            </div>
+            <div style={{ flex: 1, background: "#FFFDFC", border: "1px solid #E0D8C8", borderRadius: 12, padding: "12px" }}>
+              <div style={{ fontSize: 20, fontWeight: "bold", color: "#6BAF7A", marginBottom: 4 }}>
+                {geleisteteStunden.toFixed(1)}h
+              </div>
+              <div style={{ fontSize: 11, color: "#8B7355" }}>geleistete Zeit</div>
+            </div>
+            <div style={{ flex: 1, background: "#FFFDFC", border: "1px solid #E0D8C8", borderRadius: 12, padding: "12px" }}>
+              <div style={{ fontSize: 24, marginBottom: 4 }}>
+                {getMedaille(user?.data?.punkte || 0).icon}
+              </div>
+              <div style={{ fontSize: 11, color: "#8B7355" }}>aktuelle Medaille</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FreiwilligenKommunikation({
+  user,
+}) {
+  const [meineChats, setMeineChats] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [selectedChat, setSelectedChat] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadMyChats() {
+      setLoading(true);
+      setError("");
+
+      try {
+        const data = await getMyTerminDirectThreads();
+        if (!active) return;
+        setMeineChats(data || []);
+        setSelectedChat((data || [])[0] || null);
+      } catch (err) {
+        if (!active) return;
+        console.error("Kommunikation konnte nicht geladen werden:", err);
+        setError(err?.message || "Chats konnten nicht geladen werden.");
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    loadMyChats();
+    return () => {
+      active = false;
+    };
+  }, [user?.data?.id]);
+
+  return (
+    <div>
+      <div
+        style={{
+          background: "linear-gradient(160deg,#1A1208,#2C2416)",
+          padding: "20px 20px 18px",
+          color: "#F4F0E8",
+        }}
+      >
+        <div style={{ fontSize: 22, fontWeight: "bold", marginBottom: 4 }}>
+          Kommunikation
+        </div>
+        <div style={{ fontSize: 13, color: "#C4B89A" }}>
+          Deine Chats mit Vereinen
+        </div>
+      </div>
+
+      <div style={{ padding: "16px 16px 100px" }}>
+        <div
+          style={{
+            background: "#FAF7F2",
+            borderRadius: 14,
+            padding: "16px",
+            border: "1px solid #E0D8C8",
+          }}
+        >
+          {loading ? (
+            <div style={{ fontSize: 13, color: "#8B7355" }}>Chats werden geladen …</div>
+          ) : error ? (
+            <div style={{ fontSize: 13, color: "#B53A2D", fontWeight: "bold" }}>{error}</div>
+          ) : meineChats.length === 0 ? (
+            <div style={{ fontSize: 13, color: "#8B7355" }}>
+              Noch keine direkten Chats vorhanden.
+            </div>
+          ) : (
+            <>
+              <div style={{ display: "grid", gap: 8, marginBottom: 12 }}>
+                {meineChats.map((thread) => {
+                  const termin = thread.termine;
+                  const stelleTitel = Array.isArray(termin?.stellen)
+                    ? termin?.stellen?.[0]?.titel
+                    : termin?.stellen?.titel;
+                  const vereinName = thread.vereine?.name || "Verein";
+                  const isActive = selectedChat?.id === thread.id;
+
+                  return (
+                    <button
+                      key={thread.id}
+                      onClick={() => setSelectedChat(thread)}
+                      style={{
+                        width: "100%",
+                        textAlign: "left",
+                        border: isActive ? "2px solid #2C2416" : "1px solid #E0D8C8",
+                        background: isActive ? "#F3EBDD" : "#FFFDFC",
+                        borderRadius: 12,
+                        padding: "12px",
+                        cursor: "pointer",
+                        fontFamily: "inherit",
+                      }}
+                    >
+                      <div style={{ fontSize: 13, fontWeight: "bold", color: "#2C2416", marginBottom: 4 }}>
+                        {stelleTitel || "Stelle"}
+                      </div>
+                      <div style={{ fontSize: 12, color: "#8B7355", marginBottom: 4 }}>
+                        {vereinName}
+                      </div>
+                      <div style={{ fontSize: 11, color: "#3A7D44" }}>
+                        📅 {termin?.datum ? formatDate(termin.datum) : "-"} · 🕐 {termin?.startzeit || "-"}
+                        {termin?.endzeit ? ` – ${termin.endzeit}` : ""}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {selectedChat?.id ? (
+                <MessageThreadView
+                  threadId={selectedChat.id}
+                  title="Chat mit dem Verein"
+                  emptyText="Noch keine Nachrichten vorhanden."
+                  height={320}
+                />
+              ) : null}
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+
 function FreiwilligerProfil({
   user,
   setUser,
@@ -3743,6 +4263,8 @@ function FreiwilligerProfilVerein({
 export {
   DetailScreen,
   VereinProfilPublic,
+  FreiwilligenDashboard,
+  FreiwilligenKommunikation,
   FreiwilligerProfil,
   EinstellungenScreen,
   FreiwilligerProfilVerein
