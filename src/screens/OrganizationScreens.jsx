@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import MeineGemeindePanel from "../components/messages/MeineGemeindePanel";
 import MessageThreadView from "../components/messages/MessageThreadView";
-import { getOrCreateTerminThread } from '../services/messages';
+import { getTerminDirectThreadsForVerein, getOrCreateTerminDirectThread } from "../services/messages";
 import { supabase, T, KATEGORIEN, SKILLS, getSkillLabel, getKat, getMedaille, getNextMedaille, getMedailleName, IMPRESSUM_TEXT, DATENSCHUTZ_TEXT, AGB_TEXT, formatDate, getGemeindeByPlz, isKlarname, isTerminNochNichtGestartet, isTerminAktuell } from '../core/shared';
 import { Header, StelleCard, VereineListe, BottomBar, DatenschutzBox, Input, BigButton, Chip, InfoChip, SectionLabel, RoleCard, EmptyState, ErrorMsg } from '../components/ui';
 
@@ -665,7 +665,6 @@ function VereinDashboard({
   );
 }
 
-
 function VereinStelleDetail({
   stelle,
   onBack,
@@ -682,18 +681,11 @@ function VereinStelleDetail({
   const alleTermine = stelle.termine || [];
   const [verschiebeTermin, setVerschiebeTermin] = useState(null);
   const [wartelisten, setWartelisten] = useState({});
-  const [neuesDatum, setNeuesDatum] = useState("");
-  const [neueStartzeit, setNeueStartzeit] = useState("");
-  const [neueEndzeit, setNeueEndzeit] = useState("");
-  const [terminTabs, setTerminTabs] = useState({});
-  const [terminThreads, setTerminThreads] = useState({});
-  const [terminThreadLoading, setTerminThreadLoading] = useState({});
-  const [terminThreadErrors, setTerminThreadErrors] = useState({});
 
   useEffect(() => {
+    // Warteliste für alle Termine laden
     const terminIds = alleTermine.map((t) => t.id).filter(Boolean);
     if (terminIds.length === 0) return;
-
     supabase
       .from("warteliste")
       .select("*")
@@ -709,32 +701,60 @@ function VereinStelleDetail({
         setWartelisten(grouped);
       });
   }, [stelle]);
+  const [neuesDatum, setNeuesDatum] = useState("");
+  const [neueStartzeit, setNeueStartzeit] = useState("");
+  const [neueEndzeit, setNeueEndzeit] = useState("");
+  const [terminTabs, setTerminTabs] = useState({});
+  const [terminChatLists, setTerminChatLists] = useState({});
+  const [terminChatLoading, setTerminChatLoading] = useState({});
+  const [terminChatErrors, setTerminChatErrors] = useState({});
+  const [selectedTerminChat, setSelectedTerminChat] = useState({});
 
-  const openTerminChat = async (terminId) => {
-    if (!terminId) return null;
-
-    setTerminTabs((prev) => ({ ...prev, [terminId]: "chat" }));
-
-    if (terminThreads[terminId]?.id) {
-      return terminThreads[terminId];
-    }
-
-    setTerminThreadLoading((prev) => ({ ...prev, [terminId]: true }));
-    setTerminThreadErrors((prev) => ({ ...prev, [terminId]: "" }));
-
+  const loadTerminChats = async (terminId) => {
+    if (!terminId) return [];
+    setTerminChatLoading((prev) => ({ ...prev, [terminId]: true }));
+    setTerminChatErrors((prev) => ({ ...prev, [terminId]: "" }));
     try {
-      const thread = await getOrCreateTerminThread(terminId);
-      setTerminThreads((prev) => ({ ...prev, [terminId]: thread }));
-      return thread;
-    } catch (err) {
-      console.error("Fehler beim Laden des Termin-Chats:", err);
-      setTerminThreadErrors((prev) => ({
+      const chats = await getTerminDirectThreadsForVerein(terminId);
+      setTerminChatLists((prev) => ({ ...prev, [terminId]: chats || [] }));
+      setSelectedTerminChat((prev) => ({
         ...prev,
-        [terminId]: err?.message || "Termin-Chat konnte nicht geladen werden.",
+        [terminId]: prev?.[terminId] && (chats || []).some((c) => c.id === prev[terminId]?.id)
+          ? prev[terminId]
+          : (chats || [])[0] || null,
+      }));
+      return chats || [];
+    } catch (err) {
+      console.error("Fehler beim Laden der Termin-Chats:", err);
+      setTerminChatErrors((prev) => ({
+        ...prev,
+        [terminId]: err?.message || "Chats konnten nicht geladen werden.",
+      }));
+      return [];
+    } finally {
+      setTerminChatLoading((prev) => ({ ...prev, [terminId]: false }));
+    }
+  };
+
+  const openTerminDirectChat = async (terminId, freiwilliger) => {
+    if (!terminId || !freiwilliger?.id) return null;
+    setTerminTabs((prev) => ({ ...prev, [terminId]: "chats" }));
+    try {
+      const thread = await getOrCreateTerminDirectThread(terminId, freiwilliger.id);
+      const chats = await loadTerminChats(terminId);
+      const selected = (chats || []).find((item) => item.id === thread.id) || {
+        ...thread,
+        freiwillige: freiwilliger,
+      };
+      setSelectedTerminChat((prev) => ({ ...prev, [terminId]: selected }));
+      return selected;
+    } catch (err) {
+      console.error("Fehler beim Öffnen des Direktchats:", err);
+      setTerminChatErrors((prev) => ({
+        ...prev,
+        [terminId]: err?.message || "Direktchat konnte nicht geöffnet werden.",
       }));
       return null;
-    } finally {
-      setTerminThreadLoading((prev) => ({ ...prev, [terminId]: false }));
     }
   };
 
@@ -822,11 +842,6 @@ function VereinStelleDetail({
         {alleTermine.map((t) => {
           const istVergangen = !isTerminAktuell(t);
           const nochNichtGestartet = isTerminNochNichtGestartet(t);
-          const activeTab = terminTabs[t.id] || "teilnehmer";
-          const thread = terminThreads[t.id];
-          const loadingThread = Boolean(terminThreadLoading[t.id]);
-          const threadError = terminThreadErrors[t.id] || "";
-          const aktiveTeilnehmer = aktiveBewerbungen(t.bewerbungen || []);
 
           return (
             <div
@@ -839,6 +854,7 @@ function VereinStelleDetail({
                 border: `1px solid ${istVergangen ? "#E0D8C8" : "#C8D8E8"}`,
               }}
             >
+              {/* Termin Header */}
               <div
                 style={{
                   display: "flex",
@@ -861,11 +877,11 @@ function VereinStelleDetail({
                   {istVergangen ? "Vergangen" : "Bevorstehend"}
                 </div>
               </div>
-
               <div style={{ fontSize: 12, color: "#3A7D44", marginBottom: 10 }}>
                 {getTerminPlaetze(t).freiePlaetze} Plätze frei
               </div>
 
+              {/* Termin-Aktionen für bevorstehende Termine */}
               {nochNichtGestartet && (
                 <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
                   <button
@@ -910,198 +926,239 @@ function VereinStelleDetail({
                 </div>
               )}
 
-              <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-                <button
-                  onClick={() =>
-                    setTerminTabs((prev) => ({ ...prev, [t.id]: "teilnehmer" }))
-                  }
-                  style={{
-                    flex: 1,
-                    padding: "8px",
-                    borderRadius: 10,
-                    border: activeTab === "teilnehmer" ? "none" : "1px solid #E0D8C8",
-                    background: activeTab === "teilnehmer" ? "#2C2416" : "transparent",
-                    color: activeTab === "teilnehmer" ? "#FAF7F2" : "#2C2416",
-                    fontSize: 12,
-                    cursor: "pointer",
-                    fontFamily: "inherit",
-                    fontWeight: "bold",
-                  }}
-                >
-                  👥 Teilnehmer
-                </button>
+              {(() => {
+                const aktiveTeilnehmer = aktiveBewerbungen(t.bewerbungen || []);
+                const activeTab = terminTabs[t.id] || "teilnehmer";
+                const chatList = terminChatLists[t.id] || [];
+                const selectedChat = selectedTerminChat[t.id] || null;
+                const isChatLoading = Boolean(terminChatLoading[t.id]);
+                const chatError = terminChatErrors[t.id] || "";
 
-                <button
-                  onClick={() => openTerminChat(t.id)}
-                  style={{
-                    flex: 1,
-                    padding: "8px",
-                    borderRadius: 10,
-                    border: activeTab === "chat" ? "none" : "1px solid #E0D8C8",
-                    background: activeTab === "chat" ? "#2C2416" : "transparent",
-                    color: activeTab === "chat" ? "#FAF7F2" : "#2C2416",
-                    fontSize: 12,
-                    cursor: "pointer",
-                    fontFamily: "inherit",
-                    fontWeight: "bold",
-                  }}
-                >
-                  💬 Chat
-                </button>
-              </div>
-
-              {activeTab === "chat" ? (
-                <div style={{ marginTop: 8, marginBottom: 12 }}>
-                  {loadingThread ? (
-                    <div style={{ fontSize: 12, color: "#8B7355" }}>
-                      Termin-Chat wird geladen …
-                    </div>
-                  ) : threadError ? (
-                    <div style={{ fontSize: 12, color: "#B53A2D", fontWeight: "bold" }}>
-                      {threadError}
-                    </div>
-                  ) : thread?.id ? (
-                    <MessageThreadView
-                      threadId={thread.id}
-                      title="Termin-Chat"
-                      emptyText="Noch keine Nachrichten zu diesem Termin vorhanden."
-                      height={280}
-                      onMessageSent={() => openTerminChat(t.id)}
-                    />
-                  ) : (
-                    <div style={{ fontSize: 12, color: "#8B7355" }}>
-                      Noch kein Termin-Chat vorhanden.
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <>
-                  <SectionLabel>
-                    Angemeldete ({aktiveTeilnehmer.length})
-                  </SectionLabel>
-                  {aktiveTeilnehmer.length === 0 ? (
-                    <div style={{ fontSize: 12, color: "#8B7355" }}>
-                      Noch niemand angemeldet.
-                    </div>
-                  ) : (
-                    aktiveTeilnehmer.map((b) => (
-                      <div
-                        key={b.id}
+                return (
+                  <>
+                    <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                      <button
+                        onClick={() => setTerminTabs((prev) => ({ ...prev, [t.id]: "teilnehmer" }))}
                         style={{
-                          background: "#F4F0E8",
+                          flex: 1,
+                          padding: "8px",
                           borderRadius: 10,
-                          padding: "12px",
-                          marginBottom: 8,
+                          border: activeTab === "teilnehmer" ? "none" : "1px solid #E0D8C8",
+                          background: activeTab === "teilnehmer" ? "#2C2416" : "transparent",
+                          color: activeTab === "teilnehmer" ? "#FAF7F2" : "#2C2416",
+                          fontSize: 12,
+                          cursor: "pointer",
+                          fontFamily: "inherit",
+                          fontWeight: "bold",
                         }}
                       >
-                        <div
-                          onClick={() => onFreiwilligerProfil({ ...b, termin: t })}
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "center",
-                            cursor: "pointer",
-                            marginBottom: 8,
-                          }}
-                        >
-                          <div>
-                            <div style={{ fontWeight: "bold", fontSize: 13 }}>
-                              👤 {b.freiwilliger_name}
+                        👥 Teilnehmer
+                      </button>
+                      <button
+                        onClick={async () => {
+                          setTerminTabs((prev) => ({ ...prev, [t.id]: "chats" }));
+                          await loadTerminChats(t.id);
+                        }}
+                        style={{
+                          flex: 1,
+                          padding: "8px",
+                          borderRadius: 10,
+                          border: activeTab === "chats" ? "none" : "1px solid #E0D8C8",
+                          background: activeTab === "chats" ? "#2C2416" : "transparent",
+                          color: activeTab === "chats" ? "#FAF7F2" : "#2C2416",
+                          fontSize: 12,
+                          cursor: "pointer",
+                          fontFamily: "inherit",
+                          fontWeight: "bold",
+                        }}
+                      >
+                        💬 Chats
+                      </button>
+                    </div>
+
+                    {activeTab === "chats" ? (
+                      <div style={{ marginBottom: 12 }}>
+                        {isChatLoading ? (
+                          <div style={{ fontSize: 12, color: "#8B7355" }}>Chats werden geladen …</div>
+                        ) : chatError ? (
+                          <div style={{ fontSize: 12, color: "#B53A2D", fontWeight: "bold" }}>{chatError}</div>
+                        ) : aktiveTeilnehmer.length === 0 ? (
+                          <div style={{ fontSize: 12, color: "#8B7355" }}>Noch niemand angemeldet.</div>
+                        ) : (
+                          <>
+                            <div style={{ display: "grid", gap: 8, marginBottom: 12 }}>
+                              {aktiveTeilnehmer.map((b) => {
+                                const existing = chatList.find((item) => item.freiwilliger_id === b.freiwilliger_id);
+                                const isSelected = selectedChat?.freiwilliger_id === b.freiwilliger_id;
+                                return (
+                                  <button
+                                    key={b.id}
+                                    onClick={() => openTerminDirectChat(t.id, {
+                                      id: b.freiwilliger_id,
+                                      name: b.freiwilliger_name,
+                                      email: b.freiwilliger_email,
+                                    })}
+                                    style={{
+                                      width: "100%",
+                                      textAlign: "left",
+                                      border: isSelected ? "2px solid #2C2416" : "1px solid #E0D8C8",
+                                      background: isSelected ? "#F3EBDD" : "#FFFDFC",
+                                      borderRadius: 12,
+                                      padding: "12px",
+                                      cursor: "pointer",
+                                      fontFamily: "inherit",
+                                    }}
+                                  >
+                                    <div style={{ fontSize: 13, fontWeight: "bold", color: "#2C2416", marginBottom: 4 }}>
+                                      {b.freiwilliger_name || "Freiwilliger"}
+                                    </div>
+                                    <div style={{ fontSize: 12, color: "#8B7355", marginBottom: 4 }}>
+                                      {b.freiwilliger_email || "Keine E-Mail"}
+                                    </div>
+                                    <div style={{ fontSize: 11, color: existing ? "#3A7D44" : "#8B7355" }}>
+                                      {existing ? "Chat öffnen" : "Direktchat starten"}
+                                    </div>
+                                  </button>
+                                );
+                              })}
                             </div>
-                            <div style={{ fontSize: 12, color: "#8B7355" }}>
-                              📧 {b.freiwilliger_email}
-                            </div>
-                          </div>
-                          <div style={{ color: "#8B7355", fontSize: 18 }}>›</div>
-                        </div>
 
-                        {nochNichtGestartet && (
-                          <button
-                            onClick={() => onStornieren && onStornieren(b.id, t.id)}
-                            style={{
-                              width: "100%",
-                              padding: "7px",
-                              borderRadius: 8,
-                              border: "1px solid #E85C5C",
-                              background: "transparent",
-                              color: "#E85C5C",
-                              fontSize: 12,
-                              cursor: "pointer",
-                              fontFamily: "inherit",
-                            }}
-                          >
-                            🗑 Anmeldung stornieren
-                          </button>
-                        )}
-
-                        {istVergangen && bewerbungIstOffen(b) && (
-                          <div style={{ display: "flex", gap: 8 }}>
-                            <button
-                              onClick={() => onBestaetigen(b.id, true)}
-                              style={{
-                                flex: 1,
-                                padding: "8px",
-                                borderRadius: 8,
-                                border: "none",
-                                background: "#3A7D44",
-                                color: "#fff",
-                                fontSize: 12,
-                                fontFamily: "inherit",
-                                cursor: "pointer",
-                                fontWeight: "bold",
-                              }}
-                            >
-                              ✓ Erschienen (+5)
-                            </button>
-                            <button
-                              onClick={() => onBestaetigen(b.id, false)}
-                              style={{
-                                flex: 1,
-                                padding: "8px",
-                                borderRadius: 8,
-                                border: "none",
-                                background: "#E85C5C",
-                                color: "#fff",
-                                fontSize: 12,
-                                fontFamily: "inherit",
-                                cursor: "pointer",
-                                fontWeight: "bold",
-                              }}
-                            >
-                              ✗ Nicht erschienen
-                            </button>
-                          </div>
-                        )}
-
-                        {istVergangen && bewerbungIstErschienen(b) && (
-                          <div
-                            style={{
-                              fontSize: 12,
-                              color: "#3A7D44",
-                              fontWeight: "bold",
-                            }}
-                          >
-                            ✓ Erschienen bestätigt
-                          </div>
-                        )}
-
-                        {istVergangen && bewerbungIstNoShow(b) && (
-                          <div
-                            style={{
-                              fontSize: 12,
-                              color: "#E85C5C",
-                              fontWeight: "bold",
-                            }}
-                          >
-                            ✗ Nicht erschienen
-                          </div>
+                            {selectedChat?.id ? (
+                              <MessageThreadView
+                                threadId={selectedChat.id}
+                                title="Direktchat"
+                                emptyText="Noch keine Nachrichten vorhanden."
+                                height={280}
+                                senderLabels={{
+                                  verein: stelle?.vereine?.name || stelle?.verein_name || "Verein",
+                                  freiwilliger: selectedChat?.freiwillige?.name || "Freiwilliger",
+                                }}
+                              />
+                            ) : (
+                              <div style={{ fontSize: 12, color: "#8B7355" }}>
+                                Wähle einen Teilnehmer aus, um den Chat zu öffnen.
+                              </div>
+                            )}
+                          </>
                         )}
                       </div>
-                    ))
-                  )}
-                </>
-              )}
+                    ) : (
+                      <>
+                        <SectionLabel>
+                          Angemeldete ({aktiveTeilnehmer.length})
+                        </SectionLabel>
+                        {aktiveTeilnehmer.length === 0 ? (
+                          <div style={{ fontSize: 12, color: "#8B7355" }}>
+                            Noch niemand angemeldet.
+                          </div>
+                        ) : (
+                          aktiveTeilnehmer.map((b) => (
+                            <div
+                              key={b.id}
+                              style={{
+                                background: "#F4F0E8",
+                                borderRadius: 10,
+                                padding: "12px",
+                                marginBottom: 8,
+                              }}
+                            >
+                              <div
+                                onClick={() => onFreiwilligerProfil({ ...b, termin: t })}
+                                style={{
+                                  display: "flex",
+                                  justifyContent: "space-between",
+                                  alignItems: "center",
+                                  cursor: "pointer",
+                                  marginBottom: 8,
+                                }}
+                              >
+                                <div>
+                                  <div style={{ fontWeight: "bold", fontSize: 13 }}>
+                                    👤 {b.freiwilliger_name}
+                                  </div>
+                                  <div style={{ fontSize: 12, color: "#8B7355" }}>
+                                    📧 {b.freiwilliger_email}
+                                  </div>
+                                </div>
+                                <div style={{ color: "#8B7355", fontSize: 18 }}>›</div>
+                              </div>
+                              {nochNichtGestartet && (
+                                <button
+                                  onClick={() => onStornieren && onStornieren(b.id, t.id)}
+                                  style={{
+                                    width: "100%",
+                                    padding: "7px",
+                                    borderRadius: 8,
+                                    border: "1px solid #E85C5C",
+                                    background: "transparent",
+                                    color: "#E85C5C",
+                                    fontSize: 12,
+                                    cursor: "pointer",
+                                    fontFamily: "inherit",
+                                  }}
+                                >
+                                  🗑 Anmeldung stornieren
+                                </button>
+                              )}
+                              {istVergangen && bewerbungIstOffen(b) && (
+                                <div style={{ display: "flex", gap: 8 }}>
+                                  <button
+                                    onClick={() => onBestaetigen(b.id, true)}
+                                    style={{
+                                      flex: 1,
+                                      padding: "8px",
+                                      borderRadius: 8,
+                                      border: "none",
+                                      background: "#3A7D44",
+                                      color: "#fff",
+                                      fontSize: 12,
+                                      fontFamily: "inherit",
+                                      cursor: "pointer",
+                                      fontWeight: "bold",
+                                    }}
+                                  >
+                                    ✓ Erschienen (+5)
+                                  </button>
+                                  <button
+                                    onClick={() => onBestaetigen(b.id, false)}
+                                    style={{
+                                      flex: 1,
+                                      padding: "8px",
+                                      borderRadius: 8,
+                                      border: "none",
+                                      background: "#E85C5C",
+                                      color: "#fff",
+                                      fontSize: 12,
+                                      fontFamily: "inherit",
+                                      cursor: "pointer",
+                                      fontWeight: "bold",
+                                    }}
+                                  >
+                                    ✗ Nicht erschienen
+                                  </button>
+                                </div>
+                              )}
+                              {istVergangen && bewerbungIstErschienen(b) && (
+                                <div style={{ fontSize: 12, color: "#3A7D44", fontWeight: "bold" }}>
+                                  ✓ Erschienen bestätigt
+                                </div>
+                              )}
+                              {istVergangen && bewerbungIstNoShow(b) && (
+                                <div style={{ fontSize: 12, color: "#E85C5C", fontWeight: "bold" }}>
+                                  ✗ Nicht erschienen
+                                </div>
+                              )}
+                            </div>
+                          ))
+                        )}
+                      </>
+                    )}
 
+                  </>
+                );
+              })()}
+
+              {/* Warteliste */}
               {(wartelisten[t.id] || []).length > 0 && (
                 <div style={{ marginTop: 8 }}>
                   <div
@@ -1188,6 +1245,7 @@ function VereinStelleDetail({
         </button>
       </div>
 
+      {/* Verschieben Modal */}
       {verschiebeTermin && (
         <div
           style={{
@@ -1342,7 +1400,6 @@ function VereinStelleDetail({
     </div>
   );
 }
-
 
 function StelleErstellenScreen({ verein, onBack, onSave }) {
   const [titel, setTitel] = useState("");
