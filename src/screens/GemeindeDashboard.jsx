@@ -86,6 +86,7 @@ export default function GemeindeDashboard({
   const [supportThreadId, setSupportThreadId] = useState(null);
   const [supportLoading, setSupportLoading] = useState(false);
   const [supportError, setSupportError] = useState('');
+  const [kommunikationTab, setKommunikationTab] = useState('vereine');
   const [verschiebeTermin, setVerschiebeTermin] = useState(null);
   const [neuesDatum, setNeuesDatum] = useState('');
   const [neueStartzeit, setNeueStartzeit] = useState('');
@@ -616,6 +617,12 @@ export default function GemeindeDashboard({
     }
   }, [tab, supportThreadId, user?.id]);
 
+  useEffect(() => {
+    if (tab === 'kommunikation' && kommunikationTab === 'support' && !supportThreadId) {
+      ensureSupportThread();
+    }
+  }, [tab, kommunikationTab, supportThreadId, user?.id]);
+
   const handleBestaetigen = async (bewerbungId, erschienen) => {
     try {
       setDetailActionLoading(true);
@@ -830,8 +837,7 @@ export default function GemeindeDashboard({
           ['dashboard','Übersicht'],
           ['stellen','Eigene Stellen'],
           ['erstellen','Stelle erstellen'],
-          ['organisationen','Organisationen'],
-          ['support','Support'],
+          ['kommunikation','Kommunikation'],
           ['csr','CSR-Report'],
           ['settings','Einstellungen'],
         ].map(([key,label]) => (
@@ -1500,60 +1506,81 @@ export default function GemeindeDashboard({
         </div>
       )}
 
-      {tab === 'organisationen' && (
-        <div style={{ padding:'0 16px 24px' }}>
-          <MeineVereinePanel />
-        </div>
-      )}
-
-      {tab === 'support' && (
+      {tab === 'kommunikation' && (
         <div style={{ padding:'0 16px 24px' }}>
           <div style={{ background:'#FAF7F2', borderRadius:18, padding:18, border:'1px solid #E6D9C2', marginBottom:14 }}>
-            <div style={{ fontSize:18, fontWeight:700, color:'#2C2416', marginBottom:8 }}>Support an Civico</div>
+            <div style={{ fontSize:20, fontWeight:700, color:'#2C2416', marginBottom:8 }}>Kommunikation</div>
             <div style={{ fontSize:13, color:'#8B7355', lineHeight:1.6 }}>
-              Stelle hier Rückfragen, technische Probleme oder organisatorische Anliegen direkt an den Admin.
+              Hier laufen die Gespräche mit deinen Organisationen und der Support an Civico gebündelt zusammen.
             </div>
           </div>
 
-          {supportLoading ? (
-            <div style={{ background:'#FAF7F2', borderRadius:18, padding:18, border:'1px solid #E6D9C2' }}>
-              <div style={{ color:'#8B7355', fontSize:13 }}>Lade Support-Verlauf...</div>
-            </div>
-          ) : supportError ? (
-            <div style={{ background:'#FFF4F2', borderRadius:18, padding:18, border:'1px solid #F0C9C3' }}>
-              <div style={{ color:'#B53A2D', fontSize:13, fontWeight:700, marginBottom:10 }}>{supportError}</div>
+          <div style={{ display:'flex', gap:8, flexWrap:'wrap', marginBottom:14 }}>
+            {[
+              ['vereine','🏢 Vereine'],
+              ['support','🛟 Support'],
+            ].map(([key,label]) => (
               <button
-                onClick={ensureSupportThread}
-                style={{ border:'none', background:'#2C2416', color:'#fff', borderRadius:12, padding:'10px 14px', cursor:'pointer', fontFamily:'inherit', fontWeight:600 }}
+                key={key}
+                onClick={() => setKommunikationTab(key)}
+                style={{
+                  padding:'10px 14px',
+                  borderRadius:12,
+                  border: kommunikationTab === key ? 'none' : '1px solid #E0D8C8',
+                  background: kommunikationTab === key ? '#2C2416' : '#FAF7F2',
+                  color: kommunikationTab === key ? '#FAF7F2' : '#2C2416',
+                  fontSize:12,
+                  cursor:'pointer',
+                  fontFamily:'inherit',
+                  fontWeight:'bold'
+                }}
               >
-                Erneut versuchen
+                {label}
               </button>
-            </div>
-          ) : supportThreadId ? (
-            <div style={{ background:'#FAF7F2', borderRadius:18, padding:18, border:'1px solid #E6D9C2' }}>
-              <MessageThreadView
-                threadId={supportThreadId}
-                currentUserRole="gemeinde"
-                contextType="support"
-                organisation={supportOrganisation}
-                onMessageSent={ensureSupportThread}
-              />
-            </div>
-          ) : (
-            <EmptyState icon="💬" text="Noch kein Support-Thread" sub="Sobald der Support initialisiert ist, kannst du hier direkt schreiben." />
-          )}
+            ))}
+          </div>
 
-          {inbox.length > 0 && (
-            <div style={{ marginTop:14, background:'#FAF7F2', borderRadius:18, padding:18, border:'1px solid #E6D9C2' }}>
-              <SectionLabel>Frühere Hinweise</SectionLabel>
-              {inbox.map((msg, idx)=>(
-                <div key={msg.id || idx} style={{ background:'#F7F1E6', borderRadius:14, padding:14, marginBottom:10, border:'1px solid #E6D9C2' }}>
-                  <div style={{ fontWeight:700 }}>{msg.title || msg.betreff || 'Hinweis'}</div>
-                  <div style={{ fontSize:12, color:'#8B7355', margin:'4px 0 8px' }}>{msg.email || msg.absender || 'unbekannt'}</div>
-                  <div style={{ fontSize:13, color:'#5C4A32' }}>{msg.message || msg.text || ''}</div>
+          {kommunikationTab === 'vereine' ? (
+            <MeineVereinePanel />
+          ) : (
+            <>
+              <div style={{ background:'#FAF7F2', borderRadius:18, padding:18, border:'1px solid #E6D9C2', marginBottom:14 }}>
+                <div style={{ fontSize:18, fontWeight:700, color:'#2C2416', marginBottom:8 }}>Support an Civico</div>
+                <div style={{ fontSize:13, color:'#8B7355', lineHeight:1.6 }}>
+                  Stelle hier Rückfragen, technische Probleme oder organisatorische Anliegen direkt an den Admin.
                 </div>
-              ))}
-            </div>
+              </div>
+
+              {supportLoading ? (
+                <div style={{ background:'#FAF7F2', borderRadius:18, padding:18, border:'1px solid #E6D9C2' }}>
+                  <div style={{ color:'#8B7355', fontSize:13 }}>Lade Support-Verlauf...</div>
+                </div>
+              ) : supportError ? (
+                <div style={{ background:'#FFF4F2', borderRadius:18, padding:18, border:'1px solid #F0C9C3' }}>
+                  <div style={{ color:'#B53A2D', fontSize:13, fontWeight:700, marginBottom:10 }}>{supportError}</div>
+                  <button
+                    onClick={ensureSupportThread}
+                    style={{ border:'none', background:'#2C2416', color:'#fff', borderRadius:12, padding:'10px 14px', cursor:'pointer', fontFamily:'inherit', fontWeight:600 }}
+                  >
+                    Erneut versuchen
+                  </button>
+                </div>
+              ) : supportThreadId ? (
+                <div style={{ background:'#FAF7F2', borderRadius:18, padding:18, border:'1px solid #E6D9C2' }}>
+                  <MessageThreadView
+                    threadId={supportThreadId}
+                    currentUserRole="gemeinde"
+                    contextType="support"
+                    organisation={supportOrganisation}
+                    onMessageSent={ensureSupportThread}
+                  />
+                </div>
+              ) : (
+                <div style={{ background:'#FAF7F2', borderRadius:18, padding:18, border:'1px solid #E6D9C2' }}>
+                  <EmptyState icon="💬" text="Noch kein Support-Thread" sub="Sobald der Support initialisiert ist, erscheint er hier." />
+                </div>
+              )}
+            </>
           )}
         </div>
       )}

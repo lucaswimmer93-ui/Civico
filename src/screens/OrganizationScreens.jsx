@@ -70,6 +70,13 @@ function VereinDashboard({
   const [supportThreadId, setSupportThreadId] = useState(null);
   const [supportLoading, setSupportLoading] = useState(false);
   const [supportError, setSupportError] = useState('');
+  const [dashboardTab, setDashboardTab] = useState('stellen');
+  const [kommunikationTab, setKommunikationTab] = useState('termine');
+  const [vereinKommunikationLoading, setVereinKommunikationLoading] = useState(false);
+  const [vereinKommunikationError, setVereinKommunikationError] = useState('');
+  const [terminChatThreads, setTerminChatThreads] = useState([]);
+  const [selectedCommunicationThread, setSelectedCommunicationThread] = useState(null);
+
 
   const supportOrganisation = {
     type: 'verein',
@@ -120,6 +127,65 @@ function VereinDashboard({
       setSupportLoading(false);
     }
   };
+
+  const loadKommunikationHub = async () => {
+    if (!user?.data?.id) return;
+    try {
+      setVereinKommunikationLoading(true);
+      setVereinKommunikationError('');
+
+      const termineMitStelle = meineStellen.flatMap((stelle) =>
+        (stelle.termine || []).map((termin) => ({ stelle, termin }))
+      );
+
+      const chatResults = await Promise.all(
+        termineMitStelle.map(async ({ stelle, termin }) => {
+          try {
+            const rows = await getTerminDirectThreadsForVerein(termin.id);
+            return (rows || []).map((thread) => ({
+              ...thread,
+              stelleTitel: stelle?.titel || 'Stelle',
+              terminDatum: termin?.datum || '',
+              terminStartzeit: termin?.startzeit || '',
+              terminEndzeit: termin?.endzeit || '',
+            }));
+          } catch (err) {
+            console.error('Termin-Chats konnten nicht geladen werden:', err);
+            return [];
+          }
+        })
+      );
+
+      const flatChats = chatResults
+        .flat()
+        .sort((a, b) => {
+          const aTime = new Date(a.last_message_at || a.created_at || 0).getTime();
+          const bTime = new Date(b.last_message_at || b.created_at || 0).getTime();
+          return bTime - aTime;
+        });
+
+      setTerminChatThreads(flatChats);
+      setSelectedCommunicationThread((prev) => {
+        if (prev?.id && flatChats.some((item) => item.id === prev.id)) return prev;
+        return flatChats[0] || null;
+      });
+
+      if (!supportThreadId) {
+        await ensureSupportThread();
+      }
+    } catch (err) {
+      console.error('Kommunikations-Hub konnte nicht geladen werden:', err);
+      setVereinKommunikationError(err?.message || 'Kommunikation konnte nicht geladen werden.');
+    } finally {
+      setVereinKommunikationLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (dashboardTab === 'kommunikation') {
+      loadKommunikationHub();
+    }
+  }, [dashboardTab, user?.data?.id]);
 
   return (
     <div>
@@ -295,48 +361,40 @@ function VereinDashboard({
           }}
         >
           <button
-            onClick={() => {
-              if (!user.data.verifiziert) {
-                showToast(
-                  "Dein Verein muss erst freigeschaltet werden.",
-                  "#E8A87C"
-                );
-                return;
-              }
-              onNeu();
-            }}
+            onClick={() => setDashboardTab('stellen')}
             style={{
               flex: 2,
               padding: "12px",
               borderRadius: 12,
-              border: "none",
-              background: user.data.verifiziert
+              border: dashboardTab === 'stellen' ? "none" : "1px solid #E0D8C8",
+              background: dashboardTab === 'stellen'
                 ? "linear-gradient(135deg, #2C2416, #4A3C28)"
-                : "#C4B89A",
-              color: "#F4F0E8",
+                : "#FAF7F2",
+              color: dashboardTab === 'stellen' ? "#F4F0E8" : "#2C2416",
               fontSize: 14,
               fontFamily: "inherit",
               fontWeight: "bold",
               cursor: "pointer",
             }}
           >
-            + Neue Stelle
+            📋 Meine Stellen
           </button>
           <button
-            onClick={onProfil}
+            onClick={() => setDashboardTab('kommunikation')}
             style={{
-              flex: 1,
+              flex: 1.4,
               padding: "12px",
               borderRadius: 12,
-              border: "1px solid #8B7355",
-              background: "transparent",
-              color: "#8B7355",
+              border: dashboardTab === 'kommunikation' ? "none" : "1px solid #E8A87C",
+              background: dashboardTab === 'kommunikation' ? "#E8A87C" : "transparent",
+              color: dashboardTab === 'kommunikation' ? "#2C2416" : "#E8A87C",
               fontSize: 13,
               fontFamily: "inherit",
+              fontWeight: "bold",
               cursor: "pointer",
             }}
           >
-            👤 Profil
+            💬 Kommunikation
           </button>
           <button
             onClick={onAnalyse}
@@ -355,39 +413,20 @@ function VereinDashboard({
             📊 Analyse
           </button>
           <button
-            onClick={onMeineGemeinde}
+            onClick={onProfil}
             style={{
               flex: 1,
               padding: "12px",
               borderRadius: 12,
-              border: "1px solid #C8A96E",
+              border: "1px solid #8B7355",
               background: "transparent",
-              color: "#C8A96E",
+              color: "#8B7355",
               fontSize: 13,
               fontFamily: "inherit",
               cursor: "pointer",
             }}
           >
-            🏛 Meine Gemeinde
-          </button>
-          <button
-            onClick={() => {
-              setShowSupportModal(true);
-              if (!supportThreadId) ensureSupportThread();
-            }}
-            style={{
-              flex: 1,
-              padding: "12px",
-              borderRadius: 12,
-              border: "1px solid #E8A87C",
-              background: "transparent",
-              color: "#E8A87C",
-              fontSize: 13,
-              fontFamily: "inherit",
-              cursor: "pointer",
-            }}
-          >
-            💬 Support
+            👤 Profil
           </button>
         </div>
         {!user.data.verifiziert && (
@@ -475,192 +514,250 @@ function VereinDashboard({
             </div>
           </div>
         )}
-        <SectionLabel>Deine Stellen ({meineStellen.length})</SectionLabel>
-        {meineStellen.length === 0 ? (
-          <EmptyState
-            icon="📋"
-            text="Noch keine Stellen"
-            sub="Erstelle deine erste Ehrenamtsstelle!"
-          />
-        ) : (
-          meineStellen.map((s) => {
-            const gesamtAnmeldungen = (s.termine || []).reduce(
-              (sum, t) => sum + aktiveBewerbungen(t.bewerbungen || []).length,
-              0
-            );
-            return (
-              <div
-                key={s.id}
-                style={{
-                  background: "#FAF7F2",
-                  borderRadius: 14,
-                  padding: "14px",
-                  marginBottom: 10,
-                  border: "1px solid #E0D8C8",
-                }}
-              >
-                <div
-                  onClick={() => onDetail(s)}
-                  style={{ cursor: "pointer", marginBottom: 10 }}
-                >
-                  <div style={{ fontWeight: "bold", fontSize: 14 }}>
-                    {s.titel}
-                  </div>
-                  <div style={{ fontSize: 12, color: "#8B7355", marginTop: 4 }}>
-                    📍 {s.ort} · 👥 {gesamtAnmeldungen} Anmeldungen · 👁️{" "}
-                    {s.aufrufe || 0} Aufrufe
-                  </div>
-                </div>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button
-                    onClick={() => onDetail(s)}
+        {dashboardTab === 'stellen' ? (
+          <>
+            <SectionLabel>Deine Stellen ({meineStellen.length})</SectionLabel>
+            {meineStellen.length === 0 ? (
+              <EmptyState
+                icon="📋"
+                text="Noch keine Stellen"
+                sub="Erstelle deine erste Ehrenamtsstelle!"
+              />
+            ) : (
+              meineStellen.map((s) => {
+                const gesamtAnmeldungen = (s.termine || []).reduce(
+                  (sum, t) => sum + aktiveBewerbungen(t.bewerbungen || []).length,
+                  0
+                );
+                return (
+                  <div
+                    key={s.id}
                     style={{
-                      flex: 1,
-                      padding: "7px",
-                      borderRadius: 8,
+                      background: "#FAF7F2",
+                      borderRadius: 14,
+                      padding: "14px",
+                      marginBottom: 10,
                       border: "1px solid #E0D8C8",
-                      background: "transparent",
-                      color: "#2C2416",
-                      fontSize: 12,
-                      cursor: "pointer",
-                      fontFamily: "inherit",
                     }}
                   >
-                    👥 Anmeldungen
-                  </button>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onBearbeiten(s);
-                    }}
-                    style={{
-                      flex: 1,
-                      padding: "7px",
-                      borderRadius: 8,
-                      border: "1px solid #5B9BD5",
-                      background: "transparent",
-                      color: "#5B9BD5",
-                      fontSize: 12,
-                      cursor: "pointer",
-                      fontFamily: "inherit",
-                    }}
-                  >
-                    ✏️ Bearbeiten
-                  </button>
-                </div>
+                    <div
+                      onClick={() => onDetail(s)}
+                      style={{ cursor: "pointer", marginBottom: 10 }}
+                    >
+                      <div style={{ fontWeight: "bold", fontSize: 14 }}>
+                        {s.titel}
+                      </div>
+                      <div style={{ fontSize: 12, color: "#8B7355", marginTop: 4 }}>
+                        📍 {s.ort} · 👥 {gesamtAnmeldungen} Anmeldungen · 👁️ {s.aufrufe || 0} Aufrufe
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button
+                        onClick={() => onDetail(s)}
+                        style={{
+                          flex: 1,
+                          padding: "7px",
+                          borderRadius: 8,
+                          border: "1px solid #E0D8C8",
+                          background: "transparent",
+                          color: "#2C2416",
+                          fontSize: 12,
+                          cursor: "pointer",
+                          fontFamily: "inherit",
+                        }}
+                      >
+                        👥 Anmeldungen
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onBearbeiten(s);
+                        }}
+                        style={{
+                          flex: 1,
+                          padding: "7px",
+                          borderRadius: 8,
+                          border: "1px solid #5B9BD5",
+                          background: "transparent",
+                          color: "#5B9BD5",
+                          fontSize: 12,
+                          cursor: "pointer",
+                          fontFamily: "inherit",
+                        }}
+                      >
+                        ✏️ Bearbeiten
+                      </button>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </>
+        ) : (
+          <div>
+            <div style={{ background: "#FAF7F2", borderRadius: 14, padding: "16px", marginBottom: 14, border: "1px solid #E0D8C8" }}>
+              <div style={{ fontSize: 20, fontWeight: "bold", color: "#2C2416", marginBottom: 6 }}>Kommunikation</div>
+              <div style={{ fontSize: 13, color: "#8B7355", lineHeight: 1.6 }}>
+                Hier bündelst du Termin-Chats, die Kommunikation mit deiner Gemeinde und Support an Civico.
               </div>
-            );
-          })
-        )}
-      </div>
-      {showSupportModal && (
-        <div
-          style={{
-            position: "fixed",
-            inset: 0,
-            background: "rgba(0,0,0,0.45)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            zIndex: 400,
-            padding: 16,
-          }}
-        >
-          <div
-            style={{
-              width: "100%",
-              maxWidth: 760,
-              background: "#FAF7F2",
-              borderRadius: 20,
-              border: "1px solid #E0D8C8",
-              boxShadow: "0 18px 48px rgba(0,0,0,0.18)",
-              overflow: "hidden",
-            }}
-          >
-            <div
-              style={{
-                padding: "18px 20px",
-                borderBottom: "1px solid #E0D8C8",
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                background: "linear-gradient(135deg,#2C2416,#4A3C28)",
-                color: "#F4F0E8",
-              }}
-            >
-              <div>
-                <div style={{ fontSize: 18, fontWeight: "bold" }}>Support an Civico</div>
-                <div style={{ fontSize: 12, color: "#C4B89A", marginTop: 4 }}>
-                  Technische Probleme, Rückfragen oder organisatorische Anliegen direkt an den Admin.
-                </div>
-              </div>
-              <button
-                onClick={() => setShowSupportModal(false)}
-                style={{
-                  background: "rgba(255,255,255,0.12)",
-                  border: "none",
-                  color: "#F4F0E8",
-                  borderRadius: 12,
-                  padding: "8px 12px",
-                  cursor: "pointer",
-                  fontFamily: "inherit",
-                  fontWeight: "bold",
-                }}
-              >
-                Schließen
-              </button>
             </div>
 
-            <div style={{ padding: 20 }}>
-              {supportLoading ? (
-                <div style={{ color: "#8B7355", fontSize: 13 }}>Lade Support-Verlauf...</div>
-              ) : supportError ? (
-                <div
+            <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+              {[
+                ['termine', '💬 Termin-Chats'],
+                ['gemeinde', '🏛 Meine Gemeinde'],
+                ['support', '🛟 Support'],
+              ].map(([key, label]) => (
+                <button
+                  key={key}
+                  onClick={() => {
+                    setKommunikationTab(key);
+                    if (key === 'support' && !supportThreadId) ensureSupportThread();
+                  }}
                   style={{
-                    background: "#FFF4F2",
-                    border: "1px solid #F0C9C3",
-                    borderRadius: 14,
-                    padding: 16,
+                    padding: "10px 14px",
+                    borderRadius: 12,
+                    border: kommunikationTab === key ? "none" : "1px solid #E0D8C8",
+                    background: kommunikationTab === key ? "#2C2416" : "#FAF7F2",
+                    color: kommunikationTab === key ? "#FAF7F2" : "#2C2416",
+                    fontSize: 12,
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                    fontWeight: "bold",
                   }}
                 >
-                  <div style={{ color: "#B53A2D", fontSize: 13, fontWeight: "bold", marginBottom: 10 }}>
-                    {supportError}
-                  </div>
-                  <button
-                    onClick={ensureSupportThread}
-                    style={{
-                      background: "#2C2416",
-                      border: "none",
-                      color: "#fff",
-                      borderRadius: 12,
-                      padding: "10px 14px",
-                      cursor: "pointer",
-                      fontFamily: "inherit",
-                      fontWeight: "bold",
-                    }}
-                  >
-                    Erneut versuchen
-                  </button>
-                </div>
-              ) : supportThreadId ? (
-                <MessageThreadView
-                  threadId={supportThreadId}
-                  currentUserRole="verein"
-                  contextType="support"
-                  organisation={supportOrganisation}
-                  onMessageSent={ensureSupportThread}
-                />
-              ) : (
-                <EmptyState
-                  icon="💬"
-                  text="Noch kein Support-Thread"
-                  sub="Sobald der Support initialisiert ist, kannst du hier direkt schreiben."
-                />
-              )}
+                  {label}
+                </button>
+              ))}
             </div>
+
+            {kommunikationTab === 'termine' && (
+              <>
+                {vereinKommunikationLoading ? (
+                  <div style={{ background: "#FAF7F2", borderRadius: 14, padding: 16, border: "1px solid #E0D8C8", color: "#8B7355", fontSize: 13 }}>
+                    Chats werden geladen …
+                  </div>
+                ) : vereinKommunikationError ? (
+                  <div style={{ background: "#FFF4F2", borderRadius: 14, padding: 16, border: "1px solid #F0C9C3", color: "#B53A2D", fontSize: 13, fontWeight: "bold" }}>
+                    {vereinKommunikationError}
+                  </div>
+                ) : terminChatThreads.length === 0 ? (
+                  <EmptyState
+                    icon="💬"
+                    text="Noch keine Termin-Chats vorhanden"
+                    sub="Sobald Freiwillige bei deinen Terminen schreiben, erscheinen die Chats hier gesammelt."
+                  />
+                ) : (
+                  <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", gap: 14 }}>
+                    <div style={{ background: "#FAF7F2", borderRadius: 14, padding: 14, border: "1px solid #E0D8C8" }}>
+                      {terminChatThreads.map((thread) => {
+                        const isActive = selectedCommunicationThread?.id === thread.id;
+                        return (
+                          <button
+                            key={thread.id}
+                            onClick={() => setSelectedCommunicationThread(thread)}
+                            style={{
+                              width: "100%",
+                              textAlign: "left",
+                              padding: "12px",
+                              borderRadius: 12,
+                              border: isActive ? "2px solid #2C2416" : "1px solid #E0D8C8",
+                              background: isActive ? "#F3EBDD" : "#FFFDFC",
+                              marginBottom: 8,
+                              cursor: "pointer",
+                              fontFamily: "inherit",
+                            }}
+                          >
+                            <div style={{ fontSize: 13, fontWeight: "bold", color: "#2C2416", marginBottom: 4 }}>
+                              {thread.freiwillige?.name || "Freiwilliger"}
+                            </div>
+                            <div style={{ fontSize: 12, color: "#8B7355", marginBottom: 4 }}>
+                              {thread.stelleTitel || "Stelle"}
+                            </div>
+                            <div style={{ fontSize: 11, color: "#3A7D44" }}>
+                              📅 {thread.terminDatum ? formatDate(thread.terminDatum) : "-"} · 🕐 {thread.terminStartzeit || "-"}{thread.terminEndzeit ? ` – ${thread.terminEndzeit}` : ""}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    <div style={{ background: "#FAF7F2", borderRadius: 14, padding: 14, border: "1px solid #E0D8C8" }}>
+                      {selectedCommunicationThread?.id ? (
+                        <MessageThreadView
+                          threadId={selectedCommunicationThread.id}
+                          title={selectedCommunicationThread.stelleTitel || "Direktchat"}
+                          emptyText="Noch keine Nachrichten vorhanden."
+                          height={420}
+                          senderLabels={{
+                            verein: user?.data?.name || "Verein",
+                            freiwilliger: selectedCommunicationThread?.freiwillige?.name || "Freiwilliger",
+                          }}
+                        />
+                      ) : (
+                        <EmptyState
+                          icon="💬"
+                          text="Kein Chat ausgewählt"
+                          sub="Wähle links einen Termin-Chat aus."
+                        />
+                      )}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+
+            {kommunikationTab === 'gemeinde' && (
+              <MeineGemeindePanel onBack={() => setKommunikationTab('termine')} onHome={onHome} />
+            )}
+
+            {kommunikationTab === 'support' && (
+              <div style={{ background: "#FAF7F2", borderRadius: 14, padding: 16, border: "1px solid #E0D8C8" }}>
+                <div style={{ fontSize: 18, fontWeight: "bold", color: "#2C2416", marginBottom: 8 }}>Support an Civico</div>
+                <div style={{ fontSize: 13, color: "#8B7355", marginBottom: 14, lineHeight: 1.6 }}>
+                  Technische Probleme, Rückfragen oder organisatorische Anliegen direkt an den Admin.
+                </div>
+
+                {supportLoading ? (
+                  <div style={{ color: "#8B7355", fontSize: 13 }}>Lade Support-Verlauf...</div>
+                ) : supportError ? (
+                  <div style={{ background: "#FFF4F2", border: "1px solid #F0C9C3", borderRadius: 14, padding: 16 }}>
+                    <div style={{ color: "#B53A2D", fontSize: 13, fontWeight: "bold", marginBottom: 10 }}>{supportError}</div>
+                    <button
+                      onClick={ensureSupportThread}
+                      style={{
+                        background: "#2C2416",
+                        border: "none",
+                        color: "#fff",
+                        borderRadius: 12,
+                        padding: "10px 14px",
+                        cursor: "pointer",
+                        fontFamily: "inherit",
+                        fontWeight: "bold",
+                      }}
+                    >
+                      Erneut versuchen
+                    </button>
+                  </div>
+                ) : supportThreadId ? (
+                  <MessageThreadView
+                    threadId={supportThreadId}
+                    title="Support"
+                    emptyText="Noch keine Support-Nachrichten vorhanden."
+                    height={420}
+                  />
+                ) : (
+                  <EmptyState
+                    icon="🛟"
+                    text="Noch kein Support-Thread"
+                    sub="Sobald der Support initialisiert ist, erscheint er hier."
+                  />
+                )}
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
