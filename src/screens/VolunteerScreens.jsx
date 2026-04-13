@@ -3677,11 +3677,7 @@ function FreiwilligerProfilVerein({
 }
 
 export {
-  DetailScreen,
-  VereinProfilPublic,
   FreiwilligenDashboard,
-  FreiwilligenKommunikation,
-  FreiwilligerProfil,
   EinstellungenScreen,
   FreiwilligerProfilVerein
 };
