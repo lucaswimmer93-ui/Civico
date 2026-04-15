@@ -59,26 +59,67 @@ const getTerminPlaetze = (termin) => {
   };
 };
 
-const berechneTerminStunden = (termin, stelle = null) => {
-  const direkteDauer = Number(termin?.dauer_stunden);
-  if (Number.isFinite(direkteDauer) && direkteDauer > 0) return direkteDauer;
 
-  const start = termin?.startzeit;
-  const end = termin?.endzeit;
-  if (start && end) {
-    try {
-      const startDate = new Date(`2000-01-01T${start}`);
-      const endDate = new Date(`2000-01-01T${end}`);
-      const diff = (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60);
-      if (diff > 0) return diff;
-    } catch {}
+
+async function enrichThreadsWithUnreadCounts(threads = [], authUserId = null) {
+  const threadList = Array.isArray(threads) ? threads : [];
+  if (!threadList.length || !authUserId) {
+    return threadList.map((thread) => ({ ...thread, unread_count: 0 }));
   }
 
-  const standardDauer = Number(stelle?.standard_dauer_stunden);
-  if (Number.isFinite(standardDauer) && standardDauer > 0) return standardDauer;
+  const threadIds = [...new Set(threadList.map((thread) => thread?.id).filter(Boolean))];
+  if (!threadIds.length) {
+    return threadList.map((thread) => ({ ...thread, unread_count: 0 }));
+  }
 
-  return 0;
-};
+  let readStatusMap = new Map();
+  try {
+    const { data: readRows, error: readError } = await supabase
+      .from("message_read_status")
+      .select("thread_id, last_read_at")
+      .eq("user_id", authUserId)
+      .in("thread_id", threadIds);
+
+    if (readError) throw readError;
+    readStatusMap = new Map((readRows || []).map((row) => [row.thread_id, row.last_read_at]));
+  } catch (error) {
+    console.error("Read-Status konnte nicht geladen werden:", error);
+  }
+
+  let messagesByThread = new Map();
+  try {
+    const { data: messageRows, error: messageError } = await supabase
+      .from("messages")
+      .select("thread_id, created_at, sender_user_id")
+      .in("thread_id", threadIds)
+      .order("created_at", { ascending: true });
+
+    if (messageError) throw messageError;
+
+    for (const message of messageRows || []) {
+      const existing = messagesByThread.get(message.thread_id) || [];
+      existing.push(message);
+      messagesByThread.set(message.thread_id, existing);
+    }
+  } catch (error) {
+    console.error("Nachrichten-Metadaten konnten nicht geladen werden:", error);
+  }
+
+  return threadList.map((thread) => {
+    const lastReadAt = readStatusMap.get(thread.id);
+    const lastReadTime = lastReadAt ? new Date(lastReadAt).getTime() : 0;
+    const unreadCount = (messagesByThread.get(thread.id) || []).filter((message) => {
+      const messageTime = message?.created_at ? new Date(message.created_at).getTime() : 0;
+      if (!messageTime || messageTime <= lastReadTime) return false;
+      return message?.sender_user_id !== authUserId;
+    }).length;
+
+    return {
+      ...thread,
+      unread_count: unreadCount,
+    };
+  });
+}
 
 function DetailScreen({
   stelle,
@@ -1269,7 +1310,6 @@ function FreiwilligenDashboard({
 }) {
   const [meineChats, setMeineChats] = useState([]);
   const [meineChatsLoading, setMeineChatsLoading] = useState(false);
-  const [historicalStats, setHistoricalStats] = useState({ bestaetigteEinsaetze: 0, geleisteteStunden: 0 });
 
   useEffect(() => {
     let active = true;
@@ -1342,8 +1382,10 @@ function FreiwilligenDashboard({
           };
         });
 
+        const dataWithUnread = await enrichThreadsWithUnreadCounts(data || [], user?.data?.auth_id);
+
         if (!active) return;
-        setMeineChats(data || []);
+        setMeineChats(dataWithUnread || []);
       } catch (err) {
         console.error("Dashboard-Chats konnten nicht geladen werden:", err);
         if (!active) return;
@@ -1383,7 +1425,7 @@ function FreiwilligenDashboard({
 
   const naechsteEinsaetze = aktiveEinsaetze.slice(0, 3);
 
-  const vergangeneEinsaetzeAusStellen = (stellen || [])
+  const vergangeneEinsaetze = (stellen || [])
     .flatMap((stelle) =>
       (stelle.termine || [])
         .map((termin) => {
@@ -1396,93 +1438,20 @@ function FreiwilligenDashboard({
         .filter(Boolean)
     );
 
-  const lokaleBestaetigteEinsaetze = vergangeneEinsaetzeAusStellen.length;
-  const lokaleGeleisteteStunden = vergangeneEinsaetzeAusStellen.reduce(
-    (sum, item) => sum + berechneTerminStunden(item?.termin, item?.stelle),
-    0
-  );
+  const geleisteteStunden = vergangeneEinsaetze.reduce((sum, item) => {
+    const start = item?.termin?.startzeit;
+    const end = item?.termin?.endzeit;
+    if (!start || !end) return sum;
 
-  useEffect(() => {
-    let active = true;
-
-    async function loadHistoricalStats() {
-      if (!user?.data?.id) {
-        if (active) setHistoricalStats({ bestaetigteEinsaetze: 0, geleisteteStunden: 0 });
-        return;
-      }
-
-      try {
-        const { data: bewerbungen, error: bewerbungenError } = await supabase
-          .from("bewerbungen")
-          .select("id, termin_id, stelle_id, status, bestaetigt")
-          .eq("freiwilliger_id", user.data.id)
-          .or("status.eq.erschienen,bestaetigt.eq.true");
-
-        if (bewerbungenError) throw bewerbungenError;
-
-        const rows = bewerbungen || [];
-        const terminIds = [...new Set(rows.map((row) => row.termin_id).filter(Boolean))];
-        const stelleIds = [...new Set(rows.map((row) => row.stelle_id).filter(Boolean))];
-
-        let termineMap = new Map();
-        let stellenMap = new Map();
-
-        if (terminIds.length > 0) {
-          const { data: termineRows, error: termineError } = await supabase
-            .from("termine")
-            .select("id, startzeit, endzeit, dauer_stunden")
-            .in("id", terminIds);
-
-          if (termineError) throw termineError;
-          termineMap = new Map((termineRows || []).map((termin) => [termin.id, termin]));
-        }
-
-        if (stelleIds.length > 0) {
-          const { data: stellenRows, error: stellenError } = await supabase
-            .from("stellen")
-            .select("id, standard_dauer_stunden")
-            .in("id", stelleIds);
-
-          if (stellenError) throw stellenError;
-          stellenMap = new Map((stellenRows || []).map((stelle) => [stelle.id, stelle]));
-        }
-
-        const bestaetigteEinsaetze = rows.length;
-        const geleisteteStunden = rows.reduce((sum, row) => {
-          const termin = termineMap.get(row.termin_id) || null;
-          const stelle = stellenMap.get(row.stelle_id) || null;
-          return sum + berechneTerminStunden(termin, stelle);
-        }, 0);
-
-        if (!active) return;
-        setHistoricalStats({
-          bestaetigteEinsaetze,
-          geleisteteStunden,
-        });
-      } catch (err) {
-        console.error("Historische Freiwilligen-Statistiken konnten nicht geladen werden:", err);
-        if (!active) return;
-        setHistoricalStats({
-          bestaetigteEinsaetze: lokaleBestaetigteEinsaetze,
-          geleisteteStunden: lokaleGeleisteteStunden,
-        });
-      }
+    try {
+      const startDate = new Date(`2000-01-01T${start}`);
+      const endDate = new Date(`2000-01-01T${end}`);
+      const diff = (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60);
+      return diff > 0 ? sum + diff : sum;
+    } catch {
+      return sum;
     }
-
-    loadHistoricalStats();
-    return () => {
-      active = false;
-    };
-  }, [user?.data?.id, lokaleBestaetigteEinsaetze, lokaleGeleisteteStunden]);
-
-  const bestaetigteEinsaetzeGesamt = Math.max(
-    lokaleBestaetigteEinsaetze,
-    Number(historicalStats?.bestaetigteEinsaetze || 0)
-  );
-  const geleisteteStundenGesamt = Math.max(
-    lokaleGeleisteteStunden,
-    Number(historicalStats?.geleisteteStunden || 0)
-  );
+  }, 0);
 
   const gefolgteVereine = [...new Set(follows?.vereine || [])]
     .map((vereinId) => (stellen || []).find((s) => s.verein_id === vereinId)?.vereine)
@@ -1533,7 +1502,7 @@ function FreiwilligenDashboard({
             </div>
             <div style={{ textAlign: "center", flex: 1 }}>
               <div style={{ fontSize: 24, fontWeight: "bold", color: "#6BAF7A" }}>
-                {geleisteteStundenGesamt.toFixed(1)}h
+                {geleisteteStunden.toFixed(1)}h
               </div>
               <div style={{ fontSize: 11, color: "#C4B89A" }}>geleistet</div>
             </div>
@@ -1644,11 +1613,12 @@ function FreiwilligenDashboard({
             <div style={{ fontSize: 13, color: "#8B7355" }}>Chats werden geladen …</div>
           ) : meineChats.length === 0 ? (
             <div style={{ fontSize: 13, color: "#8B7355" }}>
-              Noch keine direkten Chats mit Vereinen vorhanden.
+              Noch keine direkten Chats vorhanden.
             </div>
           ) : (
             meineChats.slice(0, 2).map((thread) => {
               const termin = thread.termine;
+              const unreadCount = Number(thread?.unread_count || 0);
               return (
                 <button
                   key={thread.id}
@@ -1764,13 +1734,13 @@ function FreiwilligenDashboard({
           <div style={{ display: "flex", gap: 12 }}>
             <div style={{ flex: 1, background: "#FFFDFC", border: "1px solid #E0D8C8", borderRadius: 12, padding: "12px" }}>
               <div style={{ fontSize: 20, fontWeight: "bold", color: "#E8A87C", marginBottom: 4 }}>
-                {bestaetigteEinsaetzeGesamt}
+                {vergangeneEinsaetze.length}
               </div>
               <div style={{ fontSize: 11, color: "#8B7355" }}>bestätigte Einsätze</div>
             </div>
             <div style={{ flex: 1, background: "#FFFDFC", border: "1px solid #E0D8C8", borderRadius: 12, padding: "12px" }}>
               <div style={{ fontSize: 20, fontWeight: "bold", color: "#6BAF7A", marginBottom: 4 }}>
-                {geleisteteStundenGesamt.toFixed(1)}h
+                {geleisteteStunden.toFixed(1)}h
               </div>
               <div style={{ fontSize: 11, color: "#8B7355" }}>geleistete Zeit</div>
             </div>
@@ -1794,10 +1764,6 @@ function FreiwilligenKommunikation({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [selectedChat, setSelectedChat] = useState(null);
-  const [kommunikationTab, setKommunikationTab] = useState("vereine");
-  const [supportThreadId, setSupportThreadId] = useState(null);
-  const [supportLoading, setSupportLoading] = useState(false);
-  const [supportError, setSupportError] = useState("");
 
   useEffect(() => {
     let active = true;
@@ -1872,11 +1838,15 @@ function FreiwilligenKommunikation({
           };
         });
 
+        const dataWithUnread = await enrichThreadsWithUnreadCounts(data || [], user?.data?.auth_id);
+
         if (!active) return;
-        setMeineChats(data || []);
+        setMeineChats(dataWithUnread || []);
         setSelectedChat((prev) => {
-          if (prev?.id && (data || []).some((item) => item.id === prev.id)) return prev;
-          return (data || [])[0] || null;
+          if (prev?.id) {
+            return (dataWithUnread || []).find((item) => item.id === prev.id) || (dataWithUnread || [])[0] || null;
+          }
+          return (dataWithUnread || [])[0] || null;
         });
       } catch (err) {
         if (!active) return;
@@ -1893,57 +1863,6 @@ function FreiwilligenKommunikation({
     };
   }, [user?.data?.id]);
 
-  const ensureSupportThread = async () => {
-    if (!user?.data?.id) return;
-
-    try {
-      setSupportLoading(true);
-      setSupportError("");
-
-      const { data: existing, error: existingError } = await supabase
-        .from("message_threads")
-        .select("id")
-        .eq("thread_type", "support")
-        .eq("freiwilliger_id", user.data.id)
-        .order("last_message_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (existingError) throw existingError;
-
-      if (existing?.id) {
-        setSupportThreadId(existing.id);
-        return;
-      }
-
-      const { data: created, error: createError } = await supabase
-        .from("message_threads")
-        .insert([
-          {
-            thread_type: "support",
-            freiwilliger_id: user.data.id,
-            last_message_at: new Date().toISOString(),
-          },
-        ])
-        .select("id")
-        .single();
-
-      if (createError) throw createError;
-      setSupportThreadId(created?.id || null);
-    } catch (err) {
-      console.error("Support konnte nicht geladen werden:", err);
-      setSupportError(err?.message || "Support konnte nicht geladen werden.");
-    } finally {
-      setSupportLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    if (kommunikationTab === "support" && !supportThreadId && !supportLoading) {
-      ensureSupportThread();
-    }
-  }, [kommunikationTab, supportThreadId, supportLoading, user?.data?.id]);
-
   return (
     <div>
       <div
@@ -1957,7 +1876,10 @@ function FreiwilligenKommunikation({
           Kommunikation
         </div>
         <div style={{ fontSize: 13, color: "#C4B89A" }}>
-          Deine Chats mit Vereinen und der Support an Civico
+          Deine Chats mit Vereinen
+          {meineChats.some((thread) => Number(thread?.unread_count || 0) > 0)
+            ? ` · ${meineChats.reduce((sum, thread) => sum + Number(thread?.unread_count || 0), 0)} neu`
+            : ""}
         </div>
       </div>
 
@@ -1970,124 +1892,94 @@ function FreiwilligenKommunikation({
             border: "1px solid #E0D8C8",
           }}
         >
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
-            {[
-              ["vereine", "🏢 Vereins-Chats"],
-              ["support", "🛟 Support"],
-            ].map(([key, label]) => (
-              <button
-                key={key}
-                onClick={() => setKommunikationTab(key)}
-                style={{
-                  padding: "10px 14px",
-                  borderRadius: 12,
-                  border: kommunikationTab === key ? "none" : "1px solid #E0D8C8",
-                  background: kommunikationTab === key ? "#2C2416" : "#FFFDFC",
-                  color: kommunikationTab === key ? "#FAF7F2" : "#2C2416",
-                  fontSize: 12,
-                  cursor: "pointer",
-                  fontFamily: "inherit",
-                  fontWeight: "bold",
-                }}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+          {loading ? (
+            <div style={{ fontSize: 13, color: "#8B7355" }}>Chats werden geladen …</div>
+          ) : error ? (
+            <div style={{ fontSize: 13, color: "#B53A2D", fontWeight: "bold" }}>{error}</div>
+          ) : meineChats.length === 0 ? (
+            <div style={{ fontSize: 13, color: "#8B7355" }}>
+              Noch keine direkten Chats vorhanden.
+            </div>
+          ) : (
+            <>
+              <div style={{ display: "grid", gap: 8, marginBottom: 12 }}>
+                {meineChats.map((thread) => {
+                  const termin = thread.termine;
+                  const stelleTitel = thread.stellen?.titel || "Stelle";
+                  const vereinName = thread.vereine?.name || "Verein";
+                  const isActive = selectedChat?.id === thread.id;
+                  const unreadCount = Number(thread?.unread_count || 0);
 
-          {kommunikationTab === "vereine" ? (
-            loading ? (
-              <div style={{ fontSize: 13, color: "#8B7355" }}>Chats werden geladen …</div>
-            ) : error ? (
-              <div style={{ fontSize: 13, color: "#B53A2D", fontWeight: "bold" }}>{error}</div>
-            ) : meineChats.length === 0 ? (
-              <div style={{ fontSize: 13, color: "#8B7355" }}>
-                Noch keine direkten Chats vorhanden.
-              </div>
-            ) : (
-              <>
-                <div style={{ display: "grid", gap: 8, marginBottom: 12 }}>
-                  {meineChats.map((thread) => {
-                    const termin = thread.termine;
-                    const stelleTitel = thread.stellen?.titel || "Stelle";
-                    const vereinName = thread.vereine?.name || "Verein";
-                    const isActive = selectedChat?.id === thread.id;
-
-                    return (
-                      <button
-                        key={thread.id}
-                        onClick={() => setSelectedChat(thread)}
-                        style={{
-                          width: "100%",
-                          textAlign: "left",
-                          border: isActive ? "2px solid #2C2416" : "1px solid #E0D8C8",
-                          background: isActive ? "#F3EBDD" : "#FFFDFC",
-                          borderRadius: 12,
-                          padding: "12px",
-                          cursor: "pointer",
-                          fontFamily: "inherit",
-                        }}
-                      >
-                        <div style={{ fontSize: 13, fontWeight: "bold", color: "#2C2416", marginBottom: 4 }}>
+                  return (
+                    <button
+                      key={thread.id}
+                      onClick={() => setSelectedChat(thread)}
+                      style={{
+                        width: "100%",
+                        textAlign: "left",
+                        border: isActive ? "2px solid #2C2416" : "1px solid #E0D8C8",
+                        background: isActive ? "#F3EBDD" : "#FFFDFC",
+                        borderRadius: 12,
+                        padding: "12px",
+                        cursor: "pointer",
+                        fontFamily: "inherit",
+                      }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", marginBottom: 4 }}>
+                        <div style={{ fontSize: 13, fontWeight: "bold", color: "#2C2416" }}>
                           {stelleTitel || "Stelle"}
                         </div>
-                        <div style={{ fontSize: 12, color: "#8B7355", marginBottom: 4 }}>
-                          {vereinName}
-                        </div>
-                        <div style={{ fontSize: 11, color: "#3A7D44" }}>
-                          📅 {termin?.datum ? formatDate(termin.datum) : "-"} · 🕐 {termin?.startzeit || "-"}
-                          {termin?.endzeit ? ` – ${termin.endzeit}` : ""}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
+                        {unreadCount > 0 && (
+                          <div
+                            style={{
+                              minWidth: 22,
+                              height: 22,
+                              borderRadius: 11,
+                              background: "#E85C5C",
+                              color: "#fff",
+                              fontSize: 11,
+                              fontWeight: "bold",
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              padding: "0 6px",
+                            }}
+                          >
+                            {unreadCount > 99 ? "99+" : unreadCount}
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 12, color: "#8B7355", marginBottom: 4 }}>
+                        {vereinName}
+                      </div>
+                      <div style={{ fontSize: 11, color: "#3A7D44" }}>
+                        📅 {termin?.datum ? formatDate(termin.datum) : "-"} · 🕐 {termin?.startzeit || "-"}
+                        {termin?.endzeit ? ` – ${termin.endzeit}` : ""}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
 
-                {selectedChat?.id ? (
-                  <MessageThreadView
-                    threadId={selectedChat.id}
-                    title="Chat mit dem Verein"
-                    emptyText="Noch keine Nachrichten vorhanden."
-                    height={320}
-                  />
-                ) : null}
-              </>
-            )
-          ) : (
-            supportLoading ? (
-              <div style={{ fontSize: 13, color: "#8B7355" }}>Support wird geladen …</div>
-            ) : supportError ? (
-              <div style={{ background: "#FFF4F2", borderRadius: 12, padding: 14, border: "1px solid #F0C9C3" }}>
-                <div style={{ fontSize: 13, color: "#B53A2D", fontWeight: "bold", marginBottom: 10 }}>{supportError}</div>
-                <button
-                  onClick={ensureSupportThread}
-                  style={{
-                    padding: "10px 14px",
-                    borderRadius: 10,
-                    border: "none",
-                    background: "#2C2416",
-                    color: "#FAF7F2",
-                    fontSize: 12,
-                    fontWeight: "bold",
-                    cursor: "pointer",
-                    fontFamily: "inherit",
+              {selectedChat?.id ? (
+                <MessageThreadView
+                  threadId={selectedChat.id}
+                  title="Chat mit dem Verein"
+                  emptyText="Noch keine Nachrichten vorhanden."
+                  height={320}
+                  onThreadRead={(threadId) => {
+                    setMeineChats((prev) =>
+                      prev.map((thread) =>
+                        thread.id === threadId ? { ...thread, unread_count: 0 } : thread
+                      )
+                    );
+                    setSelectedChat((prev) =>
+                      prev?.id === threadId ? { ...prev, unread_count: 0 } : prev
+                    );
                   }}
-                >
-                  Erneut versuchen
-                </button>
-              </div>
-            ) : supportThreadId ? (
-              <MessageThreadView
-                threadId={supportThreadId}
-                title="Support"
-                emptyText="Noch keine Nachrichten vorhanden."
-                height={320}
-              />
-            ) : (
-              <div style={{ fontSize: 13, color: "#8B7355" }}>
-                Noch kein Support-Chat vorhanden.
-              </div>
-            )
+                />
+              ) : null}
+            </>
           )}
         </div>
       </div>
@@ -2261,15 +2153,14 @@ function FreiwilligerProfil({
           <button
             onClick={logout}
             style={{
-              background: "rgba(232,92,92,0.16)",
-              border: "1px solid rgba(232,92,92,0.45)",
-              color: "#F4F0E8",
+              background: "transparent",
+              border: "none",
+              color: "#8B7355",
               fontSize: 12,
               padding: "6px 12px",
               borderRadius: 20,
               cursor: "pointer",
               fontFamily: "inherit",
-              fontWeight: "bold",
             }}
           >
             Abmelden
