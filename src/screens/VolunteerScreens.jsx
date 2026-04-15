@@ -108,39 +108,23 @@ async function getUnreadCountsForThreads(threadIds = [], authUserId = null) {
       row.last_read_at ? new Date(row.last_read_at).getTime() : 0,
     ])
   );
+
   const unreadByThread = new Map();
 
-  const countPromises = (threadRows || []).map(async (thread) => {
+  for (const thread of threadRows || []) {
     const threadId = thread?.id;
-    if (!threadId) return;
+    if (!threadId) continue;
 
     const lastMessageAt = thread?.last_message_at
       ? new Date(thread.last_message_at).getTime()
       : 0;
     const lastReadAt = readMap.get(threadId) || 0;
 
-    if (!lastMessageAt || lastMessageAt <= lastReadAt) {
-      unreadByThread.set(threadId, 0);
-      return;
-    }
-
-    let query = supabase
-      .from('messages')
-      .select('id', { count: 'exact', head: true })
-      .eq('thread_id', threadId)
-      .neq('sender_user_id', authUserId);
-
-    if (lastReadAt) {
-      query = query.gt('created_at', new Date(lastReadAt).toISOString());
-    }
-
-    const { count, error } = await query;
-    if (error) throw error;
-
-    unreadByThread.set(threadId, count || 0);
-  });
-
-  await Promise.all(countPromises);
+    unreadByThread.set(
+      threadId,
+      lastMessageAt && lastMessageAt > lastReadAt ? 1 : 0
+    );
+  }
 
   const unreadTotal = Array.from(unreadByThread.values()).reduce(
     (sum, value) => sum + value,
