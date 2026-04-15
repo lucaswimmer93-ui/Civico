@@ -1438,9 +1438,6 @@ function FreiwilligenDashboard({
       .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => {
         loadMyChats();
       })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'message_read_status' }, () => {
-        loadMyChats();
-      })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'message_threads' }, () => {
         loadMyChats();
       })
@@ -1959,9 +1956,6 @@ function FreiwilligenKommunikation({
       .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => {
         loadMyChats();
       })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'message_read_status' }, () => {
-        loadMyChats();
-      })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'message_threads' }, () => {
         loadMyChats();
       })
@@ -2020,9 +2014,6 @@ function FreiwilligenKommunikation({
     const channel = supabase
       .channel(`freiwilligen-support-unread-${user?.data?.id}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => {
-        loadSupportUnread();
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'message_read_status' }, () => {
         loadSupportUnread();
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'message_threads' }, () => {
