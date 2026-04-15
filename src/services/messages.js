@@ -508,6 +508,82 @@ export async function getThreadMessages(threadId) {
   return data ?? [];
 }
 
+
+async function sendPushToVolunteerForMessage({ threadId, senderActor, messageBody }) {
+  if (!threadId || !senderActor || senderActor.role === "freiwilliger") return;
+
+  try {
+    const { data: thread, error: threadError } = await supabase
+      .from("message_threads")
+      .select("id, thread_type, freiwilliger_id, verein_id, gemeinde_id")
+      .eq("id", threadId)
+      .maybeSingle();
+
+    if (threadError) throw threadError;
+    if (!thread?.freiwilliger_id) return;
+    if (!["termin_direct", "support"].includes(thread.thread_type)) return;
+
+    const { data: volunteer, error: volunteerError } = await supabase
+      .from("freiwillige")
+      .select("id, auth_id, push_token")
+      .eq("id", thread.freiwilliger_id)
+      .maybeSingle();
+
+    if (volunteerError) throw volunteerError;
+    if (!volunteer?.id || !volunteer?.auth_id) return;
+
+    const { data: settingsRow, error: settingsError } = await supabase
+      .from("notification_settings")
+      .select("push_enabled")
+      .eq("freiwilliger_id", volunteer.id)
+      .maybeSingle();
+
+    if (settingsError) {
+      console.log("notification_settings fuer chat push konnten nicht geladen werden:", settingsError);
+    }
+
+    const pushEnabled = settingsRow?.push_enabled !== false;
+    const shortBody = String(messageBody || "").trim();
+    const bodyPreview = shortBody.length > 90 ? `${shortBody.slice(0, 87)}...` : shortBody;
+    const senderLabel = senderActor.role === "verein"
+      ? (senderActor.name || "Dein Verein")
+      : senderActor.role === "admin"
+        ? "Civico Support"
+        : senderActor.role === "gemeinde"
+          ? (senderActor.name || "Gemeinde")
+          : (senderActor.name || "Neue Nachricht");
+
+    await supabase
+      .from("notifications")
+      .insert({
+        user_id: volunteer.auth_id,
+        titel: "💬 Neue Nachricht",
+        text: `${senderLabel}: ${bodyPreview || "Du hast eine neue Nachricht erhalten."}`,
+        typ: "chat_message",
+        gelesen: false,
+        read_at: null,
+      });
+
+    if (!pushEnabled || !volunteer.push_token) return;
+
+    const { error: pushError } = await supabase.functions.invoke("send-push", {
+      body: {
+        title: "💬 Neue Nachricht",
+        body: `${senderLabel}: ${bodyPreview || "Du hast eine neue Nachricht erhalten."}`,
+        url: "/",
+        notification_type: "chat_message",
+        freiwilliger_ids: [volunteer.id],
+      },
+    });
+
+    if (pushError) {
+      console.log("chat push fehlgeschlagen:", pushError);
+    }
+  } catch (error) {
+    console.log("sendPushToVolunteerForMessage fehlgeschlagen:", error);
+  }
+}
+
 /**
  * Nachricht senden
  */
@@ -539,6 +615,12 @@ export async function sendMessage(threadId, body) {
     .eq("id", threadId);
 
   if (threadUpdateError) throw threadUpdateError;
+
+  await sendPushToVolunteerForMessage({
+    threadId,
+    senderActor: actor,
+    messageBody: body.trim(),
+  });
 
   return data;
 }
