@@ -415,6 +415,7 @@ export default function App() {
   const [follows, setFollows] = useState({ vereine: [], kategorien: [] });
   const [notifications, setNotifications] = useState([]);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [unreadChatCount, setUnreadChatCount] = useState(0);
 
   // ── Notifications ─────────────────────────────────────────────────────────
   const getNotificationUserId = (profile = user?.data) => {
@@ -1013,6 +1014,59 @@ export default function App() {
     });
 
 
+  const loadUnreadChatCount = async (freiwilligerProfil = user?.data) => {
+    if (!freiwilligerProfil?.id || !freiwilligerProfil?.auth_id) {
+      setUnreadChatCount(0);
+      return;
+    }
+
+    try {
+      const { data: threads, error: threadsError } = await supabase
+        .from("message_threads")
+        .select("id")
+        .in("thread_type", ["termin_direct", "support"])
+        .eq("freiwilliger_id", freiwilligerProfil.id);
+
+      if (threadsError) throw threadsError;
+
+      const threadIds = [...new Set((threads || []).map((thread) => thread.id).filter(Boolean))];
+      if (!threadIds.length) {
+        setUnreadChatCount(0);
+        return;
+      }
+
+      const [{ data: readRows, error: readError }, { data: messageRows, error: messageError }] = await Promise.all([
+        supabase
+          .from("message_read_status")
+          .select("thread_id, last_read_at")
+          .eq("user_id", freiwilligerProfil.auth_id)
+          .in("thread_id", threadIds),
+        supabase
+          .from("messages")
+          .select("thread_id, created_at, sender_user_id")
+          .in("thread_id", threadIds)
+          .order("created_at", { ascending: false }),
+      ]);
+
+      if (readError) throw readError;
+      if (messageError) throw messageError;
+
+      const readMap = new Map((readRows || []).map((row) => [row.thread_id, row.last_read_at ? new Date(row.last_read_at).getTime() : 0]));
+      const unreadTotal = (messageRows || []).reduce((sum, row) => {
+        if (row?.sender_user_id === freiwilligerProfil.auth_id) return sum;
+        const lastReadAt = readMap.get(row.thread_id) || 0;
+        const createdAt = row?.created_at ? new Date(row.created_at).getTime() : 0;
+        return !lastReadAt || createdAt > lastReadAt ? sum + 1 : sum;
+      }, 0);
+
+      setUnreadChatCount(unreadTotal);
+    } catch (error) {
+      console.error("Unread chat count laden fehlgeschlagen:", error);
+      setUnreadChatCount(0);
+    }
+  };
+
+
   const loadStellen = async (
     gemeinde_id = null,
     plz = null,
@@ -1362,6 +1416,44 @@ export default function App() {
       supabase.removeChannel(channel);
     };
   }, [user?.type, user?.data?.auth_id]);
+
+  useEffect(() => {
+    if (user?.type !== "freiwilliger") {
+      setUnreadChatCount(0);
+      return;
+    }
+
+    loadUnreadChatCount(user?.data);
+
+    const channel = supabase
+      .channel(`chat-unread-${user?.data?.id}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "messages" },
+        () => {
+          loadUnreadChatCount(user?.data);
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "message_read_status" },
+        () => {
+          loadUnreadChatCount(user?.data);
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "message_threads" },
+        () => {
+          loadUnreadChatCount(user?.data);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user?.type, user?.data?.id, user?.data?.auth_id]);
 
   // Filter
   const plzMatch = (s) => {
@@ -2147,7 +2239,28 @@ export default function App() {
                       : "2px solid transparent",
                 }}
               >
-                {tab.label}
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                  <span>{tab.label}</span>
+                  {tab.id === "kommunikation" && unreadChatCount > 0 && (
+                    <span
+                      style={{
+                        minWidth: 18,
+                        height: 18,
+                        padding: "0 6px",
+                        borderRadius: 999,
+                        background: "#E85C5C",
+                        color: "#fff",
+                        fontSize: 10,
+                        fontWeight: "bold",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      {unreadChatCount}
+                    </span>
+                  )}
+                </span>
               </button>
             ))}
           </div>
