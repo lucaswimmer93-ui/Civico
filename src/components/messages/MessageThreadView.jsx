@@ -25,6 +25,7 @@ export default function MessageThreadView({
   className = "",
   height = 360,
   onMessageSent,
+  onThreadRead,
 }) {
   const [messages, setMessages] = useState([]);
   const [draft, setDraft] = useState("");
@@ -56,6 +57,9 @@ export default function MessageThreadView({
       const data = await getThreadMessages(threadId);
       setMessages(data || []);
       await markThreadAsRead(threadId);
+      if (typeof onThreadRead === "function") {
+        onThreadRead(threadId);
+      }
     } catch (err) {
       console.error("Fehler beim Laden der Nachrichten:", err);
       setError(err?.message || "Nachrichten konnten nicht geladen werden.");
@@ -72,7 +76,7 @@ export default function MessageThreadView({
 
   useEffect(() => {
     loadMessages();
-  }, [threadId]);
+  }, [threadId, onThreadRead]);
 
   useEffect(() => {
     if (!threadId) return;
@@ -92,6 +96,9 @@ export default function MessageThreadView({
             const data = await getThreadMessages(threadId);
             setMessages(data || []);
             await markThreadAsRead(threadId);
+            if (typeof onThreadRead === "function") {
+              onThreadRead(threadId);
+            }
           } catch (err) {
             console.error("Realtime-Update fehlgeschlagen:", err);
           }
