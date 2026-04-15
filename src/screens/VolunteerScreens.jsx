@@ -1269,8 +1269,6 @@ function FreiwilligenDashboard({
 }) {
   const [meineChats, setMeineChats] = useState([]);
   const [meineChatsLoading, setMeineChatsLoading] = useState(false);
-  const [supportThreadId, setSupportThreadId] = useState(null);
-  const [supportLoading, setSupportLoading] = useState(false);
   const [historicalStats, setHistoricalStats] = useState({ bestaetigteEinsaetze: 0, geleisteteStunden: 0 });
 
   useEffect(() => {
@@ -1356,45 +1354,6 @@ function FreiwilligenDashboard({
     }
 
     loadMyChats();
-    return () => {
-      active = false;
-    };
-  }, [user?.data?.id]);
-
-  useEffect(() => {
-    let active = true;
-
-    async function ensureSupportThread() {
-      if (!user?.data?.id) {
-        if (active) setSupportThreadId(null);
-        return;
-      }
-
-      try {
-        setSupportLoading(true);
-        const { data: existing, error: existingError } = await supabase
-          .from("message_threads")
-          .select("id")
-          .eq("thread_type", "support")
-          .eq("freiwilliger_id", user.data.id)
-          .order("last_message_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
-
-        if (existingError) throw existingError;
-
-        if (!active) return;
-        setSupportThreadId(existing?.id || null);
-      } catch (err) {
-        console.error("Support-Thread im Dashboard konnte nicht geladen werden:", err);
-        if (!active) return;
-        setSupportThreadId(null);
-      } finally {
-        if (active) setSupportLoading(false);
-      }
-    }
-
-    ensureSupportThread();
     return () => {
       active = false;
     };
@@ -1681,32 +1640,6 @@ function FreiwilligenDashboard({
             </button>
           </div>
 
-          <button
-            onClick={onOpenKommunikation}
-            style={{
-              width: "100%",
-              textAlign: "left",
-              padding: "12px",
-              borderRadius: 12,
-              border: "1px solid #E0D8C8",
-              background: "#FFFDFC",
-              marginBottom: meineChats.length > 0 ? 10 : 0,
-              cursor: "pointer",
-              fontFamily: "inherit",
-            }}
-          >
-            <div style={{ fontSize: 13, fontWeight: "bold", color: "#2C2416", marginBottom: 4 }}>
-              🛟 Support an Civico
-            </div>
-            <div style={{ fontSize: 11, color: "#3A7D44" }}>
-              {supportLoading
-                ? "Support wird geladen …"
-                : supportThreadId
-                  ? "Direkt an den Support schreiben"
-                  : "Support-Chat öffnen"}
-            </div>
-          </button>
-
           {meineChatsLoading ? (
             <div style={{ fontSize: 13, color: "#8B7355" }}>Chats werden geladen …</div>
           ) : meineChats.length === 0 ? (
@@ -1862,8 +1795,6 @@ function FreiwilligenKommunikation({
   const [error, setError] = useState("");
   const [selectedChat, setSelectedChat] = useState(null);
   const [kommunikationTab, setKommunikationTab] = useState("vereine");
-  const [supportThreadId, setSupportThreadId] = useState(null);
-  const [supportLoading, setSupportLoading] = useState(false);
   const [supportError, setSupportError] = useState("");
 
   useEffect(() => {
@@ -2121,51 +2052,40 @@ function FreiwilligenKommunikation({
               </>
             )
           ) : (
-            <>
-              <div style={{ background: "#FFFDFC", borderRadius: 12, padding: 14, border: "1px solid #E0D8C8", marginBottom: 12 }}>
-                <div style={{ fontSize: 16, fontWeight: "bold", color: "#2C2416", marginBottom: 6 }}>
-                  Support an Civico
-                </div>
-                <div style={{ fontSize: 13, color: "#8B7355", lineHeight: 1.6 }}>
-                  Stelle hier technische Probleme, Rückfragen oder allgemeine Anliegen direkt an den Support.
-                </div>
+            supportLoading ? (
+              <div style={{ fontSize: 13, color: "#8B7355" }}>Support wird geladen …</div>
+            ) : supportError ? (
+              <div style={{ background: "#FFF4F2", borderRadius: 12, padding: 14, border: "1px solid #F0C9C3" }}>
+                <div style={{ fontSize: 13, color: "#B53A2D", fontWeight: "bold", marginBottom: 10 }}>{supportError}</div>
+                <button
+                  onClick={ensureSupportThread}
+                  style={{
+                    padding: "10px 14px",
+                    borderRadius: 10,
+                    border: "none",
+                    background: "#2C2416",
+                    color: "#FAF7F2",
+                    fontSize: 12,
+                    fontWeight: "bold",
+                    cursor: "pointer",
+                    fontFamily: "inherit",
+                  }}
+                >
+                  Erneut versuchen
+                </button>
               </div>
-
-              {supportLoading ? (
-                <div style={{ fontSize: 13, color: "#8B7355" }}>Support wird geladen …</div>
-              ) : supportError ? (
-                <div style={{ background: "#FFF4F2", borderRadius: 12, padding: 14, border: "1px solid #F0C9C3" }}>
-                  <div style={{ fontSize: 13, color: "#B53A2D", fontWeight: "bold", marginBottom: 10 }}>{supportError}</div>
-                  <button
-                    onClick={ensureSupportThread}
-                    style={{
-                      padding: "10px 14px",
-                      borderRadius: 10,
-                      border: "none",
-                      background: "#2C2416",
-                      color: "#FAF7F2",
-                      fontSize: 12,
-                      fontWeight: "bold",
-                      cursor: "pointer",
-                      fontFamily: "inherit",
-                    }}
-                  >
-                    Erneut versuchen
-                  </button>
-                </div>
-              ) : supportThreadId ? (
-                <MessageThreadView
-                  threadId={supportThreadId}
-                  title="Support"
-                  emptyText="Noch keine Nachrichten vorhanden."
-                  height={320}
-                />
-              ) : (
-                <div style={{ fontSize: 13, color: "#8B7355" }}>
-                  Noch kein Support-Chat vorhanden.
-                </div>
-              )}
-            </>
+            ) : supportThreadId ? (
+              <MessageThreadView
+                threadId={supportThreadId}
+                title="Support"
+                emptyText="Noch keine Nachrichten vorhanden."
+                height={320}
+              />
+            ) : (
+              <div style={{ fontSize: 13, color: "#8B7355" }}>
+                Noch kein Support-Chat vorhanden.
+              </div>
+            )
           )}
         </div>
       </div>
@@ -2339,14 +2259,15 @@ function FreiwilligerProfil({
           <button
             onClick={logout}
             style={{
-              background: "transparent",
-              border: "none",
-              color: "#8B7355",
+              background: "rgba(232,92,92,0.16)",
+              border: "1px solid rgba(232,92,92,0.45)",
+              color: "#F4F0E8",
               fontSize: 12,
               padding: "6px 12px",
               borderRadius: 20,
               cursor: "pointer",
               fontFamily: "inherit",
+              fontWeight: "bold",
             }}
           >
             Abmelden
