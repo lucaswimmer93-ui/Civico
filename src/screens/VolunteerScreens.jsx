@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase, T, KATEGORIEN, SKILLS, MEDAILLEN, getSkillLabel, getKat, getMedaille, getNextMedaille, getMedailleName, IMPRESSUM_TEXT, DATENSCHUTZ_TEXT, AGB_TEXT, formatDate, getGemeindeByPlz, isKlarname, isTerminNochNichtGestartet, isTerminAktuell } from '../core/shared';
 import { Header, StelleCard, VereineListe, BottomBar, DatenschutzBox, Input, BigButton, Chip, InfoChip, SectionLabel, RoleCard, EmptyState, ErrorMsg } from '../components/ui';
 import MessageThreadView from '../components/messages/MessageThreadView';
-import { getMyTerminDirectThreads, getOrCreateTerminDirectThread } from '../services/messages';
+import { getMyTerminDirectThreads, getOrCreateTerminDirectThread, getOrCreateSupportThread } from '../services/messages';
 
 const bewerbungIstErschienen = (bewerbung) =>
   bewerbung?.status === "erschienen" || Boolean(bewerbung?.bestaetigt);
@@ -59,66 +59,163 @@ const getTerminPlaetze = (termin) => {
   };
 };
 
+const berechneTerminStunden = (termin, stelle = null) => {
+  const direkteDauer = Number(termin?.dauer_stunden);
+  if (Number.isFinite(direkteDauer) && direkteDauer > 0) return direkteDauer;
 
-
-async function enrichThreadsWithUnreadCounts(threads = [], authUserId = null) {
-  const threadList = Array.isArray(threads) ? threads : [];
-  if (!threadList.length || !authUserId) {
-    return threadList.map((thread) => ({ ...thread, unread_count: 0 }));
+  const start = termin?.startzeit;
+  const end = termin?.endzeit;
+  if (start && end) {
+    try {
+      const startDate = new Date(`2000-01-01T${start}`);
+      const endDate = new Date(`2000-01-01T${end}`);
+      const diff = (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60);
+      if (diff > 0) return diff;
+    } catch {}
   }
 
-  const threadIds = [...new Set(threadList.map((thread) => thread?.id).filter(Boolean))];
-  if (!threadIds.length) {
-    return threadList.map((thread) => ({ ...thread, unread_count: 0 }));
+  const standardDauer = Number(stelle?.standard_dauer_stunden);
+  if (Number.isFinite(standardDauer) && standardDauer > 0) return standardDauer;
+
+  return 0;
+};
+
+
+async function getUnreadCountsForThreads(threadIds = [], authUserId = null) {
+  const cleanThreadIds = [...new Set((threadIds || []).filter(Boolean))];
+  if (!cleanThreadIds.length || !authUserId) {
+    return { unreadByThread: new Map(), unreadTotal: 0 };
   }
 
-  let readStatusMap = new Map();
-  try {
-    const { data: readRows, error: readError } = await supabase
-      .from("message_read_status")
-      .select("thread_id, last_read_at")
-      .eq("user_id", authUserId)
-      .in("thread_id", threadIds);
+  const [{ data: readRows, error: readError }, { data: threadRows, error: threadError }] = await Promise.all([
+    supabase
+      .from('message_read_status')
+      .select('thread_id, last_read_at')
+      .eq('user_id', authUserId)
+      .in('thread_id', cleanThreadIds),
+    supabase
+      .from('message_threads')
+      .select('id, last_message_at')
+      .in('id', cleanThreadIds),
+  ]);
 
-    if (readError) throw readError;
-    readStatusMap = new Map((readRows || []).map((row) => [row.thread_id, row.last_read_at]));
-  } catch (error) {
-    console.error("Read-Status konnte nicht geladen werden:", error);
-  }
+  if (readError) throw readError;
+  if (threadError) throw threadError;
 
-  let messagesByThread = new Map();
-  try {
-    const { data: messageRows, error: messageError } = await supabase
-      .from("messages")
-      .select("thread_id, created_at, sender_user_id")
-      .in("thread_id", threadIds)
-      .order("created_at", { ascending: true });
+  const readMap = new Map(
+    (readRows || []).map((row) => [
+      row.thread_id,
+      row.last_read_at ? new Date(row.last_read_at).getTime() : 0,
+    ])
+  );
+  const unreadByThread = new Map();
 
-    if (messageError) throw messageError;
+  const countPromises = (threadRows || []).map(async (thread) => {
+    const threadId = thread?.id;
+    if (!threadId) return;
 
-    for (const message of messageRows || []) {
-      const existing = messagesByThread.get(message.thread_id) || [];
-      existing.push(message);
-      messagesByThread.set(message.thread_id, existing);
+    const lastMessageAt = thread?.last_message_at
+      ? new Date(thread.last_message_at).getTime()
+      : 0;
+    const lastReadAt = readMap.get(threadId) || 0;
+
+    if (!lastMessageAt || lastMessageAt <= lastReadAt) {
+      unreadByThread.set(threadId, 0);
+      return;
     }
-  } catch (error) {
-    console.error("Nachrichten-Metadaten konnten nicht geladen werden:", error);
+
+    let query = supabase
+      .from('messages')
+      .select('id', { count: 'exact', head: true })
+      .eq('thread_id', threadId)
+      .neq('sender_user_id', authUserId);
+
+    if (lastReadAt) {
+      query = query.gt('created_at', new Date(lastReadAt).toISOString());
+    }
+
+    const { count, error } = await query;
+    if (error) throw error;
+
+    unreadByThread.set(threadId, count || 0);
+  });
+
+  await Promise.all(countPromises);
+
+  const unreadTotal = Array.from(unreadByThread.values()).reduce(
+    (sum, value) => sum + value,
+    0
+  );
+  return { unreadByThread, unreadTotal };
+}
+
+async function loadVolunteerDirectThreadsWithUnread({ freiwilligerId, authUserId }) {
+  const { data: threads, error: threadsError } = await supabase
+    .from('message_threads')
+    .select('*')
+    .eq('thread_type', 'termin_direct')
+    .eq('freiwilliger_id', freiwilligerId)
+    .order('last_message_at', { ascending: false });
+
+  if (threadsError) throw threadsError;
+
+  const threadList = threads || [];
+  const terminIds = [...new Set(threadList.map((t) => t.termin_id).filter(Boolean))];
+  const vereinIds = [...new Set(threadList.map((t) => t.verein_id).filter(Boolean))];
+
+  let termineMap = new Map();
+  let vereineMap = new Map();
+  let stellenMap = new Map();
+
+  if (terminIds.length > 0) {
+    const { data: termineRows, error: termineError } = await supabase
+      .from('termine')
+      .select('id, datum, startzeit, endzeit, stelle_id')
+      .in('id', terminIds);
+
+    if (termineError) throw termineError;
+    termineMap = new Map((termineRows || []).map((t) => [t.id, t]));
   }
 
-  return threadList.map((thread) => {
-    const lastReadAt = readStatusMap.get(thread.id);
-    const lastReadTime = lastReadAt ? new Date(lastReadAt).getTime() : 0;
-    const unreadCount = (messagesByThread.get(thread.id) || []).filter((message) => {
-      const messageTime = message?.created_at ? new Date(message.created_at).getTime() : 0;
-      if (!messageTime || messageTime <= lastReadTime) return false;
-      return message?.sender_user_id !== authUserId;
-    }).length;
+  const stelleIds = [...new Set(Array.from(termineMap.values()).map((t) => t?.stelle_id).filter(Boolean))];
 
+  if (stelleIds.length > 0) {
+    const { data: stellenRows, error: stellenError } = await supabase
+      .from('stellen')
+      .select('id, titel')
+      .in('id', stelleIds);
+
+    if (stellenError) throw stellenError;
+    stellenMap = new Map((stellenRows || []).map((s) => [s.id, s]));
+  }
+
+  if (vereinIds.length > 0) {
+    const { data: vereineRows, error: vereineError } = await supabase
+      .from('vereine')
+      .select('id, name')
+      .in('id', vereinIds);
+
+    if (vereineError) throw vereineError;
+    vereineMap = new Map((vereineRows || []).map((v) => [v.id, v]));
+  }
+
+  const { unreadByThread, unreadTotal } = await getUnreadCountsForThreads(
+    threadList.map((thread) => thread.id),
+    authUserId
+  );
+
+  const data = threadList.map((thread) => {
+    const termin = termineMap.get(thread.termin_id) || null;
     return {
       ...thread,
-      unread_count: unreadCount,
+      unread_count: unreadByThread.get(thread.id) || 0,
+      termine: termin,
+      vereine: vereineMap.get(thread.verein_id) || null,
+      stellen: termin?.stelle_id ? stellenMap.get(termin.stelle_id) || null : null,
     };
   });
+
+  return { threads: data, unreadTotal };
 }
 
 function DetailScreen({
@@ -1310,6 +1407,7 @@ function FreiwilligenDashboard({
 }) {
   const [meineChats, setMeineChats] = useState([]);
   const [meineChatsLoading, setMeineChatsLoading] = useState(false);
+  const [historicalStats, setHistoricalStats] = useState({ bestaetigteEinsaetze: 0, geleisteteStunden: 0 });
 
   useEffect(() => {
     let active = true;
@@ -1317,75 +1415,13 @@ function FreiwilligenDashboard({
     async function loadMyChats() {
       setMeineChatsLoading(true);
       try {
-        const { data: threads, error: threadsError } = await supabase
-          .from("message_threads")
-          .select("*")
-          .eq("thread_type", "termin_direct")
-          .eq("freiwilliger_id", user.data.id)
-          .order("last_message_at", { ascending: false });
-
-        if (threadsError) throw threadsError;
-
-        const threadList = threads || [];
-        const terminIds = [...new Set(threadList.map((t) => t.termin_id).filter(Boolean))];
-        const vereinIds = [...new Set(threadList.map((t) => t.verein_id).filter(Boolean))];
-
-        let termineMap = new Map();
-        let vereineMap = new Map();
-        let stellenMap = new Map();
-
-        if (terminIds.length > 0) {
-          const { data: termineRows, error: termineError } = await supabase
-            .from("termine")
-            .select("id, datum, startzeit, endzeit, stelle_id")
-            .in("id", terminIds);
-
-          if (termineError) throw termineError;
-          termineMap = new Map((termineRows || []).map((t) => [t.id, t]));
-        }
-
-        const stelleIds = [
-          ...new Set(
-            Array.from(termineMap.values())
-              .map((t) => t?.stelle_id)
-              .filter(Boolean)
-          ),
-        ];
-
-        if (stelleIds.length > 0) {
-          const { data: stellenRows, error: stellenError } = await supabase
-            .from("stellen")
-            .select("id, titel")
-            .in("id", stelleIds);
-
-          if (stellenError) throw stellenError;
-          stellenMap = new Map((stellenRows || []).map((s) => [s.id, s]));
-        }
-
-        if (vereinIds.length > 0) {
-          const { data: vereineRows, error: vereineError } = await supabase
-            .from("vereine")
-            .select("id, name")
-            .in("id", vereinIds);
-
-          if (vereineError) throw vereineError;
-          vereineMap = new Map((vereineRows || []).map((v) => [v.id, v]));
-        }
-
-        const data = threadList.map((thread) => {
-          const termin = termineMap.get(thread.termin_id) || null;
-          return {
-            ...thread,
-            termine: termin,
-            vereine: vereineMap.get(thread.verein_id) || null,
-            stellen: termin?.stelle_id ? stellenMap.get(termin.stelle_id) || null : null,
-          };
+        const { threads } = await loadVolunteerDirectThreadsWithUnread({
+          freiwilligerId: user.data.id,
+          authUserId: user.data.auth_id,
         });
 
-        const dataWithUnread = await enrichThreadsWithUnreadCounts(data || [], user?.data?.auth_id);
-
         if (!active) return;
-        setMeineChats(dataWithUnread || []);
+        setMeineChats(threads || []);
       } catch (err) {
         console.error("Dashboard-Chats konnten nicht geladen werden:", err);
         if (!active) return;
@@ -1396,10 +1432,25 @@ function FreiwilligenDashboard({
     }
 
     loadMyChats();
+
+    const channel = supabase
+      .channel(`freiwilligen-dashboard-chats-${user?.data?.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => {
+        loadMyChats();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'message_read_status' }, () => {
+        loadMyChats();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'message_threads' }, () => {
+        loadMyChats();
+      })
+      .subscribe();
+
     return () => {
       active = false;
+      supabase.removeChannel(channel);
     };
-  }, [user?.data?.id]);
+  }, [user?.data?.id, user?.data?.auth_id]);
 
   const aktiveEinsaetze = (stellen || [])
     .flatMap((stelle) =>
@@ -1425,7 +1476,7 @@ function FreiwilligenDashboard({
 
   const naechsteEinsaetze = aktiveEinsaetze.slice(0, 3);
 
-  const vergangeneEinsaetze = (stellen || [])
+  const vergangeneEinsaetzeAusStellen = (stellen || [])
     .flatMap((stelle) =>
       (stelle.termine || [])
         .map((termin) => {
@@ -1438,20 +1489,93 @@ function FreiwilligenDashboard({
         .filter(Boolean)
     );
 
-  const geleisteteStunden = vergangeneEinsaetze.reduce((sum, item) => {
-    const start = item?.termin?.startzeit;
-    const end = item?.termin?.endzeit;
-    if (!start || !end) return sum;
+  const lokaleBestaetigteEinsaetze = vergangeneEinsaetzeAusStellen.length;
+  const lokaleGeleisteteStunden = vergangeneEinsaetzeAusStellen.reduce(
+    (sum, item) => sum + berechneTerminStunden(item?.termin, item?.stelle),
+    0
+  );
 
-    try {
-      const startDate = new Date(`2000-01-01T${start}`);
-      const endDate = new Date(`2000-01-01T${end}`);
-      const diff = (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60);
-      return diff > 0 ? sum + diff : sum;
-    } catch {
-      return sum;
+  useEffect(() => {
+    let active = true;
+
+    async function loadHistoricalStats() {
+      if (!user?.data?.id) {
+        if (active) setHistoricalStats({ bestaetigteEinsaetze: 0, geleisteteStunden: 0 });
+        return;
+      }
+
+      try {
+        const { data: bewerbungen, error: bewerbungenError } = await supabase
+          .from("bewerbungen")
+          .select("id, termin_id, stelle_id, status, bestaetigt")
+          .eq("freiwilliger_id", user.data.id)
+          .or("status.eq.erschienen,bestaetigt.eq.true");
+
+        if (bewerbungenError) throw bewerbungenError;
+
+        const rows = bewerbungen || [];
+        const terminIds = [...new Set(rows.map((row) => row.termin_id).filter(Boolean))];
+        const stelleIds = [...new Set(rows.map((row) => row.stelle_id).filter(Boolean))];
+
+        let termineMap = new Map();
+        let stellenMap = new Map();
+
+        if (terminIds.length > 0) {
+          const { data: termineRows, error: termineError } = await supabase
+            .from("termine")
+            .select("id, startzeit, endzeit, dauer_stunden")
+            .in("id", terminIds);
+
+          if (termineError) throw termineError;
+          termineMap = new Map((termineRows || []).map((termin) => [termin.id, termin]));
+        }
+
+        if (stelleIds.length > 0) {
+          const { data: stellenRows, error: stellenError } = await supabase
+            .from("stellen")
+            .select("id, standard_dauer_stunden")
+            .in("id", stelleIds);
+
+          if (stellenError) throw stellenError;
+          stellenMap = new Map((stellenRows || []).map((stelle) => [stelle.id, stelle]));
+        }
+
+        const bestaetigteEinsaetze = rows.length;
+        const geleisteteStunden = rows.reduce((sum, row) => {
+          const termin = termineMap.get(row.termin_id) || null;
+          const stelle = stellenMap.get(row.stelle_id) || null;
+          return sum + berechneTerminStunden(termin, stelle);
+        }, 0);
+
+        if (!active) return;
+        setHistoricalStats({
+          bestaetigteEinsaetze,
+          geleisteteStunden,
+        });
+      } catch (err) {
+        console.error("Historische Freiwilligen-Statistiken konnten nicht geladen werden:", err);
+        if (!active) return;
+        setHistoricalStats({
+          bestaetigteEinsaetze: lokaleBestaetigteEinsaetze,
+          geleisteteStunden: lokaleGeleisteteStunden,
+        });
+      }
     }
-  }, 0);
+
+    loadHistoricalStats();
+    return () => {
+      active = false;
+    };
+  }, [user?.data?.id, lokaleBestaetigteEinsaetze, lokaleGeleisteteStunden]);
+
+  const bestaetigteEinsaetzeGesamt = Math.max(
+    lokaleBestaetigteEinsaetze,
+    Number(historicalStats?.bestaetigteEinsaetze || 0)
+  );
+  const geleisteteStundenGesamt = Math.max(
+    lokaleGeleisteteStunden,
+    Number(historicalStats?.geleisteteStunden || 0)
+  );
 
   const gefolgteVereine = [...new Set(follows?.vereine || [])]
     .map((vereinId) => (stellen || []).find((s) => s.verein_id === vereinId)?.vereine)
@@ -1502,7 +1626,7 @@ function FreiwilligenDashboard({
             </div>
             <div style={{ textAlign: "center", flex: 1 }}>
               <div style={{ fontSize: 24, fontWeight: "bold", color: "#6BAF7A" }}>
-                {geleisteteStunden.toFixed(1)}h
+                {geleisteteStundenGesamt.toFixed(1)}h
               </div>
               <div style={{ fontSize: 11, color: "#C4B89A" }}>geleistet</div>
             </div>
@@ -1603,9 +1727,31 @@ function FreiwilligenDashboard({
                 fontSize: 12,
                 fontFamily: "inherit",
                 fontWeight: "bold",
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
               }}
             >
-              Alle Chats →
+              <span>Alle Chats</span>
+              {meineChats.reduce((sum, thread) => sum + (thread.unread_count || 0), 0) > 0 && (
+                <span
+                  style={{
+                    minWidth: 18,
+                    height: 18,
+                    padding: "0 6px",
+                    borderRadius: 999,
+                    background: "#E85C5C",
+                    color: "#fff",
+                    fontSize: 10,
+                    fontWeight: "bold",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                >
+                  {meineChats.reduce((sum, thread) => sum + (thread.unread_count || 0), 0)}
+                </span>
+              )}
             </button>
           </div>
 
@@ -1613,12 +1759,11 @@ function FreiwilligenDashboard({
             <div style={{ fontSize: 13, color: "#8B7355" }}>Chats werden geladen …</div>
           ) : meineChats.length === 0 ? (
             <div style={{ fontSize: 13, color: "#8B7355" }}>
-              Noch keine direkten Chats vorhanden.
+              Noch keine direkten Chats mit Vereinen vorhanden.
             </div>
           ) : (
             meineChats.slice(0, 2).map((thread) => {
               const termin = thread.termine;
-              const unreadCount = Number(thread?.unread_count || 0);
               return (
                 <button
                   key={thread.id}
@@ -1635,8 +1780,15 @@ function FreiwilligenDashboard({
                     fontFamily: "inherit",
                   }}
                 >
-                  <div style={{ fontSize: 13, fontWeight: "bold", color: "#2C2416", marginBottom: 4 }}>
-                    {thread.vereine?.name || "Verein"}
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", marginBottom: 4 }}>
+                    <div style={{ fontSize: 13, fontWeight: "bold", color: "#2C2416" }}>
+                      {thread.vereine?.name || "Verein"}
+                    </div>
+                    {thread.unread_count > 0 && (
+                      <span style={{ minWidth: 18, height: 18, padding: "0 6px", borderRadius: 999, background: "#E85C5C", color: "#fff", fontSize: 10, fontWeight: "bold", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                        {thread.unread_count}
+                      </span>
+                    )}
                   </div>
                   <div style={{ fontSize: 11, color: "#3A7D44" }}>
                     📅 {termin?.datum ? formatDate(termin.datum) : "-"} · 🕐 {termin?.startzeit || "-"}
@@ -1734,13 +1886,13 @@ function FreiwilligenDashboard({
           <div style={{ display: "flex", gap: 12 }}>
             <div style={{ flex: 1, background: "#FFFDFC", border: "1px solid #E0D8C8", borderRadius: 12, padding: "12px" }}>
               <div style={{ fontSize: 20, fontWeight: "bold", color: "#E8A87C", marginBottom: 4 }}>
-                {vergangeneEinsaetze.length}
+                {bestaetigteEinsaetzeGesamt}
               </div>
               <div style={{ fontSize: 11, color: "#8B7355" }}>bestätigte Einsätze</div>
             </div>
             <div style={{ flex: 1, background: "#FFFDFC", border: "1px solid #E0D8C8", borderRadius: 12, padding: "12px" }}>
               <div style={{ fontSize: 20, fontWeight: "bold", color: "#6BAF7A", marginBottom: 4 }}>
-                {geleisteteStunden.toFixed(1)}h
+                {geleisteteStundenGesamt.toFixed(1)}h
               </div>
               <div style={{ fontSize: 11, color: "#8B7355" }}>geleistete Zeit</div>
             </div>
@@ -1764,6 +1916,11 @@ function FreiwilligenKommunikation({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [selectedChat, setSelectedChat] = useState(null);
+  const [kommunikationTab, setKommunikationTab] = useState("vereine");
+  const [supportThreadId, setSupportThreadId] = useState(null);
+  const [supportLoading, setSupportLoading] = useState(false);
+  const [supportError, setSupportError] = useState("");
+  const [supportUnreadCount, setSupportUnreadCount] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -1773,80 +1930,18 @@ function FreiwilligenKommunikation({
       setError("");
 
       try {
-        const { data: threads, error: threadsError } = await supabase
-          .from("message_threads")
-          .select("*")
-          .eq("thread_type", "termin_direct")
-          .eq("freiwilliger_id", user.data.id)
-          .order("last_message_at", { ascending: false });
-
-        if (threadsError) throw threadsError;
-
-        const threadList = threads || [];
-        const terminIds = [...new Set(threadList.map((t) => t.termin_id).filter(Boolean))];
-        const vereinIds = [...new Set(threadList.map((t) => t.verein_id).filter(Boolean))];
-
-        let termineMap = new Map();
-        let vereineMap = new Map();
-        let stellenMap = new Map();
-
-        if (terminIds.length > 0) {
-          const { data: termineRows, error: termineError } = await supabase
-            .from("termine")
-            .select("id, datum, startzeit, endzeit, stelle_id")
-            .in("id", terminIds);
-
-          if (termineError) throw termineError;
-          termineMap = new Map((termineRows || []).map((t) => [t.id, t]));
-        }
-
-        const stelleIds = [
-          ...new Set(
-            Array.from(termineMap.values())
-              .map((t) => t?.stelle_id)
-              .filter(Boolean)
-          ),
-        ];
-
-        if (stelleIds.length > 0) {
-          const { data: stellenRows, error: stellenError } = await supabase
-            .from("stellen")
-            .select("id, titel")
-            .in("id", stelleIds);
-
-          if (stellenError) throw stellenError;
-          stellenMap = new Map((stellenRows || []).map((s) => [s.id, s]));
-        }
-
-        if (vereinIds.length > 0) {
-          const { data: vereineRows, error: vereineError } = await supabase
-            .from("vereine")
-            .select("id, name")
-            .in("id", vereinIds);
-
-          if (vereineError) throw vereineError;
-          vereineMap = new Map((vereineRows || []).map((v) => [v.id, v]));
-        }
-
-        const data = threadList.map((thread) => {
-          const termin = termineMap.get(thread.termin_id) || null;
-          return {
-            ...thread,
-            termine: termin,
-            vereine: vereineMap.get(thread.verein_id) || null,
-            stellen: termin?.stelle_id ? stellenMap.get(termin.stelle_id) || null : null,
-          };
+        const { threads } = await loadVolunteerDirectThreadsWithUnread({
+          freiwilligerId: user.data.id,
+          authUserId: user.data.auth_id,
         });
 
-        const dataWithUnread = await enrichThreadsWithUnreadCounts(data || [], user?.data?.auth_id);
-
         if (!active) return;
-        setMeineChats(dataWithUnread || []);
+        setMeineChats(threads || []);
         setSelectedChat((prev) => {
-          if (prev?.id) {
-            return (dataWithUnread || []).find((item) => item.id === prev.id) || (dataWithUnread || [])[0] || null;
+          if (prev?.id && (threads || []).some((item) => item.id === prev.id)) {
+            return (threads || []).find((item) => item.id === prev.id) || prev;
           }
-          return (dataWithUnread || [])[0] || null;
+          return (threads || [])[0] || null;
         });
       } catch (err) {
         if (!active) return;
@@ -1858,10 +1953,88 @@ function FreiwilligenKommunikation({
     }
 
     loadMyChats();
+
+    const channel = supabase
+      .channel(`freiwilligen-kommunikation-${user?.data?.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => {
+        loadMyChats();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'message_read_status' }, () => {
+        loadMyChats();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'message_threads' }, () => {
+        loadMyChats();
+      })
+      .subscribe();
+
     return () => {
       active = false;
+      supabase.removeChannel(channel);
     };
-  }, [user?.data?.id]);
+  }, [user?.data?.id, user?.data?.auth_id]);
+
+  const ensureSupportThread = async () => {
+    if (!user?.data?.id) return;
+
+    try {
+      setSupportLoading(true);
+      setSupportError("");
+
+      const thread = await getOrCreateSupportThread();
+      setSupportThreadId(thread?.id || null);
+    } catch (err) {
+      console.error("Support konnte nicht geladen werden:", err);
+      setSupportError(err?.message || "Support konnte nicht geladen werden.");
+    } finally {
+      setSupportLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (kommunikationTab === "support" && !supportThreadId && !supportLoading) {
+      ensureSupportThread();
+    }
+  }, [kommunikationTab, supportThreadId, supportLoading, user?.data?.id]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadSupportUnread() {
+      if (!supportThreadId || !user?.data?.auth_id) {
+        if (active) setSupportUnreadCount(0);
+        return;
+      }
+
+      try {
+        const { unreadByThread } = await getUnreadCountsForThreads([supportThreadId], user.data.auth_id);
+        if (!active) return;
+        setSupportUnreadCount(unreadByThread.get(supportThreadId) || 0);
+      } catch (err) {
+        console.error('Support unread count konnte nicht geladen werden:', err);
+        if (active) setSupportUnreadCount(0);
+      }
+    }
+
+    loadSupportUnread();
+
+    const channel = supabase
+      .channel(`freiwilligen-support-unread-${user?.data?.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => {
+        loadSupportUnread();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'message_read_status' }, () => {
+        loadSupportUnread();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'message_threads' }, () => {
+        loadSupportUnread();
+      })
+      .subscribe();
+
+    return () => {
+      active = false;
+      supabase.removeChannel(channel);
+    };
+  }, [supportThreadId, user?.data?.auth_id, user?.data?.id]);
 
   return (
     <div>
@@ -1876,10 +2049,7 @@ function FreiwilligenKommunikation({
           Kommunikation
         </div>
         <div style={{ fontSize: 13, color: "#C4B89A" }}>
-          Deine Chats mit Vereinen
-          {meineChats.some((thread) => Number(thread?.unread_count || 0) > 0)
-            ? ` · ${meineChats.reduce((sum, thread) => sum + Number(thread?.unread_count || 0), 0)} neu`
-            : ""}
+          Deine Chats mit Vereinen und der Support an Civico
         </div>
       </div>
 
@@ -1892,94 +2062,162 @@ function FreiwilligenKommunikation({
             border: "1px solid #E0D8C8",
           }}
         >
-          {loading ? (
-            <div style={{ fontSize: 13, color: "#8B7355" }}>Chats werden geladen …</div>
-          ) : error ? (
-            <div style={{ fontSize: 13, color: "#B53A2D", fontWeight: "bold" }}>{error}</div>
-          ) : meineChats.length === 0 ? (
-            <div style={{ fontSize: 13, color: "#8B7355" }}>
-              Noch keine direkten Chats vorhanden.
-            </div>
-          ) : (
-            <>
-              <div style={{ display: "grid", gap: 8, marginBottom: 12 }}>
-                {meineChats.map((thread) => {
-                  const termin = thread.termine;
-                  const stelleTitel = thread.stellen?.titel || "Stelle";
-                  const vereinName = thread.vereine?.name || "Verein";
-                  const isActive = selectedChat?.id === thread.id;
-                  const unreadCount = Number(thread?.unread_count || 0);
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
+            {[
+              ["vereine", "🏢 Vereins-Chats", meineChats.reduce((sum, thread) => sum + (thread.unread_count || 0), 0)],
+              ["support", "🛟 Support", supportUnreadCount],
+            ].map(([key, label, unreadCount]) => (
+              <button
+                key={key}
+                onClick={() => setKommunikationTab(key)}
+                style={{
+                  padding: "10px 14px",
+                  borderRadius: 12,
+                  border: kommunikationTab === key ? "none" : "1px solid #E0D8C8",
+                  background: kommunikationTab === key ? "#2C2416" : "#FFFDFC",
+                  color: kommunikationTab === key ? "#FAF7F2" : "#2C2416",
+                  fontSize: 12,
+                  cursor: "pointer",
+                  fontFamily: "inherit",
+                  fontWeight: "bold",
+                }}
+              >
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                  <span>{label}</span>
+                  {unreadCount > 0 && (
+                    <span style={{ minWidth: 18, height: 18, padding: "0 6px", borderRadius: 999, background: kommunikationTab === key ? "#E85C5C" : "#E85C5C", color: "#fff", fontSize: 10, fontWeight: "bold", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                      {unreadCount}
+                    </span>
+                  )}
+                </span>
+              </button>
+            ))}
+          </div>
 
-                  return (
-                    <button
-                      key={thread.id}
-                      onClick={() => setSelectedChat(thread)}
-                      style={{
-                        width: "100%",
-                        textAlign: "left",
-                        border: isActive ? "2px solid #2C2416" : "1px solid #E0D8C8",
-                        background: isActive ? "#F3EBDD" : "#FFFDFC",
-                        borderRadius: 12,
-                        padding: "12px",
-                        cursor: "pointer",
-                        fontFamily: "inherit",
-                      }}
-                    >
-                      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", marginBottom: 4 }}>
-                        <div style={{ fontSize: 13, fontWeight: "bold", color: "#2C2416" }}>
-                          {stelleTitel || "Stelle"}
-                        </div>
-                        {unreadCount > 0 && (
-                          <div
-                            style={{
-                              minWidth: 22,
-                              height: 22,
-                              borderRadius: 11,
-                              background: "#E85C5C",
-                              color: "#fff",
-                              fontSize: 11,
-                              fontWeight: "bold",
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "center",
-                              padding: "0 6px",
-                            }}
-                          >
-                            {unreadCount > 99 ? "99+" : unreadCount}
-                          </div>
-                        )}
-                      </div>
-                      <div style={{ fontSize: 12, color: "#8B7355", marginBottom: 4 }}>
-                        {vereinName}
-                      </div>
-                      <div style={{ fontSize: 11, color: "#3A7D44" }}>
-                        📅 {termin?.datum ? formatDate(termin.datum) : "-"} · 🕐 {termin?.startzeit || "-"}
-                        {termin?.endzeit ? ` – ${termin.endzeit}` : ""}
-                      </div>
-                    </button>
-                  );
-                })}
+          {kommunikationTab === "vereine" ? (
+            loading ? (
+              <div style={{ fontSize: 13, color: "#8B7355" }}>Chats werden geladen …</div>
+            ) : error ? (
+              <div style={{ fontSize: 13, color: "#B53A2D", fontWeight: "bold" }}>{error}</div>
+            ) : meineChats.length === 0 ? (
+              <div style={{ fontSize: 13, color: "#8B7355" }}>
+                Noch keine direkten Chats vorhanden.
               </div>
+            ) : (
+              <>
+                <div style={{ display: "grid", gap: 8, marginBottom: 12 }}>
+                  {meineChats.map((thread) => {
+                    const termin = thread.termine;
+                    const stelleTitel = thread.stellen?.titel || "Stelle";
+                    const vereinName = thread.vereine?.name || "Verein";
+                    const isActive = selectedChat?.id === thread.id;
 
-              {selectedChat?.id ? (
-                <MessageThreadView
-                  threadId={selectedChat.id}
-                  title="Chat mit dem Verein"
-                  emptyText="Noch keine Nachrichten vorhanden."
-                  height={320}
-                  onThreadRead={(threadId) => {
-                    setMeineChats((prev) =>
-                      prev.map((thread) =>
-                        thread.id === threadId ? { ...thread, unread_count: 0 } : thread
-                      )
+                    return (
+                      <button
+                        key={thread.id}
+                        onClick={() => {
+                          setSelectedChat(thread);
+                        }}
+                        style={{
+                          width: "100%",
+                          textAlign: "left",
+                          border: isActive ? "2px solid #2C2416" : "1px solid #E0D8C8",
+                          background: isActive ? "#F3EBDD" : "#FFFDFC",
+                          borderRadius: 12,
+                          padding: "12px",
+                          cursor: "pointer",
+                          fontFamily: "inherit",
+                        }}
+                      >
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", marginBottom: 4 }}>
+                          <div style={{ fontSize: 13, fontWeight: "bold", color: "#2C2416" }}>
+                            {stelleTitel || "Stelle"}
+                          </div>
+                          {thread.unread_count > 0 && (
+                            <span style={{ minWidth: 18, height: 18, padding: "0 6px", borderRadius: 999, background: "#E85C5C", color: "#fff", fontSize: 10, fontWeight: "bold", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+                              {thread.unread_count}
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ fontSize: 12, color: "#8B7355", marginBottom: 4 }}>
+                          {vereinName}
+                        </div>
+                        <div style={{ fontSize: 11, color: "#3A7D44" }}>
+                          📅 {termin?.datum ? formatDate(termin.datum) : "-"} · 🕐 {termin?.startzeit || "-"}
+                          {termin?.endzeit ? ` – ${termin.endzeit}` : ""}
+                        </div>
+                      </button>
                     );
-                    setSelectedChat((prev) =>
-                      prev?.id === threadId ? { ...prev, unread_count: 0 } : prev
-                    );
+                  })}
+                </div>
+
+                {selectedChat?.id ? (
+                  <MessageThreadView
+                    threadId={selectedChat.id}
+                    title="Chat mit dem Verein"
+                    emptyText="Noch keine Nachrichten vorhanden."
+                    height={320}
+                    onMessageSent={async () => {
+                      const { threads } = await loadVolunteerDirectThreadsWithUnread({
+                        freiwilligerId: user.data.id,
+                        authUserId: user.data.auth_id,
+                      });
+                      setMeineChats(threads || []);
+                    }}
+                    onRead={async () => {
+                      const { threads } = await loadVolunteerDirectThreadsWithUnread({
+                        freiwilligerId: user.data.id,
+                        authUserId: user.data.auth_id,
+                      });
+                      setMeineChats(threads || []);
+                    }}
+                  />
+                ) : null}
+              </>
+            )
+          ) : (
+            supportLoading ? (
+              <div style={{ fontSize: 13, color: "#8B7355" }}>Support wird geladen …</div>
+            ) : supportError ? (
+              <div style={{ background: "#FFF4F2", borderRadius: 12, padding: 14, border: "1px solid #F0C9C3" }}>
+                <div style={{ fontSize: 13, color: "#B53A2D", fontWeight: "bold", marginBottom: 10 }}>{supportError}</div>
+                <button
+                  onClick={ensureSupportThread}
+                  style={{
+                    padding: "10px 14px",
+                    borderRadius: 10,
+                    border: "none",
+                    background: "#2C2416",
+                    color: "#FAF7F2",
+                    fontSize: 12,
+                    fontWeight: "bold",
+                    cursor: "pointer",
+                    fontFamily: "inherit",
                   }}
-                />
-              ) : null}
-            </>
+                >
+                  Erneut versuchen
+                </button>
+              </div>
+            ) : supportThreadId ? (
+              <MessageThreadView
+                threadId={supportThreadId}
+                title="Support"
+                emptyText="Noch keine Nachrichten vorhanden."
+                height={320}
+                onMessageSent={async () => {
+                  const { unreadByThread } = await getUnreadCountsForThreads([supportThreadId], user.data.auth_id);
+                  setSupportUnreadCount(unreadByThread.get(supportThreadId) || 0);
+                }}
+                onRead={async () => {
+                  const { unreadByThread } = await getUnreadCountsForThreads([supportThreadId], user.data.auth_id);
+                  setSupportUnreadCount(unreadByThread.get(supportThreadId) || 0);
+                }}
+              />
+            ) : (
+              <div style={{ fontSize: 13, color: "#8B7355" }}>
+                Noch kein Support-Chat vorhanden.
+              </div>
+            )
           )}
         </div>
       </div>
@@ -2153,14 +2391,15 @@ function FreiwilligerProfil({
           <button
             onClick={logout}
             style={{
-              background: "transparent",
-              border: "none",
-              color: "#8B7355",
+              background: "rgba(232,92,92,0.16)",
+              border: "1px solid rgba(232,92,92,0.45)",
+              color: "#F4F0E8",
               fontSize: 12,
               padding: "6px 12px",
               borderRadius: 20,
               cursor: "pointer",
               fontFamily: "inherit",
+              fontWeight: "bold",
             }}
           >
             Abmelden
