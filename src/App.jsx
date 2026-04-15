@@ -707,22 +707,36 @@ export default function App() {
   };
 
   const logout = async () => {
+    const freiwilligerId =
+      user?.type === "freiwilliger" ? user?.data?.id : null;
+
     try {
-      if (user?.type === "freiwilliger") {
-        await unregisterPush(user.data.id);
-      }
+      await supabase.auth.signOut();
     } catch (e) {
-      console.log("Logout cleanup failed:", e);
+      console.log("Sign out failed:", e);
     }
 
-        await supabase.auth.signOut();
     if (typeof window !== "undefined") {
       sessionStorage.removeItem("civico_auth_flow");
     }
+
     clearStoredLastRole();
     setUser(null);
     setHistory([]);
     setScreen("home");
+    setHomeTab("stellen");
+    setSelected(null);
+    setSelectedVerein(null);
+    setSelectedFreiwilliger(null);
+    setNotifications([]);
+    setShowNotifications(false);
+    setFollows({ vereine: [], kategorien: [] });
+
+    if (freiwilligerId) {
+      unregisterPush(freiwilligerId).catch((e) =>
+        console.log("Logout push cleanup failed:", e)
+      );
+    }
   };
 
   // ── Push Notifications ────────────────────────────────────────────────────
