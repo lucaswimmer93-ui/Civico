@@ -1795,6 +1795,8 @@ function FreiwilligenKommunikation({
   const [error, setError] = useState("");
   const [selectedChat, setSelectedChat] = useState(null);
   const [kommunikationTab, setKommunikationTab] = useState("vereine");
+  const [supportThreadId, setSupportThreadId] = useState(null);
+  const [supportLoading, setSupportLoading] = useState(false);
   const [supportError, setSupportError] = useState("");
 
   useEffect(() => {
