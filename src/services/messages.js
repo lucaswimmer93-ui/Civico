@@ -168,14 +168,12 @@ export async function getOrCreateSupportThread() {
     throw new Error("Admin benötigt keinen eigenen Support-Thread.");
   }
 
-  if (actor.role === "freiwilliger") {
-    throw new Error("Freiwillige haben hier keinen Support-Thread.");
-  }
-
   const matchField =
     actor.role === "verein"
       ? { verein_id: actor.organizationId }
-      : { gemeinde_id: actor.organizationId };
+      : actor.role === "gemeinde"
+        ? { gemeinde_id: actor.organizationId }
+        : { freiwilliger_id: actor.organizationId };
 
   const { data: existing, error: existingError } = await supabase
     .from("message_threads")
@@ -191,6 +189,7 @@ export async function getOrCreateSupportThread() {
     thread_type: "support",
     verein_id: actor.role === "verein" ? actor.organizationId : null,
     gemeinde_id: actor.role === "gemeinde" ? actor.organizationId : null,
+    freiwilliger_id: actor.role === "freiwilliger" ? actor.organizationId : null,
     created_by_user_id: actor.userId,
     last_message_at: new Date().toISOString(),
   };
@@ -282,7 +281,8 @@ export async function getAdminSupportThreads() {
     .select(`
       *,
       vereine ( id, name, email ),
-      gemeinden ( id, name, email )
+      gemeinden ( id, name, email ),
+      freiwillige ( id, name, email )
     `)
     .eq("thread_type", "support")
     .order("last_message_at", { ascending: false });
