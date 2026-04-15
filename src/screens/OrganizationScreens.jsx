@@ -199,6 +199,21 @@ function VereinDashboard({
             </button>
           </div>
           <button
+            onClick={onProfil}
+            style={{
+              background: "rgba(255,255,255,0.1)",
+              border: "none",
+              color: "#F4F0E8",
+              fontSize: 12,
+              padding: "6px 12px",
+              borderRadius: 20,
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            👤 Profil
+          </button>
+          <button
             onClick={logout}
             style={{
               background: "rgba(255,255,255,0.1)",
@@ -288,10 +303,10 @@ function VereinDashboard({
       <div style={{ padding: "16px 16px 100px" }}>
         <div
           style={{
-            display: "flex",
+            display: "grid",
+            gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
             gap: 8,
             marginBottom: 16,
-            flexWrap: "wrap",
           }}
         >
           <button
@@ -306,8 +321,6 @@ function VereinDashboard({
               onNeu();
             }}
             style={{
-              flex: 1,
-              minWidth: 160,
               padding: "12px",
               borderRadius: 12,
               border: "none",
@@ -324,99 +337,51 @@ function VereinDashboard({
             + Neue Stelle
           </button>
           <button
-            onClick={() => {
-              if (!user.data.verifiziert) {
-                showToast(
-                  "Dein Verein muss erst freigeschaltet werden.",
-                  "#E8A87C"
-                );
-                return;
-              }
-              onNeu();
-            }}
             style={{
-              flex: 2,
               padding: "12px",
               borderRadius: 12,
               border: "none",
-              background: user.data.verifiziert
-                ? "linear-gradient(135deg, #2C2416, #4A3C28)"
-                : "#C4B89A",
+              background: "linear-gradient(135deg, #2C2416, #4A3C28)",
               color: "#F4F0E8",
               fontSize: 14,
               fontFamily: "inherit",
               fontWeight: "bold",
-              cursor: "pointer",
+              cursor: "default",
             }}
           >
-            + Neue Stelle
-          </button>
-          <button
-            onClick={onProfil}
-            style={{
-              flex: 1,
-              padding: "12px",
-              borderRadius: 12,
-              border: "1px solid #8B7355",
-              background: "transparent",
-              color: "#8B7355",
-              fontSize: 13,
-              fontFamily: "inherit",
-              cursor: "pointer",
-            }}
-          >
-            👤 Profil
-          </button>
-          <button
-            onClick={onAnalyse}
-            style={{
-              flex: 1,
-              padding: "12px",
-              borderRadius: 12,
-              border: "1px solid #5B9BD5",
-              background: "transparent",
-              color: "#5B9BD5",
-              fontSize: 13,
-              fontFamily: "inherit",
-              cursor: "pointer",
-            }}
-          >
-            📊 Analyse
+            📋 Meine Stellen
           </button>
           <button
             onClick={onMeineGemeinde}
             style={{
-              flex: 1,
-              padding: "12px",
-              borderRadius: 12,
-              border: "1px solid #C8A96E",
-              background: "transparent",
-              color: "#C8A96E",
-              fontSize: 13,
-              fontFamily: "inherit",
-              cursor: "pointer",
-            }}
-          >
-            🏛 Meine Gemeinde
-          </button>
-          <button
-            onClick={() => {
-              setShowSupportModal(true);
-              if (!supportThreadId) ensureSupportThread();
-            }}
-            style={{
-              flex: 1,
               padding: "12px",
               borderRadius: 12,
               border: "1px solid #E8A87C",
               background: "transparent",
               color: "#E8A87C",
-              fontSize: 13,
+              fontSize: 14,
               fontFamily: "inherit",
+              fontWeight: "bold",
               cursor: "pointer",
             }}
           >
-            💬 Support
+            💬 Kommunikation
+          </button>
+          <button
+            onClick={onAnalyse}
+            style={{
+              padding: "12px",
+              borderRadius: 12,
+              border: "1px solid #5B9BD5",
+              background: "transparent",
+              color: "#5B9BD5",
+              fontSize: 14,
+              fontFamily: "inherit",
+              fontWeight: "bold",
+              cursor: "pointer",
+            }}
+          >
+            📊 Analyse
           </button>
         </div>
         {!user.data.verifiziert && (
