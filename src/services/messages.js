@@ -1,5 +1,17 @@
 import { supabase } from "../lib/supabaseclient";
 
+
+const LAST_ROLE_STORAGE_KEY = "civico_last_role";
+
+function getPreferredRole() {
+  if (typeof window === "undefined") return null;
+  try {
+    return window.localStorage.getItem(LAST_ROLE_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Aktuellen User bestimmen
  * Reihenfolge bewusst:
@@ -31,44 +43,53 @@ export async function getCurrentActor() {
   if (adminRes.error) throw adminRes.error;
   if (freiwilligerRes.error) throw freiwilligerRes.error;
 
-  if (vereinRes.data) {
-    return {
-      role: "verein",
-      userId: authId,
-      organizationId: vereinRes.data.id,
-      data: vereinRes.data,
-      name: vereinRes.data.name,
-    };
-  }
+  const roleMap = {
+    verein: vereinRes.data
+      ? {
+          role: "verein",
+          userId: authId,
+          organizationId: vereinRes.data.id,
+          data: vereinRes.data,
+          name: vereinRes.data.name,
+        }
+      : null,
+    gemeinde: gemeindeRes.data
+      ? {
+          role: "gemeinde",
+          userId: authId,
+          organizationId: gemeindeRes.data.id,
+          data: gemeindeRes.data,
+          name: gemeindeRes.data.name,
+        }
+      : null,
+    admin: adminRes.data
+      ? {
+          role: "admin",
+          userId: authId,
+          organizationId: adminRes.data.id,
+          data: adminRes.data,
+          name: adminRes.data.email || "Admin",
+        }
+      : null,
+    freiwilliger: freiwilligerRes.data
+      ? {
+          role: "freiwilliger",
+          userId: authId,
+          organizationId: freiwilligerRes.data.id,
+          data: freiwilligerRes.data,
+          name: freiwilligerRes.data.name,
+        }
+      : null,
+  };
 
-  if (gemeindeRes.data) {
-    return {
-      role: "gemeinde",
-      userId: authId,
-      organizationId: gemeindeRes.data.id,
-      data: gemeindeRes.data,
-      name: gemeindeRes.data.name,
-    };
-  }
+  const preferredRole = getPreferredRole();
+  const orderedRoles = [
+    ...(preferredRole && roleMap[preferredRole] ? [preferredRole] : []),
+    ...["verein", "gemeinde", "admin", "freiwilliger"].filter((role) => role !== preferredRole),
+  ];
 
-  if (adminRes.data) {
-    return {
-      role: "admin",
-      userId: authId,
-      organizationId: adminRes.data.id,
-      data: adminRes.data,
-      name: adminRes.data.email || "Admin",
-    };
-  }
-
-  if (freiwilligerRes.data) {
-    return {
-      role: "freiwilliger",
-      userId: authId,
-      organizationId: freiwilligerRes.data.id,
-      data: freiwilligerRes.data,
-      name: freiwilligerRes.data.name,
-    };
+  for (const role of orderedRoles) {
+    if (roleMap[role]) return roleMap[role];
   }
 
   throw new Error("User hat keine gültige Rolle");
