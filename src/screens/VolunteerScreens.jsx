@@ -1428,7 +1428,7 @@ function FreiwilligenDashboard({
       active = false;
       supabase.removeChannel(channel);
     };
-  }, [user?.data?.id, user?.data?.auth_id]);
+  }, [user?.data?.id, user?.data?.auth_id, communicationRefreshTick]);
 
   const aktiveEinsaetze = (stellen || [])
     .flatMap((stelle) =>
@@ -1889,6 +1889,10 @@ function FreiwilligenDashboard({
 
 function FreiwilligenKommunikation({
   user,
+  globalVereinsUnreadCount = 0,
+  globalSupportUnreadCount = 0,
+  communicationRefreshTick = 0,
+  onGlobalReadUpdate,
 }) {
   const [meineChats, setMeineChats] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -1945,29 +1949,68 @@ function FreiwilligenKommunikation({
     };
   }, [user?.data?.id, user?.data?.auth_id]);
 
-  const ensureSupportThread = async () => {
-    if (!user?.data?.id) return;
+  const findExistingSupportThread = async () => {
+    if (!user?.data?.id) return null;
+
+    const { data, error } = await supabase
+      .from("message_threads")
+      .select("id")
+      .eq("thread_type", "support")
+      .eq("freiwilliger_id", user.data.id)
+      .order("last_message_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) throw error;
+    return data || null;
+  };
+
+  const ensureSupportThread = async (createIfMissing = true) => {
+    if (!user?.data?.id) return null;
 
     try {
       setSupportLoading(true);
       setSupportError("");
 
+      const existing = await findExistingSupportThread();
+      if (existing?.id) {
+        setSupportThreadId(existing.id);
+        return existing;
+      }
+
+      if (!createIfMissing) {
+        setSupportThreadId(null);
+        return null;
+      }
+
       const thread = await getOrCreateSupportThread();
       setSupportThreadId(thread?.id || null);
       setSupportUnreadCount(0);
+      return thread || null;
     } catch (err) {
       console.error("Support konnte nicht geladen werden:", err);
       setSupportError(err?.message || "Support konnte nicht geladen werden.");
+      return null;
     } finally {
       setSupportLoading(false);
     }
   };
 
   useEffect(() => {
-    if (kommunikationTab === "support" && !supportThreadId && !supportLoading) {
-      ensureSupportThread();
-    }
-  }, [kommunikationTab, supportThreadId, supportLoading, user?.data?.id]);
+    let active = true;
+
+    (async () => {
+      const thread = await ensureSupportThread(false);
+      if (!active) return;
+      if (thread?.id) {
+        setSupportThreadId(thread.id);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [user?.data?.id, user?.data?.auth_id]);
 
   useEffect(() => {
     let active = true;
@@ -2001,7 +2044,16 @@ function FreiwilligenKommunikation({
       active = false;
       supabase.removeChannel(channel);
     };
-  }, [supportThreadId, user?.data?.auth_id, user?.data?.id]);
+  }, [supportThreadId, user?.data?.auth_id, user?.data?.id, communicationRefreshTick]);
+
+  const vereinsTabUnreadCount = Math.max(
+    Number(globalVereinsUnreadCount || 0),
+    meineChats.reduce((sum, thread) => sum + (thread.unread_count || 0), 0)
+  );
+  const supportTabUnreadCount = Math.max(
+    Number(globalSupportUnreadCount || 0),
+    Number(supportUnreadCount || 0)
+  );
 
   return (
     <div>
@@ -2031,15 +2083,18 @@ function FreiwilligenKommunikation({
         >
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
             {[
-              ["vereine", "🏢 Vereins-Chats", meineChats.reduce((sum, thread) => sum + (thread.unread_count || 0), 0)],
-              ["support", "🛟 Support", supportUnreadCount],
+              ["vereine", "🏢 Vereins-Chats", vereinsTabUnreadCount],
+              ["support", "🛟 Support", supportTabUnreadCount],
             ].map(([key, label, unreadCount]) => (
               <button
                 key={key}
-                onClick={() => {
+                onClick={async () => {
                   setKommunikationTab(key);
                   if (key === "support") {
                     setSupportUnreadCount(0);
+                    if (!supportThreadId && !supportLoading) {
+                      await ensureSupportThread(true);
+                    }
                   }
                 }}
                 style={{
@@ -2146,6 +2201,9 @@ function FreiwilligenKommunikation({
                             : item
                         )
                       );
+                      if (typeof onGlobalReadUpdate === "function") {
+                        await onGlobalReadUpdate();
+                      }
                     }}
                     onThreadRead={async () => {
                       setMeineChats((prev) =>
@@ -2153,6 +2211,9 @@ function FreiwilligenKommunikation({
                           item.id === selectedChat.id ? { ...item, unread_count: 0 } : item
                         )
                       );
+                      if (typeof onGlobalReadUpdate === "function") {
+                        await onGlobalReadUpdate();
+                      }
                     }}
                   />
                 ) : null}
@@ -2189,9 +2250,15 @@ function FreiwilligenKommunikation({
                 height={320}
                 onMessageSent={async () => {
                   setSupportUnreadCount(0);
+                  if (typeof onGlobalReadUpdate === "function") {
+                    await onGlobalReadUpdate();
+                  }
                 }}
                 onThreadRead={async () => {
                   setSupportUnreadCount(0);
+                  if (typeof onGlobalReadUpdate === "function") {
+                    await onGlobalReadUpdate();
+                  }
                 }}
               />
             ) : (
