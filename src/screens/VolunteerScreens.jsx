@@ -1954,6 +1954,7 @@ function FreiwilligenKommunikation({
 
       const thread = await getOrCreateSupportThread();
       setSupportThreadId(thread?.id || null);
+      setSupportUnreadCount(0);
     } catch (err) {
       console.error("Support konnte nicht geladen werden:", err);
       setSupportError(err?.message || "Support konnte nicht geladen werden.");
@@ -2087,7 +2088,7 @@ function FreiwilligenKommunikation({
                       <button
                         key={thread.id}
                         onClick={() => {
-                          setSelectedChat(thread);
+                          setSelectedChat({ ...thread, unread_count: 0 });
                           setMeineChats((prev) =>
                             prev.map((item) =>
                               item.id === thread.id ? { ...item, unread_count: 0 } : item
@@ -2134,18 +2135,24 @@ function FreiwilligenKommunikation({
                     emptyText="Noch keine Nachrichten vorhanden."
                     height={320}
                     onMessageSent={async () => {
-                      const { threads } = await loadVolunteerDirectThreadsWithUnread({
-                        freiwilligerId: user.data.id,
-                        authUserId: user.data.auth_id,
-                      });
-                      setMeineChats(threads || []);
+                      setMeineChats((prev) =>
+                        prev.map((item) =>
+                          item.id === selectedChat.id
+                            ? {
+                                ...item,
+                                last_message_at: new Date().toISOString(),
+                                unread_count: 0,
+                              }
+                            : item
+                        )
+                      );
                     }}
-                    onRead={async () => {
-                      const { threads } = await loadVolunteerDirectThreadsWithUnread({
-                        freiwilligerId: user.data.id,
-                        authUserId: user.data.auth_id,
-                      });
-                      setMeineChats(threads || []);
+                    onThreadRead={async () => {
+                      setMeineChats((prev) =>
+                        prev.map((item) =>
+                          item.id === selectedChat.id ? { ...item, unread_count: 0 } : item
+                        )
+                      );
                     }}
                   />
                 ) : null}
@@ -2181,12 +2188,10 @@ function FreiwilligenKommunikation({
                 emptyText="Noch keine Nachrichten vorhanden."
                 height={320}
                 onMessageSent={async () => {
-                  const { unreadByThread } = await getUnreadCountsForThreads([supportThreadId], user.data.auth_id);
-                  setSupportUnreadCount(unreadByThread.get(supportThreadId) || 0);
+                  setSupportUnreadCount(0);
                 }}
-                onRead={async () => {
-                  const { unreadByThread } = await getUnreadCountsForThreads([supportThreadId], user.data.auth_id);
-                  setSupportUnreadCount(unreadByThread.get(supportThreadId) || 0);
+                onThreadRead={async () => {
+                  setSupportUnreadCount(0);
                 }}
               />
             ) : (
