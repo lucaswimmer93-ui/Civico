@@ -1,17 +1,5 @@
 import { supabase } from "../lib/supabaseclient";
 
-
-const LAST_ROLE_STORAGE_KEY = "civico_last_role";
-
-function getPreferredRole() {
-  if (typeof window === "undefined") return null;
-  try {
-    return window.localStorage.getItem(LAST_ROLE_STORAGE_KEY);
-  } catch {
-    return null;
-  }
-}
-
 /**
  * Aktuellen User bestimmen
  * Reihenfolge bewusst:
@@ -43,53 +31,44 @@ export async function getCurrentActor() {
   if (adminRes.error) throw adminRes.error;
   if (freiwilligerRes.error) throw freiwilligerRes.error;
 
-  const roleMap = {
-    verein: vereinRes.data
-      ? {
-          role: "verein",
-          userId: authId,
-          organizationId: vereinRes.data.id,
-          data: vereinRes.data,
-          name: vereinRes.data.name,
-        }
-      : null,
-    gemeinde: gemeindeRes.data
-      ? {
-          role: "gemeinde",
-          userId: authId,
-          organizationId: gemeindeRes.data.id,
-          data: gemeindeRes.data,
-          name: gemeindeRes.data.name,
-        }
-      : null,
-    admin: adminRes.data
-      ? {
-          role: "admin",
-          userId: authId,
-          organizationId: adminRes.data.id,
-          data: adminRes.data,
-          name: adminRes.data.email || "Admin",
-        }
-      : null,
-    freiwilliger: freiwilligerRes.data
-      ? {
-          role: "freiwilliger",
-          userId: authId,
-          organizationId: freiwilligerRes.data.id,
-          data: freiwilligerRes.data,
-          name: freiwilligerRes.data.name,
-        }
-      : null,
-  };
+  if (vereinRes.data) {
+    return {
+      role: "verein",
+      userId: authId,
+      organizationId: vereinRes.data.id,
+      data: vereinRes.data,
+      name: vereinRes.data.name,
+    };
+  }
 
-  const preferredRole = getPreferredRole();
-  const orderedRoles = [
-    ...(preferredRole && roleMap[preferredRole] ? [preferredRole] : []),
-    ...["verein", "gemeinde", "admin", "freiwilliger"].filter((role) => role !== preferredRole),
-  ];
+  if (gemeindeRes.data) {
+    return {
+      role: "gemeinde",
+      userId: authId,
+      organizationId: gemeindeRes.data.id,
+      data: gemeindeRes.data,
+      name: gemeindeRes.data.name,
+    };
+  }
 
-  for (const role of orderedRoles) {
-    if (roleMap[role]) return roleMap[role];
+  if (adminRes.data) {
+    return {
+      role: "admin",
+      userId: authId,
+      organizationId: adminRes.data.id,
+      data: adminRes.data,
+      name: adminRes.data.email || "Admin",
+    };
+  }
+
+  if (freiwilligerRes.data) {
+    return {
+      role: "freiwilliger",
+      userId: authId,
+      organizationId: freiwilligerRes.data.id,
+      data: freiwilligerRes.data,
+      name: freiwilligerRes.data.name,
+    };
   }
 
   throw new Error("User hat keine gültige Rolle");
@@ -189,12 +168,14 @@ export async function getOrCreateSupportThread() {
     throw new Error("Admin benötigt keinen eigenen Support-Thread.");
   }
 
+  if (actor.role === "freiwilliger") {
+    throw new Error("Freiwillige haben hier keinen Support-Thread.");
+  }
+
   const matchField =
     actor.role === "verein"
       ? { verein_id: actor.organizationId }
-      : actor.role === "gemeinde"
-        ? { gemeinde_id: actor.organizationId }
-        : { freiwilliger_id: actor.organizationId };
+      : { gemeinde_id: actor.organizationId };
 
   const { data: existing, error: existingError } = await supabase
     .from("message_threads")
@@ -210,7 +191,6 @@ export async function getOrCreateSupportThread() {
     thread_type: "support",
     verein_id: actor.role === "verein" ? actor.organizationId : null,
     gemeinde_id: actor.role === "gemeinde" ? actor.organizationId : null,
-    freiwilliger_id: actor.role === "freiwilliger" ? actor.organizationId : null,
     created_by_user_id: actor.userId,
     last_message_at: new Date().toISOString(),
   };
@@ -508,82 +488,6 @@ export async function getThreadMessages(threadId) {
   return data ?? [];
 }
 
-
-async function sendPushToVolunteerForMessage({ threadId, senderActor, messageBody }) {
-  if (!threadId || !senderActor || senderActor.role === "freiwilliger") return;
-
-  try {
-    const { data: thread, error: threadError } = await supabase
-      .from("message_threads")
-      .select("id, thread_type, freiwilliger_id, verein_id, gemeinde_id")
-      .eq("id", threadId)
-      .maybeSingle();
-
-    if (threadError) throw threadError;
-    if (!thread?.freiwilliger_id) return;
-    if (!["termin_direct", "support"].includes(thread.thread_type)) return;
-
-    const { data: volunteer, error: volunteerError } = await supabase
-      .from("freiwillige")
-      .select("id, auth_id, push_token")
-      .eq("id", thread.freiwilliger_id)
-      .maybeSingle();
-
-    if (volunteerError) throw volunteerError;
-    if (!volunteer?.id || !volunteer?.auth_id) return;
-
-    const { data: settingsRow, error: settingsError } = await supabase
-      .from("notification_settings")
-      .select("push_enabled")
-      .eq("freiwilliger_id", volunteer.id)
-      .maybeSingle();
-
-    if (settingsError) {
-      console.log("notification_settings fuer chat push konnten nicht geladen werden:", settingsError);
-    }
-
-    const pushEnabled = settingsRow?.push_enabled !== false;
-    const shortBody = String(messageBody || "").trim();
-    const bodyPreview = shortBody.length > 90 ? `${shortBody.slice(0, 87)}...` : shortBody;
-    const senderLabel = senderActor.role === "verein"
-      ? (senderActor.name || "Dein Verein")
-      : senderActor.role === "admin"
-        ? "Civico Support"
-        : senderActor.role === "gemeinde"
-          ? (senderActor.name || "Gemeinde")
-          : (senderActor.name || "Neue Nachricht");
-
-    await supabase
-      .from("notifications")
-      .insert({
-        user_id: volunteer.auth_id,
-        titel: "💬 Neue Nachricht",
-        text: `${senderLabel}: ${bodyPreview || "Du hast eine neue Nachricht erhalten."}`,
-        typ: "chat_message",
-        gelesen: false,
-        read_at: null,
-      });
-
-    if (!pushEnabled || !volunteer.push_token) return;
-
-    const { error: pushError } = await supabase.functions.invoke("send-push", {
-      body: {
-        title: "💬 Neue Nachricht",
-        body: `${senderLabel}: ${bodyPreview || "Du hast eine neue Nachricht erhalten."}`,
-        url: "/",
-        notification_type: "chat_message",
-        freiwilliger_ids: [volunteer.id],
-      },
-    });
-
-    if (pushError) {
-      console.log("chat push fehlgeschlagen:", pushError);
-    }
-  } catch (error) {
-    console.log("sendPushToVolunteerForMessage fehlgeschlagen:", error);
-  }
-}
-
 /**
  * Nachricht senden
  */
@@ -615,12 +519,6 @@ export async function sendMessage(threadId, body) {
     .eq("id", threadId);
 
   if (threadUpdateError) throw threadUpdateError;
-
-  await sendPushToVolunteerForMessage({
-    threadId,
-    senderActor: actor,
-    messageBody: body.trim(),
-  });
 
   return data;
 }
