@@ -1428,7 +1428,7 @@ function FreiwilligenDashboard({
       active = false;
       supabase.removeChannel(channel);
     };
-  }, [user?.data?.id, user?.data?.auth_id, communicationRefreshTick]);
+  }, [user?.data?.id, user?.data?.auth_id]);
 
   const aktiveEinsaetze = (stellen || [])
     .flatMap((stelle) =>
