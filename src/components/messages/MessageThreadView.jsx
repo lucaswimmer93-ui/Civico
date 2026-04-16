@@ -34,8 +34,36 @@ export default function MessageThreadView({
   const [error, setError] = useState("");
   const [currentUserId, setCurrentUserId] = useState(null);
   const scrollRef = useRef(null);
+  const markedReadRef = useRef(false);
+  const markReadTimeoutRef = useRef(null);
 
   const hasThread = useMemo(() => Boolean(threadId), [threadId]);
+
+  function notifyThreadRead() {
+    if (typeof onThreadRead === "function" && threadId) {
+      onThreadRead(threadId);
+    }
+  }
+
+  async function markThreadReadSilently() {
+    if (!threadId || markedReadRef.current) return;
+    markedReadRef.current = true;
+    try {
+      await markThreadAsRead(threadId);
+    } catch (err) {
+      markedReadRef.current = false;
+      console.error("Read-Status konnte nicht gesetzt werden:", err);
+    }
+  }
+
+  function queueMarkThreadRead() {
+    if (markReadTimeoutRef.current) {
+      clearTimeout(markReadTimeoutRef.current);
+    }
+    markReadTimeoutRef.current = setTimeout(() => {
+      markThreadReadSilently();
+    }, 250);
+  }
 
   async function loadCurrentUser() {
     const {
@@ -52,14 +80,13 @@ export default function MessageThreadView({
 
     setLoading(true);
     setError("");
+    markedReadRef.current = false;
 
     try {
       const data = await getThreadMessages(threadId);
       setMessages(data || []);
-      await markThreadAsRead(threadId);
-      if (typeof onThreadRead === "function") {
-        onThreadRead(threadId);
-      }
+      notifyThreadRead();
+      queueMarkThreadRead();
     } catch (err) {
       console.error("Fehler beim Laden der Nachrichten:", err);
       setError(err?.message || "Nachrichten konnten nicht geladen werden.");
@@ -76,7 +103,13 @@ export default function MessageThreadView({
 
   useEffect(() => {
     loadMessages();
-  }, [threadId, onThreadRead]);
+    return () => {
+      markedReadRef.current = false;
+      if (markReadTimeoutRef.current) {
+        clearTimeout(markReadTimeoutRef.current);
+      }
+    };
+  }, [threadId]);
 
   useEffect(() => {
     if (!threadId) return;
@@ -91,13 +124,13 @@ export default function MessageThreadView({
           table: "messages",
           filter: `thread_id=eq.${threadId}`,
         },
-        async () => {
+        async (payload) => {
           try {
             const data = await getThreadMessages(threadId);
             setMessages(data || []);
-            await markThreadAsRead(threadId);
-            if (typeof onThreadRead === "function") {
-              onThreadRead(threadId);
+            if (payload?.eventType === "INSERT") {
+              notifyThreadRead();
+              queueMarkThreadRead();
             }
           } catch (err) {
             console.error("Realtime-Update fehlgeschlagen:", err);
