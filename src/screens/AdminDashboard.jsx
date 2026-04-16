@@ -60,7 +60,7 @@ const normalizeSupportThread = (thread) => {
     : { type: 'gemeinde', id: pickFirst(gemeindeSource?.id, thread?.gemeinde_id) || null, name: pickFirst(gemeindeName, 'Gemeinde'), email: pickFirst(gemeindeEmail, '') };
 
   return { ...thread, organisation };
-};};
+};
 
 // ── ANFRAGEN TAB ──────────────────────────────────────────────────────────
 function AnfragenTab() {
