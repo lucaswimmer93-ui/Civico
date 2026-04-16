@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase, T, KATEGORIEN, SKILLS, MEDAILLEN, getSkillLabel, getKat, getMedaille, getNextMedaille, getMedailleName, IMPRESSUM_TEXT, DATENSCHUTZ_TEXT, AGB_TEXT, formatDate, getGemeindeByPlz, isKlarname, isTerminNochNichtGestartet, isTerminAktuell } from '../core/shared';
 import { Header, StelleCard, VereineListe, BottomBar, DatenschutzBox, Input, BigButton, Chip, InfoChip, SectionLabel, RoleCard, EmptyState, ErrorMsg } from '../components/ui';
 import MessageThreadView from '../components/messages/MessageThreadView';
-import { getMyTerminDirectThreads, getOrCreateTerminDirectThread, getOrCreateSupportThread } from '../services/messages';
+import { getMyTerminDirectThreads, getOrCreateTerminDirectThread } from '../services/messages';
 
 const bewerbungIstErschienen = (bewerbung) =>
   bewerbung?.status === "erschienen" || Boolean(bewerbung?.bestaetigt);
@@ -1419,6 +1419,9 @@ function FreiwilligenDashboard({
 
     const channel = supabase
       .channel(`freiwilligen-dashboard-chats-${user?.data?.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => {
+        loadMyChats();
+      })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'message_threads' }, () => {
         loadMyChats();
       })
@@ -1889,10 +1892,6 @@ function FreiwilligenDashboard({
 
 function FreiwilligenKommunikation({
   user,
-  globalVereinsUnreadCount = 0,
-  globalSupportUnreadCount = 0,
-  communicationRefreshTick = 0,
-  onGlobalReadUpdate,
 }) {
   const [meineChats, setMeineChats] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -1938,6 +1937,9 @@ function FreiwilligenKommunikation({
 
     const channel = supabase
       .channel(`freiwilligen-kommunikation-${user?.data?.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => {
+        loadMyChats();
+      })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'message_threads' }, () => {
         loadMyChats();
       })
@@ -1949,68 +1951,60 @@ function FreiwilligenKommunikation({
     };
   }, [user?.data?.id, user?.data?.auth_id]);
 
-  const findExistingSupportThread = async () => {
-    if (!user?.data?.id) return null;
-
-    const { data, error } = await supabase
-      .from("message_threads")
-      .select("id")
-      .eq("thread_type", "support")
-      .eq("freiwilliger_id", user.data.id)
-      .order("last_message_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (error) throw error;
-    return data || null;
-  };
-
-  const ensureSupportThread = async (createIfMissing = true) => {
-    if (!user?.data?.id) return null;
+  const ensureSupportThread = async () => {
+    if (!user?.data?.id) return;
 
     try {
       setSupportLoading(true);
       setSupportError("");
 
-      const existing = await findExistingSupportThread();
+      const { data: existing, error: existingError } = await supabase
+        .from("message_threads")
+        .select("id")
+        .eq("thread_type", "support")
+        .eq("freiwilliger_id", user.data.id)
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      if (existingError) throw existingError;
+
       if (existing?.id) {
         setSupportThreadId(existing.id);
-        return existing;
+        setSupportUnreadCount(0);
+        return;
       }
 
-      if (!createIfMissing) {
-        setSupportThreadId(null);
-        return null;
-      }
+      const { data: created, error: createError } = await supabase
+        .from("message_threads")
+        .insert([
+          {
+            thread_type: "support",
+            freiwilliger_id: user.data.id,
+            created_by_user_id: user?.data?.auth_id || null,
+            last_message_at: new Date().toISOString(),
+          },
+        ])
+        .select("id")
+        .single();
 
-      const thread = await getOrCreateSupportThread();
-      setSupportThreadId(thread?.id || null);
+      if (createError) throw createError;
+
+      setSupportThreadId(created?.id || null);
       setSupportUnreadCount(0);
-      return thread || null;
     } catch (err) {
       console.error("Support konnte nicht geladen werden:", err);
       setSupportError(err?.message || "Support konnte nicht geladen werden.");
-      return null;
     } finally {
       setSupportLoading(false);
     }
   };
 
   useEffect(() => {
-    let active = true;
-
-    (async () => {
-      const thread = await ensureSupportThread(false);
-      if (!active) return;
-      if (thread?.id) {
-        setSupportThreadId(thread.id);
-      }
-    })();
-
-    return () => {
-      active = false;
-    };
-  }, [user?.data?.id, user?.data?.auth_id]);
+    if (kommunikationTab === "support" && !supportThreadId && !supportLoading) {
+      ensureSupportThread();
+    }
+  }, [kommunikationTab, supportThreadId, supportLoading, user?.data?.id]);
 
   useEffect(() => {
     let active = true;
@@ -2035,6 +2029,9 @@ function FreiwilligenKommunikation({
 
     const channel = supabase
       .channel(`freiwilligen-support-unread-${user?.data?.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, () => {
+        loadSupportUnread();
+      })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'message_threads' }, () => {
         loadSupportUnread();
       })
@@ -2044,16 +2041,7 @@ function FreiwilligenKommunikation({
       active = false;
       supabase.removeChannel(channel);
     };
-  }, [supportThreadId, user?.data?.auth_id, user?.data?.id, communicationRefreshTick]);
-
-  const vereinsTabUnreadCount = Math.max(
-    Number(globalVereinsUnreadCount || 0),
-    meineChats.reduce((sum, thread) => sum + (thread.unread_count || 0), 0)
-  );
-  const supportTabUnreadCount = Math.max(
-    Number(globalSupportUnreadCount || 0),
-    Number(supportUnreadCount || 0)
-  );
+  }, [supportThreadId, user?.data?.auth_id, user?.data?.id]);
 
   return (
     <div>
@@ -2083,20 +2071,12 @@ function FreiwilligenKommunikation({
         >
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 14 }}>
             {[
-              ["vereine", "🏢 Vereins-Chats", vereinsTabUnreadCount],
-              ["support", "🛟 Support", supportTabUnreadCount],
+              ["vereine", "🏢 Vereins-Chats", meineChats.reduce((sum, thread) => sum + (thread.unread_count || 0), 0)],
+              ["support", "🛟 Support", supportUnreadCount],
             ].map(([key, label, unreadCount]) => (
               <button
                 key={key}
-                onClick={async () => {
-                  setKommunikationTab(key);
-                  if (key === "support") {
-                    setSupportUnreadCount(0);
-                    if (!supportThreadId && !supportLoading) {
-                      await ensureSupportThread(true);
-                    }
-                  }
-                }}
+                onClick={() => setKommunikationTab(key)}
                 style={{
                   padding: "10px 14px",
                   borderRadius: 12,
@@ -2143,12 +2123,7 @@ function FreiwilligenKommunikation({
                       <button
                         key={thread.id}
                         onClick={() => {
-                          setSelectedChat({ ...thread, unread_count: 0 });
-                          setMeineChats((prev) =>
-                            prev.map((item) =>
-                              item.id === thread.id ? { ...item, unread_count: 0 } : item
-                            )
-                          );
+                          setSelectedChat(thread);
                         }}
                         style={{
                           width: "100%",
@@ -2190,30 +2165,18 @@ function FreiwilligenKommunikation({
                     emptyText="Noch keine Nachrichten vorhanden."
                     height={320}
                     onMessageSent={async () => {
-                      setMeineChats((prev) =>
-                        prev.map((item) =>
-                          item.id === selectedChat.id
-                            ? {
-                                ...item,
-                                last_message_at: new Date().toISOString(),
-                                unread_count: 0,
-                              }
-                            : item
-                        )
-                      );
-                      if (typeof onGlobalReadUpdate === "function") {
-                        await onGlobalReadUpdate();
-                      }
+                      const { threads } = await loadVolunteerDirectThreadsWithUnread({
+                        freiwilligerId: user.data.id,
+                        authUserId: user.data.auth_id,
+                      });
+                      setMeineChats(threads || []);
                     }}
                     onThreadRead={async () => {
-                      setMeineChats((prev) =>
-                        prev.map((item) =>
-                          item.id === selectedChat.id ? { ...item, unread_count: 0 } : item
-                        )
-                      );
-                      if (typeof onGlobalReadUpdate === "function") {
-                        await onGlobalReadUpdate();
-                      }
+                      const { threads } = await loadVolunteerDirectThreadsWithUnread({
+                        freiwilligerId: user.data.id,
+                        authUserId: user.data.auth_id,
+                      });
+                      setMeineChats(threads || []);
                     }}
                   />
                 ) : null}
@@ -2249,16 +2212,12 @@ function FreiwilligenKommunikation({
                 emptyText="Noch keine Nachrichten vorhanden."
                 height={320}
                 onMessageSent={async () => {
-                  setSupportUnreadCount(0);
-                  if (typeof onGlobalReadUpdate === "function") {
-                    await onGlobalReadUpdate();
-                  }
+                  const { unreadByThread } = await getUnreadCountsForThreads([supportThreadId], user.data.auth_id);
+                  setSupportUnreadCount(unreadByThread.get(supportThreadId) || 0);
                 }}
                 onThreadRead={async () => {
-                  setSupportUnreadCount(0);
-                  if (typeof onGlobalReadUpdate === "function") {
-                    await onGlobalReadUpdate();
-                  }
+                  const { unreadByThread } = await getUnreadCountsForThreads([supportThreadId], user.data.auth_id);
+                  setSupportUnreadCount(unreadByThread.get(supportThreadId) || 0);
                 }}
               />
             ) : (
