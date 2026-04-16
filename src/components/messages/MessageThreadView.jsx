@@ -3,7 +3,6 @@ import { supabase } from "../../core/shared";
 import {
   getThreadMessages,
   sendMessage,
-  markThreadAsRead,
 } from "../../services/messages";
 
 function formatTime(value) {
@@ -34,45 +33,58 @@ export default function MessageThreadView({
   const [error, setError] = useState("");
   const [currentUserId, setCurrentUserId] = useState(null);
   const scrollRef = useRef(null);
-  const markedReadRef = useRef(false);
-  const markReadTimeoutRef = useRef(null);
+  const readSyncTimeoutRef = useRef(null);
+  const onThreadReadRef = useRef(onThreadRead);
 
   const hasThread = useMemo(() => Boolean(threadId), [threadId]);
+  useEffect(() => {
+    onThreadReadRef.current = onThreadRead;
+  }, [onThreadRead]);
 
-  function notifyThreadRead() {
-    if (typeof onThreadRead === "function" && threadId) {
-      onThreadRead(threadId);
-    }
-  }
-
-  async function markThreadReadSilently() {
-    if (!threadId || markedReadRef.current) return;
-    markedReadRef.current = true;
-    try {
-      await markThreadAsRead(threadId);
-    } catch (err) {
-      markedReadRef.current = false;
-      console.error("Read-Status konnte nicht gesetzt werden:", err);
-    }
-  }
-
-  function queueMarkThreadRead() {
-    if (markReadTimeoutRef.current) {
-      clearTimeout(markReadTimeoutRef.current);
-    }
-    markReadTimeoutRef.current = setTimeout(() => {
-      markThreadReadSilently();
-    }, 250);
-  }
 
   async function loadCurrentUser() {
     const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
+      data: { session },
+      error: sessionError,
+    } = await supabase.auth.getSession();
 
-    if (userError) throw userError;
-    setCurrentUserId(user?.id || null);
+    if (sessionError) throw sessionError;
+    setCurrentUserId(session?.user?.id || null);
+  }
+
+  async function syncReadState({ silent = false } = {}) {
+    if (!threadId || !currentUserId) return;
+
+    const { error: readError } = await supabase
+      .from("message_read_status")
+      .upsert(
+        [
+          {
+            thread_id: threadId,
+            user_id: currentUserId,
+            last_read_at: new Date().toISOString(),
+          },
+        ],
+        { onConflict: "thread_id,user_id" }
+      );
+
+    if (readError && !silent) {
+      console.error("Read-Status konnte nicht gesetzt werden:", readError);
+    }
+
+    if (!readError && typeof onThreadReadRef.current === "function") {
+      onThreadReadRef.current(threadId);
+    }
+  }
+
+  function scheduleReadSync() {
+    if (!threadId || !currentUserId) return;
+    if (readSyncTimeoutRef.current) {
+      clearTimeout(readSyncTimeoutRef.current);
+    }
+    readSyncTimeoutRef.current = setTimeout(() => {
+      syncReadState({ silent: true }).catch(() => {});
+    }, 700);
   }
 
   async function loadMessages() {
@@ -80,13 +92,10 @@ export default function MessageThreadView({
 
     setLoading(true);
     setError("");
-    markedReadRef.current = false;
 
     try {
       const data = await getThreadMessages(threadId);
       setMessages(data || []);
-      notifyThreadRead();
-      queueMarkThreadRead();
     } catch (err) {
       console.error("Fehler beim Laden der Nachrichten:", err);
       setError(err?.message || "Nachrichten konnten nicht geladen werden.");
@@ -103,13 +112,19 @@ export default function MessageThreadView({
 
   useEffect(() => {
     loadMessages();
+  }, [threadId]);
+
+  useEffect(() => {
+    if (!threadId || !currentUserId) return;
+    scheduleReadSync();
+
     return () => {
-      markedReadRef.current = false;
-      if (markReadTimeoutRef.current) {
-        clearTimeout(markReadTimeoutRef.current);
+      if (readSyncTimeoutRef.current) {
+        clearTimeout(readSyncTimeoutRef.current);
+        readSyncTimeoutRef.current = null;
       }
     };
-  }, [threadId]);
+  }, [threadId, currentUserId]);
 
   useEffect(() => {
     if (!threadId) return;
@@ -126,12 +141,23 @@ export default function MessageThreadView({
         },
         async (payload) => {
           try {
+            if (payload?.eventType === "INSERT" && payload?.new) {
+              setMessages((prev) => {
+                if (prev.some((message) => message.id === payload.new.id)) return prev;
+                return [...prev, payload.new];
+              });
+
+              if (payload.new.sender_user_id && payload.new.sender_user_id !== currentUserId) {
+                if (typeof onThreadReadRef.current === "function") {
+                  onThreadReadRef.current(threadId);
+                }
+                scheduleReadSync();
+              }
+              return;
+            }
+
             const data = await getThreadMessages(threadId);
             setMessages(data || []);
-            if (payload?.eventType === "INSERT") {
-              notifyThreadRead();
-              queueMarkThreadRead();
-            }
           } catch (err) {
             console.error("Realtime-Update fehlgeschlagen:", err);
           }
@@ -142,7 +168,7 @@ export default function MessageThreadView({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [threadId]);
+  }, [threadId, currentUserId]);
 
   useEffect(() => {
     if (!scrollRef.current) return;
@@ -177,6 +203,15 @@ export default function MessageThreadView({
   function isOwnMessage(message) {
     return currentUserId && message?.sender_user_id === currentUserId;
   }
+
+
+  useEffect(() => {
+    return () => {
+      if (readSyncTimeoutRef.current) {
+        clearTimeout(readSyncTimeoutRef.current);
+      }
+    };
+  }, []);
 
   if (!hasThread) {
     return (
