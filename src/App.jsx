@@ -416,6 +416,11 @@ export default function App() {
   const [notifications, setNotifications] = useState([]);
   const [showNotifications, setShowNotifications] = useState(false);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
+  const [vereinChatUnreadCount, setVereinChatUnreadCount] = useState(0);
+  const [supportChatUnreadCount, setSupportChatUnreadCount] = useState(0);
+  const [adminSupportUnreadCount, setAdminSupportUnreadCount] = useState(0);
+  const [chatRefreshTick, setChatRefreshTick] = useState(0);
+  const [adminSupportRefreshTick, setAdminSupportRefreshTick] = useState(0);
 
   // ── Notifications ─────────────────────────────────────────────────────────
   const getNotificationUserId = (profile = user?.data) => {
@@ -1017,54 +1022,128 @@ export default function App() {
   const loadUnreadChatCount = async (freiwilligerProfil = user?.data) => {
     if (!freiwilligerProfil?.id || !freiwilligerProfil?.auth_id) {
       setUnreadChatCount(0);
+      setVereinChatUnreadCount(0);
+      setSupportChatUnreadCount(0);
       return;
     }
 
     try {
       const { data: threads, error: threadsError } = await supabase
         .from("message_threads")
-        .select("id")
+        .select("id, thread_type, last_message_at")
         .in("thread_type", ["termin_direct", "support"])
         .eq("freiwilliger_id", freiwilligerProfil.id);
 
       if (threadsError) throw threadsError;
 
-      const threadIds = [...new Set((threads || []).map((thread) => thread.id).filter(Boolean))];
+      const threadList = threads || [];
+      const threadIds = [...new Set(threadList.map((thread) => thread.id).filter(Boolean))];
       if (!threadIds.length) {
         setUnreadChatCount(0);
+        setVereinChatUnreadCount(0);
+        setSupportChatUnreadCount(0);
         return;
       }
 
-      const [{ data: readRows, error: readError }, { data: messageRows, error: messageError }] = await Promise.all([
-        supabase
-          .from("message_read_status")
-          .select("thread_id, last_read_at")
-          .eq("user_id", freiwilligerProfil.auth_id)
-          .in("thread_id", threadIds),
-        supabase
-          .from("messages")
-          .select("thread_id, created_at, sender_user_id")
-          .in("thread_id", threadIds)
-          .order("created_at", { ascending: false }),
-      ]);
+      const { data: readRows, error: readError } = await supabase
+        .from("message_read_status")
+        .select("thread_id, last_read_at")
+        .eq("user_id", freiwilligerProfil.auth_id)
+        .in("thread_id", threadIds);
 
       if (readError) throw readError;
-      if (messageError) throw messageError;
 
-      const readMap = new Map((readRows || []).map((row) => [row.thread_id, row.last_read_at ? new Date(row.last_read_at).getTime() : 0]));
-      const unreadTotal = (messageRows || []).reduce((sum, row) => {
-        if (row?.sender_user_id === freiwilligerProfil.auth_id) return sum;
-        const lastReadAt = readMap.get(row.thread_id) || 0;
-        const createdAt = row?.created_at ? new Date(row.created_at).getTime() : 0;
-        return !lastReadAt || createdAt > lastReadAt ? sum + 1 : sum;
-      }, 0);
+      const readMap = new Map(
+        (readRows || []).map((row) => [
+          row.thread_id,
+          row.last_read_at ? new Date(row.last_read_at).getTime() : 0,
+        ])
+      );
 
-      setUnreadChatCount(unreadTotal);
+      let nextVereinsUnread = 0;
+      let nextSupportUnread = 0;
+
+      for (const thread of threadList) {
+        const lastMessageAt = thread?.last_message_at ? new Date(thread.last_message_at).getTime() : 0;
+        const lastReadAt = readMap.get(thread.id) || 0;
+        const isUnread = Boolean(lastMessageAt && lastMessageAt > lastReadAt);
+
+        if (!isUnread) continue;
+        if (thread.thread_type === "support") nextSupportUnread += 1;
+        else nextVereinsUnread += 1;
+      }
+
+      setVereinChatUnreadCount(nextVereinsUnread);
+      setSupportChatUnreadCount(nextSupportUnread);
+      setUnreadChatCount(nextVereinsUnread + nextSupportUnread);
     } catch (error) {
       console.error("Unread chat count laden fehlgeschlagen:", error);
       setUnreadChatCount(0);
+      setVereinChatUnreadCount(0);
+      setSupportChatUnreadCount(0);
     }
   };
+
+  const loadAdminSupportUnreadCount = async (adminProfil = user?.data) => {
+    if (!adminProfil?.auth_id) {
+      setAdminSupportUnreadCount(0);
+      return;
+    }
+
+    try {
+      const { data: threads, error: threadsError } = await supabase
+        .from("message_threads")
+        .select("id, last_message_at")
+        .eq("thread_type", "support");
+
+      if (threadsError) throw threadsError;
+
+      const threadList = threads || [];
+      const threadIds = threadList.map((thread) => thread.id).filter(Boolean);
+
+      if (!threadIds.length) {
+        setAdminSupportUnreadCount(0);
+        return;
+      }
+
+      const { data: readRows, error: readError } = await supabase
+        .from("message_read_status")
+        .select("thread_id, last_read_at")
+        .eq("user_id", adminProfil.auth_id)
+        .in("thread_id", threadIds);
+
+      if (readError) throw readError;
+
+      const readMap = new Map(
+        (readRows || []).map((row) => [
+          row.thread_id,
+          row.last_read_at ? new Date(row.last_read_at).getTime() : 0,
+        ])
+      );
+
+      const unreadCount = threadList.reduce((sum, thread) => {
+        const lastMessageAt = thread?.last_message_at ? new Date(thread.last_message_at).getTime() : 0;
+        const lastReadAt = readMap.get(thread.id) || 0;
+        return sum + (lastMessageAt && lastMessageAt > lastReadAt ? 1 : 0);
+      }, 0);
+
+      setAdminSupportUnreadCount(unreadCount);
+    } catch (error) {
+      console.error("Admin support unread count laden fehlgeschlagen:", error);
+      setAdminSupportUnreadCount(0);
+    }
+  };
+
+  const refreshVolunteerMessageCenter = async (profil = user?.data) => {
+    await loadUnreadChatCount(profil);
+    setChatRefreshTick((prev) => prev + 1);
+  };
+
+  const refreshAdminSupportCenter = async (profil = user?.data) => {
+    await loadAdminSupportUnreadCount(profil);
+    setAdminSupportRefreshTick((prev) => prev + 1);
+  };
+
 
 
   const loadStellen = async (
@@ -1420,32 +1499,37 @@ export default function App() {
   useEffect(() => {
     if (user?.type !== "freiwilliger") {
       setUnreadChatCount(0);
+      setVereinChatUnreadCount(0);
+      setSupportChatUnreadCount(0);
       return;
     }
 
-    loadUnreadChatCount(user?.data);
+    refreshVolunteerMessageCenter(user?.data);
 
     const channel = supabase
       .channel(`chat-unread-${user?.data?.id}`)
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "messages" },
+        {
+          event: "*",
+          schema: "public",
+          table: "message_threads",
+          filter: `freiwilliger_id=eq.${user?.data?.id}`,
+        },
         () => {
-          loadUnreadChatCount(user?.data);
+          refreshVolunteerMessageCenter(user?.data);
         }
       )
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "message_read_status" },
+        {
+          event: "*",
+          schema: "public",
+          table: "message_read_status",
+          filter: `user_id=eq.${user?.data?.auth_id}`,
+        },
         () => {
-          loadUnreadChatCount(user?.data);
-        }
-      )
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table: "message_threads" },
-        () => {
-          loadUnreadChatCount(user?.data);
+          refreshVolunteerMessageCenter(user?.data);
         }
       )
       .subscribe();
@@ -1454,6 +1538,48 @@ export default function App() {
       supabase.removeChannel(channel);
     };
   }, [user?.type, user?.data?.id, user?.data?.auth_id]);
+
+  useEffect(() => {
+    if (user?.type !== "admin") {
+      setAdminSupportUnreadCount(0);
+      return;
+    }
+
+    refreshAdminSupportCenter(user?.data);
+
+    const channel = supabase
+      .channel(`admin-support-unread-${user?.data?.id || "admin"}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "message_threads",
+          filter: "thread_type=eq.support",
+        },
+        () => {
+          refreshAdminSupportCenter(user?.data);
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "message_read_status",
+          filter: `user_id=eq.${user?.data?.auth_id}`,
+        },
+        () => {
+          refreshAdminSupportCenter(user?.data);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user?.type, user?.data?.id, user?.data?.auth_id]);
+
 
   // Filter
   const plzMatch = (s) => {
@@ -2283,7 +2409,13 @@ export default function App() {
             )}
 
             {user?.type === "freiwilliger" && homeTab === "kommunikation" && (
-              <FreiwilligenKommunikation user={user} />
+              <FreiwilligenKommunikation
+                user={user}
+                globalVereinsUnreadCount={vereinChatUnreadCount}
+                globalSupportUnreadCount={supportChatUnreadCount}
+                communicationRefreshTick={chatRefreshTick}
+                onGlobalReadUpdate={() => refreshVolunteerMessageCenter(user?.data)}
+              />
             )}
 
             {/* STELLEN TAB */}
@@ -3430,6 +3562,9 @@ export default function App() {
           anfragen={adminInbox}
           onBack={goBack}
           logout={logout}
+          globalSupportUnreadCount={adminSupportUnreadCount}
+          supportRefreshTick={adminSupportRefreshTick}
+          onGlobalSupportRead={() => refreshAdminSupportCenter(user?.data)}
         />
       )}
 
