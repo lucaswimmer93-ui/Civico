@@ -2139,7 +2139,7 @@ function FreiwilligenKommunikation({
                       });
                       setMeineChats(threads || []);
                     }}
-                    onRead={async () => {
+                    onThreadRead={async () => {
                       const { threads } = await loadVolunteerDirectThreadsWithUnread({
                         freiwilligerId: user.data.id,
                         authUserId: user.data.auth_id,
@@ -2183,7 +2183,7 @@ function FreiwilligenKommunikation({
                   const { unreadByThread } = await getUnreadCountsForThreads([supportThreadId], user.data.auth_id);
                   setSupportUnreadCount(unreadByThread.get(supportThreadId) || 0);
                 }}
-                onRead={async () => {
+                onThreadRead={async () => {
                   const { unreadByThread } = await getUnreadCountsForThreads([supportThreadId], user.data.auth_id);
                   setSupportUnreadCount(unreadByThread.get(supportThreadId) || 0);
                 }}
