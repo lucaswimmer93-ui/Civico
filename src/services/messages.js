@@ -1,5 +1,19 @@
 import { supabase } from "../lib/supabaseclient";
 
+function getStoredLastRole() {
+  if (typeof window === "undefined") return null;
+
+  try {
+    return (
+      window.localStorage?.getItem("civico_last_role") ||
+      window.sessionStorage?.getItem("civico_last_role") ||
+      null
+    );
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Aktuellen User bestimmen
  * Reihenfolge bewusst:
@@ -31,47 +45,59 @@ export async function getCurrentActor() {
   if (adminRes.error) throw adminRes.error;
   if (freiwilligerRes.error) throw freiwilligerRes.error;
 
-  if (vereinRes.data) {
-    return {
-      role: "verein",
-      userId: authId,
-      organizationId: vereinRes.data.id,
-      data: vereinRes.data,
-      name: vereinRes.data.name,
-    };
+  const roleMap = {
+    verein: vereinRes.data
+      ? {
+          role: "verein",
+          userId: authId,
+          organizationId: vereinRes.data.id,
+          data: vereinRes.data,
+          name: vereinRes.data.name,
+        }
+      : null,
+    gemeinde: gemeindeRes.data
+      ? {
+          role: "gemeinde",
+          userId: authId,
+          organizationId: gemeindeRes.data.id,
+          data: gemeindeRes.data,
+          name: gemeindeRes.data.name,
+        }
+      : null,
+    admin: adminRes.data
+      ? {
+          role: "admin",
+          userId: authId,
+          organizationId: adminRes.data.id,
+          data: adminRes.data,
+          name: adminRes.data.email || "Admin",
+        }
+      : null,
+    freiwilliger: freiwilligerRes.data
+      ? {
+          role: "freiwilliger",
+          userId: authId,
+          organizationId: freiwilligerRes.data.id,
+          data: freiwilligerRes.data,
+          name: freiwilligerRes.data.name,
+        }
+      : null,
+  };
+
+  const preferredRole = getStoredLastRole();
+  if (preferredRole && roleMap[preferredRole]) {
+    return roleMap[preferredRole];
   }
 
-  if (gemeindeRes.data) {
-    return {
-      role: "gemeinde",
-      userId: authId,
-      organizationId: gemeindeRes.data.id,
-      data: gemeindeRes.data,
-      name: gemeindeRes.data.name,
-    };
-  }
-
-  if (adminRes.data) {
-    return {
-      role: "admin",
-      userId: authId,
-      organizationId: adminRes.data.id,
-      data: adminRes.data,
-      name: adminRes.data.email || "Admin",
-    };
-  }
-
-  if (freiwilligerRes.data) {
-    return {
-      role: "freiwilliger",
-      userId: authId,
-      organizationId: freiwilligerRes.data.id,
-      data: freiwilligerRes.data,
-      name: freiwilligerRes.data.name,
-    };
-  }
-
-  throw new Error("User hat keine gültige Rolle");
+  return (
+    roleMap.verein ||
+    roleMap.gemeinde ||
+    roleMap.admin ||
+    roleMap.freiwilliger ||
+    (() => {
+      throw new Error("User hat keine gültige Rolle");
+    })()
+  );
 }
 
 /**
@@ -168,14 +194,18 @@ export async function getOrCreateSupportThread() {
     throw new Error("Admin benötigt keinen eigenen Support-Thread.");
   }
 
-  if (actor.role === "freiwilliger") {
-    throw new Error("Freiwillige haben hier keinen Support-Thread.");
-  }
-
   const matchField =
     actor.role === "verein"
       ? { verein_id: actor.organizationId }
-      : { gemeinde_id: actor.organizationId };
+      : actor.role === "gemeinde"
+      ? { gemeinde_id: actor.organizationId }
+      : actor.role === "freiwilliger"
+      ? { freiwilliger_id: actor.organizationId }
+      : null;
+
+  if (!matchField) {
+    throw new Error("Ungültige Rolle für Support-Thread.");
+  }
 
   const { data: existing, error: existingError } = await supabase
     .from("message_threads")
@@ -191,6 +221,7 @@ export async function getOrCreateSupportThread() {
     thread_type: "support",
     verein_id: actor.role === "verein" ? actor.organizationId : null,
     gemeinde_id: actor.role === "gemeinde" ? actor.organizationId : null,
+    freiwilliger_id: actor.role === "freiwilliger" ? actor.organizationId : null,
     created_by_user_id: actor.userId,
     last_message_at: new Date().toISOString(),
   };
