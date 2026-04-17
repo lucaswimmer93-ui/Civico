@@ -119,6 +119,42 @@ function buildMessagePreview(body) {
   return clean.length > 90 ? `${clean.slice(0, 87)}...` : clean;
 }
 
+
+export async function getThreadReadState(threadId) {
+  if (!threadId) {
+    return {
+      currentUserId: null,
+      lastReadByOthersAt: null,
+    };
+  }
+
+  const user = await getAuthUserOrThrow();
+
+  const { data, error } = await supabase
+    .from("message_read_status")
+    .select("user_id, last_read_at")
+    .eq("thread_id", threadId)
+    .neq("user_id", user.id);
+
+  if (error) throw error;
+
+  let lastReadByOthersAt = null;
+  let lastReadTs = 0;
+
+  for (const row of data || []) {
+    const ts = row?.last_read_at ? new Date(row.last_read_at).getTime() : 0;
+    if (ts > lastReadTs) {
+      lastReadTs = ts;
+      lastReadByOthersAt = row.last_read_at;
+    }
+  }
+
+  return {
+    currentUserId: user.id,
+    lastReadByOthersAt,
+  };
+}
+
 export async function enrichThreadsWithReadState(threads = []) {
   const threadList = Array.isArray(threads) ? threads.filter((thread) => thread?.id) : [];
   if (threadList.length === 0) return [];
