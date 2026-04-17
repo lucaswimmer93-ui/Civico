@@ -4,8 +4,7 @@ import {
   getThreadMessages,
   sendMessage,
   markThreadAsRead,
-  getAuthUserOrThrow,
-  getThreadReadMeta,
+  getThreadReadState,
 } from "../../services/messages";
 
 function formatTime(value) {
@@ -35,28 +34,28 @@ export default function MessageThreadView({
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const [currentUserId, setCurrentUserId] = useState(null);
-  const [otherLastReadAt, setOtherLastReadAt] = useState(null);
+  const [lastReadByOthersAt, setLastReadByOthersAt] = useState(null);
   const scrollRef = useRef(null);
 
   const hasThread = useMemo(() => Boolean(threadId), [threadId]);
 
   async function loadCurrentUser() {
-    const user = await getAuthUserOrThrow();
-    setCurrentUserId(user?.id || null);
-    return user?.id || null;
-  }
+    const sessionRes = await supabase.auth.getSession();
+    const sessionError = sessionRes?.error;
+    const sessionUser = sessionRes?.data?.session?.user || null;
 
-  async function loadReadMeta(nextUserId = null) {
-    if (!threadId) return;
-    try {
-      const meta = await getThreadReadMeta(threadId, nextUserId || currentUserId || null);
-      setOtherLastReadAt(meta?.otherLastReadAt || null);
-      if (meta?.currentUserId && meta.currentUserId !== currentUserId) {
-        setCurrentUserId(meta.currentUserId);
-      }
-    } catch (err) {
-      console.error("Fehler beim Laden des Read-Status:", err);
+    if (sessionError) throw sessionError;
+    if (sessionUser?.id) {
+      setCurrentUserId(sessionUser.id);
+      return;
     }
+
+    const userRes = await supabase.auth.getUser();
+    const userError = userRes?.error;
+    const user = userRes?.data?.user || null;
+
+    if (userError) throw userError;
+    setCurrentUserId(user?.id || null);
   }
 
   async function loadMessages() {
@@ -66,20 +65,31 @@ export default function MessageThreadView({
     setError("");
 
     try {
-      const userId = currentUserId || (await loadCurrentUser());
-      const data = await getThreadMessages(threadId);
-      setMessages(data || []);
+      const [data, readState] = await Promise.all([
+        getThreadMessages(threadId),
+        getThreadReadState(threadId),
+      ]);
 
-      loadReadMeta(userId);
+      setMessages(data || []);
+      if (readState?.currentUserId) {
+        setCurrentUserId(readState.currentUserId);
+      }
+      setLastReadByOthersAt(readState?.lastReadByOthersAt || null);
+
       markThreadAsRead(threadId)
-        .then(() => {
-          if (typeof onThreadRead === "function") {
-            onThreadRead(threadId);
+        .then(async () => {
+          try {
+            const nextReadState = await getThreadReadState(threadId);
+            setLastReadByOthersAt(nextReadState?.lastReadByOthersAt || null);
+            if (typeof onThreadRead === "function") {
+              onThreadRead(threadId);
+            }
+          } catch (innerErr) {
+            console.error("Fehler beim Aktualisieren des Read-Status:", innerErr);
           }
-          loadReadMeta(userId);
         })
-        .catch((err) => {
-          console.error("Read-Status konnte nicht gesetzt werden:", err);
+        .catch((innerErr) => {
+          console.error("Fehler beim Markieren als gelesen:", innerErr);
         });
     } catch (err) {
       console.error("Fehler beim Laden der Nachrichten:", err);
@@ -114,35 +124,18 @@ export default function MessageThreadView({
         },
         async () => {
           try {
-            const data = await getThreadMessages(threadId);
+            const [data, readState] = await Promise.all([
+              getThreadMessages(threadId),
+              getThreadReadState(threadId),
+            ]);
             setMessages(data || []);
-            loadReadMeta();
-            const latest = (data || [])[data.length - 1];
-            if (latest?.sender_user_id && latest.sender_user_id !== currentUserId) {
-              markThreadAsRead(threadId)
-                .then(() => {
-                  if (typeof onThreadRead === "function") {
-                    onThreadRead(threadId);
-                  }
-                  loadReadMeta();
-                })
-                .catch((err) => console.error("Realtime Read-Status fehlgeschlagen:", err));
+            if (readState?.currentUserId) {
+              setCurrentUserId(readState.currentUserId);
             }
+            setLastReadByOthersAt(readState?.lastReadByOthersAt || null);
           } catch (err) {
             console.error("Realtime-Update fehlgeschlagen:", err);
           }
-        }
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "message_read_status",
-          filter: `thread_id=eq.${threadId}`,
-        },
-        async () => {
-          loadReadMeta();
         }
       )
       .subscribe();
@@ -150,8 +143,7 @@ export default function MessageThreadView({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [threadId, currentUserId]);
-
+  }, [threadId]);
 
   useEffect(() => {
     if (!scrollRef.current) return;
@@ -164,39 +156,19 @@ export default function MessageThreadView({
     if (!threadId || sending) return;
     if (!draft.trim()) return;
 
-    const body = draft.trim();
-    const tempId = `temp-${Date.now()}`;
-
     setSending(true);
     setError("");
-    setDraft("");
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: tempId,
-        thread_id: threadId,
-        sender_user_id: currentUserId,
-        body,
-        created_at: new Date().toISOString(),
-        _localStatus: "sending",
-      },
-    ]);
 
     try {
-      const newMessage = await sendMessage(threadId, body);
-      setMessages((prev) => prev.map((message) => (
-        message.id === tempId
-          ? { ...newMessage, _localStatus: "sent" }
-          : message
-      )));
+      const newMessage = await sendMessage(threadId, draft.trim());
+      setMessages((prev) => [...prev, newMessage]);
+      setDraft("");
 
       if (typeof onMessageSent === "function") {
         onMessageSent(newMessage);
       }
     } catch (err) {
       console.error("Fehler beim Senden:", err);
-      setMessages((prev) => prev.filter((message) => message.id !== tempId));
-      setDraft(body);
       setError(err?.message || "Nachricht konnte nicht gesendet werden.");
     } finally {
       setSending(false);
@@ -207,14 +179,13 @@ export default function MessageThreadView({
     return currentUserId && message?.sender_user_id === currentUserId;
   }
 
-
   function getOwnMessageStatus(message) {
-    if (!message) return "";
+    if (!message?.created_at) return "Gesendet";
 
-    if (message._localStatus === "sending") return "Wird gesendet";
-    const createdAt = message?.created_at ? new Date(message.created_at).getTime() : 0;
+    const readTs = lastReadByOthersAt ? new Date(lastReadByOthersAt).getTime() : 0;
+    const messageTs = new Date(message.created_at).getTime();
 
-    if (otherLastReadAt && createdAt && otherLastReadAt >= createdAt) {
+    if (readTs && readTs >= messageTs) {
       return "Gelesen";
     }
 
@@ -338,9 +309,14 @@ export default function MessageThreadView({
                       fontSize: 10,
                       color: own ? "#D9CDB7" : "#8B7355",
                       textAlign: "right",
+                      display: "flex",
+                      justifyContent: "flex-end",
+                      gap: 6,
+                      flexWrap: "wrap",
                     }}
                   >
-                    {formatTime(message.created_at)}{own ? ` · ${getOwnMessageStatus(message)}` : ""}
+                    <span>{formatTime(message.created_at)}</span>
+                    {own ? <span>• {getOwnMessageStatus(message)}</span> : null}
                   </div>
                 </div>
               </div>
