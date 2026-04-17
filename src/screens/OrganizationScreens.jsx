@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import MeineGemeindePanel from "../components/messages/MeineGemeindePanel";
 import MessageThreadView from "../components/messages/MessageThreadView";
-import { getTerminDirectThreadsForVerein, getOrCreateTerminDirectThread } from "../services/messages";
+import { getTerminDirectThreadsForVerein, getOrCreateTerminDirectThread, getOrCreateSupportThread } from "../services/messages";
 import { supabase, T, KATEGORIEN, SKILLS, getSkillLabel, getKat, getMedaille, getNextMedaille, getMedailleName, IMPRESSUM_TEXT, DATENSCHUTZ_TEXT, AGB_TEXT, formatDate, getGemeindeByPlz, isKlarname, isTerminNochNichtGestartet, isTerminAktuell } from '../core/shared';
 import { Header, StelleCard, VereineListe, BottomBar, DatenschutzBox, Input, BigButton, Chip, InfoChip, SectionLabel, RoleCard, EmptyState, ErrorMsg } from '../components/ui';
 
@@ -90,36 +90,8 @@ function VereinDashboard({
       setSupportLoading(true);
       setSupportError('');
 
-      const { data: existing, error: existingError } = await supabase
-        .from('message_threads')
-        .select('id')
-        .eq('thread_type', 'support')
-        .eq('verein_id', user.data.id)
-        .order('last_message_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (existingError) throw existingError;
-
-      if (existing?.id) {
-        setSupportThreadId(existing.id);
-        return;
-      }
-
-      const { data: created, error: createError } = await supabase
-        .from('message_threads')
-        .insert([
-          {
-            thread_type: 'support',
-            verein_id: user.data.id,
-            last_message_at: new Date().toISOString(),
-          },
-        ])
-        .select('id')
-        .single();
-
-      if (createError) throw createError;
-      setSupportThreadId(created?.id || null);
+      const thread = await getOrCreateSupportThread();
+      setSupportThreadId(thread?.id || null);
     } catch (err) {
       console.error('Fehler beim Laden des Support-Threads:', err);
       setSupportError(err.message || 'Support konnte nicht geladen werden.');

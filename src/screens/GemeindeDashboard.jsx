@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import MeineVereinePanel from '../components/messages/MeineVereinePanel';
 import MessageThreadView from '../components/messages/MessageThreadView';
 import { supabase, KATEGORIEN, formatDate, isTerminNochNichtGestartet, isTerminAktuell } from '../core/shared';
+import { getOrCreateSupportThread } from '../services/messages';
 import { Header, Input, BigButton, SectionLabel, EmptyState } from '../components/ui';
 
 function defaultTermin() {
@@ -573,36 +574,8 @@ export default function GemeindeDashboard({
       setSupportLoading(true);
       setSupportError('');
 
-      const { data: existing, error: existingError } = await supabase
-        .from('message_threads')
-        .select('id')
-        .eq('thread_type', 'support')
-        .eq('gemeinde_id', user.id)
-        .order('last_message_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (existingError) throw existingError;
-
-      if (existing?.id) {
-        setSupportThreadId(existing.id);
-        return;
-      }
-
-      const { data: created, error: createError } = await supabase
-        .from('message_threads')
-        .insert([
-          {
-            thread_type: 'support',
-            gemeinde_id: user.id,
-            last_message_at: new Date().toISOString(),
-          },
-        ])
-        .select('id')
-        .single();
-
-      if (createError) throw createError;
-      setSupportThreadId(created?.id || null);
+      const thread = await getOrCreateSupportThread();
+      setSupportThreadId(thread?.id || null);
     } catch (err) {
       console.error('Fehler beim Laden des Support-Threads:', err);
       setSupportError(err.message || 'Support konnte nicht geladen werden.');

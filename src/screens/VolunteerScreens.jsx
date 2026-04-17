@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase, T, KATEGORIEN, SKILLS, MEDAILLEN, getSkillLabel, getKat, getMedaille, getNextMedaille, getMedailleName, IMPRESSUM_TEXT, DATENSCHUTZ_TEXT, AGB_TEXT, formatDate, getGemeindeByPlz, isKlarname, isTerminNochNichtGestartet, isTerminAktuell } from '../core/shared';
 import { Header, StelleCard, VereineListe, BottomBar, DatenschutzBox, Input, BigButton, Chip, InfoChip, SectionLabel, RoleCard, EmptyState, ErrorMsg } from '../components/ui';
 import MessageThreadView from '../components/messages/MessageThreadView';
-import { getMyTerminDirectThreads, getOrCreateTerminDirectThread } from '../services/messages';
+import { getMyTerminDirectThreads, getOrCreateTerminDirectThread, getOrCreateSupportThread } from '../services/messages';
 
 const bewerbungIstErschienen = (bewerbung) =>
   bewerbung?.status === "erschienen" || Boolean(bewerbung?.bestaetigt);
@@ -1958,39 +1958,8 @@ function FreiwilligenKommunikation({
       setSupportLoading(true);
       setSupportError("");
 
-      const { data: existing, error: existingError } = await supabase
-        .from("message_threads")
-        .select("id")
-        .eq("thread_type", "support")
-        .eq("freiwilliger_id", user.data.id)
-        .order("created_at", { ascending: true })
-        .limit(1)
-        .maybeSingle();
-
-      if (existingError) throw existingError;
-
-      if (existing?.id) {
-        setSupportThreadId(existing.id);
-        setSupportUnreadCount(0);
-        return;
-      }
-
-      const { data: created, error: createError } = await supabase
-        .from("message_threads")
-        .insert([
-          {
-            thread_type: "support",
-            freiwilliger_id: user.data.id,
-            created_by_user_id: user?.data?.auth_id || null,
-            last_message_at: new Date().toISOString(),
-          },
-        ])
-        .select("id")
-        .single();
-
-      if (createError) throw createError;
-
-      setSupportThreadId(created?.id || null);
+      const thread = await getOrCreateSupportThread();
+      setSupportThreadId(thread?.id || null);
       setSupportUnreadCount(0);
     } catch (err) {
       console.error("Support konnte nicht geladen werden:", err);
