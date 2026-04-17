@@ -1,5 +1,23 @@
 import { supabase } from "../core/shared";
 
+async function getAuthUserOrThrow() {
+  const sessionRes = await supabase.auth.getSession();
+  const sessionError = sessionRes?.error;
+  const session = sessionRes?.data?.session || null;
+
+  if (sessionError) throw sessionError;
+  if (session?.user) return session.user;
+
+  const userRes = await supabase.auth.getUser();
+  const userError = userRes?.error;
+  const user = userRes?.data?.user || null;
+
+  if (userError) throw userError;
+  if (!user) throw new Error("Kein eingeloggter User");
+
+  return user;
+}
+
 function getStoredLastRole() {
   if (typeof window === "undefined") return null;
 
@@ -23,13 +41,7 @@ function getStoredLastRole() {
  * 4. Freiwilliger
  */
 export async function getCurrentActor() {
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser();
-
-  if (userError) throw userError;
-  if (!user) throw new Error("Kein eingeloggter User");
+  const user = await getAuthUserOrThrow();
 
   const authId = user.id;
 
@@ -302,13 +314,7 @@ export async function getGemeindeVereine() {
  * Admin Support Threads
  */
 export async function getAdminSupportThreads() {
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser();
-
-  if (userError) throw userError;
-  if (!user) throw new Error("Kein eingeloggter User");
+  const user = await getAuthUserOrThrow();
 
   const { data: admin, error: adminError } = await supabase
     .from("admins")
