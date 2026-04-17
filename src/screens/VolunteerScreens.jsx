@@ -87,7 +87,11 @@ async function getUnreadCountsForThreads(threadIds = [], authUserId = null) {
     return { unreadByThread: new Map(), unreadTotal: 0 };
   }
 
-  const [{ data: readRows, error: readError }, { data: threadRows, error: threadError }] = await Promise.all([
+  const [
+    { data: readRows, error: readError },
+    { data: threadRows, error: threadError },
+    { data: messageRows, error: messageError },
+  ] = await Promise.all([
     supabase
       .from('message_read_status')
       .select('thread_id, last_read_at')
@@ -97,25 +101,16 @@ async function getUnreadCountsForThreads(threadIds = [], authUserId = null) {
       .from('message_threads')
       .select('id, last_message_at')
       .in('id', cleanThreadIds),
+    supabase
+      .from('messages')
+      .select('thread_id, sender_user_id, created_at')
+      .in('thread_id', cleanThreadIds)
+      .order('created_at', { ascending: false }),
   ]);
 
   if (readError) throw readError;
   if (threadError) throw threadError;
-
-  const latestMessageRows = await Promise.all(
-    cleanThreadIds.map(async (threadId) => {
-      const { data, error } = await supabase
-        .from('messages')
-        .select('thread_id, sender_user_id, created_at')
-        .eq('thread_id', threadId)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (error) throw error;
-      return data || null;
-    })
-  );
+  if (messageError) throw messageError;
 
   const readMap = new Map(
     (readRows || []).map((row) => [
@@ -125,8 +120,8 @@ async function getUnreadCountsForThreads(threadIds = [], authUserId = null) {
   );
 
   const latestMessageByThread = new Map();
-  for (const row of latestMessageRows || []) {
-    if (!row?.thread_id) continue;
+  for (const row of messageRows || []) {
+    if (!row?.thread_id || latestMessageByThread.has(row.thread_id)) continue;
     latestMessageByThread.set(row.thread_id, row);
   }
 
@@ -136,27 +131,27 @@ async function getUnreadCountsForThreads(threadIds = [], authUserId = null) {
     const threadId = thread?.id;
     if (!threadId) continue;
 
-    const latestMessage = latestMessageByThread.get(threadId) || null;
-    const threadLastMessageAt = thread?.last_message_at ? new Date(thread.last_message_at).getTime() : 0;
-    const latestCreatedAt = latestMessage?.created_at ? new Date(latestMessage.created_at).getTime() : 0;
-    const lastActivityTs = Math.max(threadLastMessageAt, latestCreatedAt);
+    const lastMessageAt = thread?.last_message_at
+      ? new Date(thread.last_message_at).getTime()
+      : 0;
     const lastReadAt = readMap.get(threadId) || 0;
+    const latestMessage = latestMessageByThread.get(threadId);
+    const lastMessageFromSomeoneElse = latestMessage?.sender_user_id && latestMessage.sender_user_id !== authUserId;
 
-    const hasUnread = Boolean(
-      latestMessage &&
-      latestMessage.sender_user_id &&
-      latestMessage.sender_user_id !== authUserId &&
-      lastActivityTs > lastReadAt
+    unreadByThread.set(
+      threadId,
+      lastMessageAt && lastMessageAt > lastReadAt && lastMessageFromSomeoneElse ? 1 : 0
     );
-
-    unreadByThread.set(threadId, hasUnread ? 1 : 0);
   }
 
-  const unreadTotal = Array.from(unreadByThread.values()).reduce((sum, value) => sum + value, 0);
+  const unreadTotal = Array.from(unreadByThread.values()).reduce(
+    (sum, value) => sum + value,
+    0
+  );
   return { unreadByThread, unreadTotal };
 }
 
-async function loadVolunteerDirectThreadsWithUnreadasync function loadVolunteerDirectThreadsWithUnread({ freiwilligerId, authUserId }) {
+async function loadVolunteerDirectThreadsWithUnread({ freiwilligerId, authUserId }) {
   const { data: threads, error: threadsError } = await supabase
     .from('message_threads')
     .select('*')
