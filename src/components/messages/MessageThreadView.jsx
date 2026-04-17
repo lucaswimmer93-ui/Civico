@@ -4,6 +4,7 @@ import {
   getThreadMessages,
   sendMessage,
   markThreadAsRead,
+  getThreadReadState,
 } from "../../services/messages";
 
 function formatTime(value) {
@@ -33,24 +34,16 @@ export default function MessageThreadView({
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const [currentUserId, setCurrentUserId] = useState(null);
+  const [readState, setReadState] = useState(null);
   const scrollRef = useRef(null);
 
   const hasThread = useMemo(() => Boolean(threadId), [threadId]);
 
   async function loadCurrentUser() {
-    const sessionRes = await supabase.auth.getSession();
-    const sessionError = sessionRes?.error;
-    const sessionUser = sessionRes?.data?.session?.user || null;
-
-    if (sessionError) throw sessionError;
-    if (sessionUser?.id) {
-      setCurrentUserId(sessionUser.id);
-      return;
-    }
-
-    const userRes = await supabase.auth.getUser();
-    const userError = userRes?.error;
-    const user = userRes?.data?.user || null;
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser();
 
     if (userError) throw userError;
     setCurrentUserId(user?.id || null);
@@ -63,12 +56,30 @@ export default function MessageThreadView({
     setError("");
 
     try {
-      const data = await getThreadMessages(threadId);
+      const [data, nextReadState] = await Promise.all([
+        getThreadMessages(threadId),
+        getThreadReadState(threadId),
+      ]);
+
       setMessages(data || []);
-      await markThreadAsRead(threadId);
-      if (typeof onThreadRead === "function") {
-        onThreadRead(threadId);
-      }
+      setReadState(nextReadState || null);
+
+      markThreadAsRead(threadId)
+        .then(async () => {
+          try {
+            const refreshedReadState = await getThreadReadState(threadId);
+            setReadState(refreshedReadState || null);
+          } catch (readErr) {
+            console.error("Fehler beim Aktualisieren des Read-Status:", readErr);
+          }
+
+          if (typeof onThreadRead === "function") {
+            onThreadRead(threadId);
+          }
+        })
+        .catch((readErr) => {
+          console.error("Fehler beim Setzen des Read-Status:", readErr);
+        });
     } catch (err) {
       console.error("Fehler beim Laden der Nachrichten:", err);
       setError(err?.message || "Nachrichten konnten nicht geladen werden.");
@@ -88,6 +99,21 @@ export default function MessageThreadView({
   }, [threadId]);
 
   useEffect(() => {
+    if (!threadId) {
+      setReadState(null);
+      return;
+    }
+
+    getThreadReadState(threadId)
+      .then((data) => {
+        setReadState(data || null);
+      })
+      .catch((err) => {
+        console.error("Fehler beim Laden des Thread-Read-Status:", err);
+      });
+  }, [threadId]);
+
+  useEffect(() => {
     if (!threadId) return;
 
     const channel = supabase
@@ -102,8 +128,13 @@ export default function MessageThreadView({
         },
         async () => {
           try {
-            const data = await getThreadMessages(threadId);
+            const [data, nextReadState] = await Promise.all([
+              getThreadMessages(threadId),
+              getThreadReadState(threadId),
+            ]);
+
             setMessages(data || []);
+            setReadState(nextReadState || null);
           } catch (err) {
             console.error("Realtime-Update fehlgeschlagen:", err);
           }
@@ -134,6 +165,13 @@ export default function MessageThreadView({
       const newMessage = await sendMessage(threadId, draft.trim());
       setMessages((prev) => [...prev, newMessage]);
       setDraft("");
+
+      try {
+        const nextReadState = await getThreadReadState(threadId);
+        setReadState(nextReadState || null);
+      } catch (readErr) {
+        console.error("Fehler beim Laden des Read-Status nach dem Senden:", readErr);
+      }
 
       if (typeof onMessageSent === "function") {
         onMessageSent(newMessage);
@@ -270,6 +308,9 @@ export default function MessageThreadView({
                     }}
                   >
                     {formatTime(message.created_at)}
+                    {own
+                      ? ` • ${readState?.lastReadByOthersAt && readState.lastReadByOthersAt >= message.created_at ? "Gelesen" : "Gesendet"}`
+                      : ""}
                   </div>
                 </div>
               </div>
