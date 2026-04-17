@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase, T, KATEGORIEN, SKILLS, MEDAILLEN, getSkillLabel, getKat, getMedaille, getNextMedaille, getMedailleName, IMPRESSUM_TEXT, DATENSCHUTZ_TEXT, AGB_TEXT, formatDate, getGemeindeByPlz, isKlarname, isTerminNochNichtGestartet, isTerminAktuell } from '../core/shared';
 import { Header, StelleCard, VereineListe, BottomBar, DatenschutzBox, Input, BigButton, Chip, InfoChip, SectionLabel, RoleCard, EmptyState, ErrorMsg } from '../components/ui';
 import MessageThreadView from '../components/messages/MessageThreadView';
-import { getMyTerminDirectThreads, getOrCreateTerminDirectThread, getOrCreateSupportThread, getUnreadCountsForThreads } from '../services/messages';
+import { getMyTerminDirectThreads, getOrCreateTerminDirectThread, getOrCreateSupportThread } from '../services/messages';
 
 const bewerbungIstErschienen = (bewerbung) =>
   bewerbung?.status === "erschienen" || Boolean(bewerbung?.bestaetigt);
@@ -80,6 +80,76 @@ const berechneTerminStunden = (termin, stelle = null) => {
   return 0;
 };
 
+
+async function getUnreadCountsForThreads(threadIds = [], authUserId = null) {
+  const cleanThreadIds = [...new Set((threadIds || []).filter(Boolean))];
+  if (!cleanThreadIds.length || !authUserId) {
+    return { unreadByThread: new Map(), unreadTotal: 0 };
+  }
+
+  const [
+    { data: readRows, error: readError },
+    { data: threadRows, error: threadError },
+    { data: messageRows, error: messageError },
+  ] = await Promise.all([
+    supabase
+      .from('message_read_status')
+      .select('thread_id, last_read_at')
+      .eq('user_id', authUserId)
+      .in('thread_id', cleanThreadIds),
+    supabase
+      .from('message_threads')
+      .select('id, last_message_at')
+      .in('id', cleanThreadIds),
+    supabase
+      .from('messages')
+      .select('thread_id, sender_user_id, created_at')
+      .in('thread_id', cleanThreadIds)
+      .order('created_at', { ascending: false }),
+  ]);
+
+  if (readError) throw readError;
+  if (threadError) throw threadError;
+  if (messageError) throw messageError;
+
+  const readMap = new Map(
+    (readRows || []).map((row) => [
+      row.thread_id,
+      row.last_read_at ? new Date(row.last_read_at).getTime() : 0,
+    ])
+  );
+
+  const latestMessageByThread = new Map();
+  for (const row of messageRows || []) {
+    if (!row?.thread_id || latestMessageByThread.has(row.thread_id)) continue;
+    latestMessageByThread.set(row.thread_id, row);
+  }
+
+  const unreadByThread = new Map();
+
+  for (const thread of threadRows || []) {
+    const threadId = thread?.id;
+    if (!threadId) continue;
+
+    const lastMessageAt = thread?.last_message_at
+      ? new Date(thread.last_message_at).getTime()
+      : 0;
+    const lastReadAt = readMap.get(threadId) || 0;
+    const latestMessage = latestMessageByThread.get(threadId);
+    const lastMessageFromSomeoneElse = latestMessage?.sender_user_id && latestMessage.sender_user_id !== authUserId;
+
+    unreadByThread.set(
+      threadId,
+      lastMessageAt && lastMessageAt > lastReadAt && lastMessageFromSomeoneElse ? 1 : 0
+    );
+  }
+
+  const unreadTotal = Array.from(unreadByThread.values()).reduce(
+    (sum, value) => sum + value,
+    0
+  );
+  return { unreadByThread, unreadTotal };
+}
 
 async function loadVolunteerDirectThreadsWithUnread({ freiwilligerId, authUserId }) {
   const { data: threads, error: threadsError } = await supabase
