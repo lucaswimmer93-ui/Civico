@@ -31,29 +31,65 @@ const pickFirst = (...values) => {
   return '';
 };
 
-const getSupportRoleMeta = (type) => {
-  if (type === 'verein') return { label: 'Verein', icon: '🏢' };
-  if (type === 'freiwilliger') return { label: 'Freiwilliger', icon: '🙋' };
-  return { label: 'Gemeinde', icon: '🏛️' };
-};
-
 const normalizeSupportThread = (thread) => {
   const vereinSource = firstItem(thread?.verein) || firstItem(thread?.vereine);
   const gemeindeSource = firstItem(thread?.gemeinde) || firstItem(thread?.gemeinden);
-  const vereinName = pickFirst(vereinSource?.name, thread?.verein_name, thread?.vereinsname, thread?.organisation_name, thread?.name);
-  const vereinEmail = pickFirst(vereinSource?.kontakt_email, vereinSource?.email, thread?.verein_email, thread?.kontakt_email, thread?.organisation_email, thread?.email);
-  const gemeindeName = pickFirst(gemeindeSource?.name, thread?.gemeinde_name, thread?.organisation_name, thread?.name);
-  const gemeindeEmail = pickFirst(gemeindeSource?.email, thread?.gemeinde_email, thread?.kontakt_email, thread?.organisation_email, thread?.email);
-  const detectedType = pickFirst(thread?.organisation_type, thread?.sender_type, thread?.thread_type === 'support_verein' ? 'verein' : '', thread?.thread_type === 'support_gemeinde' ? 'gemeinde' : '');
-  const hasVereinData = Boolean(vereinName || vereinEmail || thread?.verein_id || vereinSource);
-  const hasGemeindeData = Boolean(gemeindeName || gemeindeEmail || thread?.gemeinde_id || gemeindeSource);
-  let type = 'gemeinde';
-  if (detectedType === 'verein' || hasVereinData) type = 'verein';
-  else if (detectedType === 'gemeinde' || hasGemeindeData) type = 'gemeinde';
-  const organisation = type === 'verein'
-    ? { type: 'verein', id: pickFirst(vereinSource?.id, thread?.verein_id, thread?.organisation_id) || null, name: pickFirst(vereinName, 'Verein'), email: pickFirst(vereinEmail, '') }
-    : { type: 'gemeinde', id: pickFirst(gemeindeSource?.id, thread?.gemeinde_id, thread?.organisation_id) || null, name: pickFirst(gemeindeName, 'Gemeinde'), email: pickFirst(gemeindeEmail, '') };
-  return { ...thread, organisation };
+  const freiwilligerSource = firstItem(thread?.freiwilliger) || firstItem(thread?.freiwillige);
+
+  const vereinName = pickFirst(vereinSource?.name, thread?.verein_name, thread?.vereinsname);
+  const vereinEmail = pickFirst(vereinSource?.kontakt_email, vereinSource?.email, thread?.verein_email);
+
+  const gemeindeName = pickFirst(gemeindeSource?.name, thread?.gemeinde_name);
+  const gemeindeEmail = pickFirst(gemeindeSource?.email, thread?.gemeinde_email);
+
+  const freiwilligerName = pickFirst(freiwilligerSource?.name, thread?.freiwilliger_name);
+  const freiwilligerEmail = pickFirst(freiwilligerSource?.email, thread?.freiwilliger_email);
+
+  if (thread?.freiwilliger_id) {
+    return {
+      ...thread,
+      organisation: {
+        type: 'freiwilliger',
+        id: pickFirst(freiwilligerSource?.id, thread?.freiwilliger_id) || null,
+        name: pickFirst(freiwilligerName, 'Freiwilliger'),
+        email: pickFirst(freiwilligerEmail, ''),
+      },
+    };
+  }
+
+  if (thread?.verein_id) {
+    return {
+      ...thread,
+      organisation: {
+        type: 'verein',
+        id: pickFirst(vereinSource?.id, thread?.verein_id) || null,
+        name: pickFirst(vereinName, 'Verein'),
+        email: pickFirst(vereinEmail, ''),
+      },
+    };
+  }
+
+  if (thread?.gemeinde_id) {
+    return {
+      ...thread,
+      organisation: {
+        type: 'gemeinde',
+        id: pickFirst(gemeindeSource?.id, thread?.gemeinde_id) || null,
+        name: pickFirst(gemeindeName, 'Gemeinde'),
+        email: pickFirst(gemeindeEmail, ''),
+      },
+    };
+  }
+
+  return {
+    ...thread,
+    organisation: {
+      type: 'unbekannt',
+      id: null,
+      name: 'Unbekannt',
+      email: '',
+    },
+  };
 };
 
 // ── ANFRAGEN TAB ──────────────────────────────────────────────────────────
@@ -628,17 +664,10 @@ export default function AdminDashboard({ onBack, logout }) {
                 : supportThreads.map((thread) => {
                   const organisation = thread.organisation || normalizeSupportThread(thread).organisation;
                   const isSelected = selectedThread?.id === thread.id;
-                  const roleMeta = getSupportRoleMeta(organisation?.type);
                   return (
                     <button key={thread.id} onClick={() => { setSelectedThread(thread); setSelectedOrganisation(organisation || null); }} style={{ width: '100%', textAlign: 'left', border: isSelected ? '2px solid #2C2416' : '1px solid #E6D9C2', background: isSelected ? '#F3EBDD' : '#FAF7F2', borderRadius: 14, padding: 12, marginBottom: 10, cursor: 'pointer', fontFamily: 'inherit' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                        <div style={{ fontWeight: 700 }}>{organisation?.name || 'Unbekannt'}</div>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, color: '#2C2416', background: '#EFE4D0', border: '1px solid #D8C3A5', borderRadius: 999, padding: '4px 8px', whiteSpace: 'nowrap' }}>
-                          <span>{roleMeta.icon}</span>
-                          <span>{roleMeta.label}</span>
-                        </span>
-                      </div>
-                      <div style={{ fontSize: 12, color: '#8B7355', marginTop: 6 }}>{organisation?.email || 'Keine E-Mail hinterlegt'}</div>
+                      <div style={{ fontWeight: 700 }}>{organisation?.name || 'Unbekannt'}</div>
+                      <div style={{ fontSize: 12, color: '#8B7355', marginTop: 4 }}>{organisation?.type === 'verein' ? 'Verein' : organisation?.type === 'freiwilliger' ? 'Freiwilliger' : organisation?.type === 'gemeinde' ? 'Gemeinde' : 'Unbekannt'}{organisation?.email ? ` • ${organisation.email}` : ''}</div>
                       <div style={{ fontSize: 12, color: '#5C4A32', marginTop: 6 }}>{thread.last_message_preview || 'Keine Vorschau verfügbar'}</div>
                       <div style={{ fontSize: 11, color: '#8B7355', marginTop: 8 }}>{thread.last_message_at ? new Date(thread.last_message_at).toLocaleString('de-DE') : 'Keine Aktivität'}</div>
                     </button>
@@ -649,14 +678,8 @@ export default function AdminDashboard({ onBack, logout }) {
               {selectedThread ? (
                 <>
                   <div style={{ marginBottom: 12 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                      <div style={{ fontSize: 18, fontWeight: 700 }}>{selectedOrganisation?.name || 'Support-Verlauf'}</div>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 700, color: '#2C2416', background: '#EFE4D0', border: '1px solid #D8C3A5', borderRadius: 999, padding: '4px 8px' }}>
-                        <span>{getSupportRoleMeta(selectedOrganisation?.type).icon}</span>
-                        <span>{getSupportRoleMeta(selectedOrganisation?.type).label}</span>
-                      </span>
-                    </div>
-                    <div style={{ fontSize: 12, color: '#8B7355', marginTop: 6 }}>{selectedOrganisation?.email || 'Keine E-Mail hinterlegt'}</div>
+                    <div style={{ fontSize: 18, fontWeight: 700 }}>{selectedOrganisation?.name || 'Support-Verlauf'}</div>
+                    <div style={{ fontSize: 12, color: '#8B7355', marginTop: 4 }}>{selectedOrganisation?.type === 'verein' ? 'Verein' : selectedOrganisation?.type === 'freiwilliger' ? 'Freiwilliger' : selectedOrganisation?.type === 'gemeinde' ? 'Gemeinde' : 'Unbekannt'}{selectedOrganisation?.email ? ` • ${selectedOrganisation.email}` : ''}</div>
                   </div>
                   <MessageThreadView threadId={selectedThread.id} currentUserRole="admin" contextType="support" organisation={selectedOrganisation} onMessageSent={loadSupportThreads} />
                 </>
