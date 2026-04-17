@@ -120,39 +120,26 @@ function buildMessagePreview(body) {
 }
 
 
-export async function getThreadReadState(threadId) {
-  if (!threadId) {
-    return {
-      currentUserId: null,
-      lastReadByOthersAt: null,
-    };
-  }
+async function getLatestMessagesForThreads(threadIds = []) {
+  const cleanThreadIds = [...new Set((threadIds || []).filter(Boolean))];
+  if (!cleanThreadIds.length) return new Map();
 
-  const user = await getAuthUserOrThrow();
+  const results = await Promise.all(
+    cleanThreadIds.map(async (threadId) => {
+      const { data, error } = await supabase
+        .from("messages")
+        .select("id, thread_id, sender_user_id, created_at, body")
+        .eq("thread_id", threadId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
-  const { data, error } = await supabase
-    .from("message_read_status")
-    .select("user_id, last_read_at")
-    .eq("thread_id", threadId)
-    .neq("user_id", user.id);
+      if (error) throw error;
+      return [threadId, data || null];
+    })
+  );
 
-  if (error) throw error;
-
-  let lastReadByOthersAt = null;
-  let lastReadTs = 0;
-
-  for (const row of data || []) {
-    const ts = row?.last_read_at ? new Date(row.last_read_at).getTime() : 0;
-    if (ts > lastReadTs) {
-      lastReadTs = ts;
-      lastReadByOthersAt = row.last_read_at;
-    }
-  }
-
-  return {
-    currentUserId: user.id,
-    lastReadByOthersAt,
-  };
+  return new Map(results);
 }
 
 export async function enrichThreadsWithReadState(threads = []) {
@@ -162,41 +149,29 @@ export async function enrichThreadsWithReadState(threads = []) {
   const user = await getAuthUserOrThrow();
   const threadIds = [...new Set(threadList.map((thread) => thread.id).filter(Boolean))];
 
-  const [readRes, messagesRes] = await Promise.all([
-    supabase
-      .from('message_read_status')
-      .select('thread_id, last_read_at')
-      .eq('user_id', user.id)
-      .in('thread_id', threadIds),
-    supabase
-      .from('messages')
-      .select('id, thread_id, sender_user_id, created_at, body')
-      .in('thread_id', threadIds)
-      .order('created_at', { ascending: false }),
-  ]);
+  const { data: readRows, error: readError } = await supabase
+    .from("message_read_status")
+    .select("thread_id, last_read_at")
+    .eq("user_id", user.id)
+    .in("thread_id", threadIds);
 
-  if (readRes.error) throw readRes.error;
-  if (messagesRes.error) throw messagesRes.error;
+  if (readError) throw readError;
 
-  const readMap = new Map((readRes.data || []).map((item) => [item.thread_id, item.last_read_at || null]));
-  const latestMessageMap = new Map();
-
-  for (const message of messagesRes.data || []) {
-    if (!latestMessageMap.has(message.thread_id)) {
-      latestMessageMap.set(message.thread_id, message);
-    }
-  }
+  const readMap = new Map((readRows || []).map((item) => [item.thread_id, item.last_read_at || null]));
+  const latestMessageMap = await getLatestMessagesForThreads(threadIds);
 
   return threadList.map((thread) => {
     const latestMessage = latestMessageMap.get(thread.id) || null;
     const lastReadAt = readMap.get(thread.id) || null;
     const latestCreatedAt = latestMessage?.created_at ? new Date(latestMessage.created_at).getTime() : 0;
+    const threadLastMessageAt = thread?.last_message_at ? new Date(thread.last_message_at).getTime() : 0;
+    const lastActivityTs = Math.max(latestCreatedAt, threadLastMessageAt);
     const lastReadTs = lastReadAt ? new Date(lastReadAt).getTime() : 0;
     const hasUnread = Boolean(
       latestMessage &&
       latestMessage.sender_user_id &&
       latestMessage.sender_user_id !== user.id &&
-      latestCreatedAt > lastReadTs
+      lastActivityTs > lastReadTs
     );
 
     return {
@@ -205,11 +180,12 @@ export async function enrichThreadsWithReadState(threads = []) {
       my_last_read_at: lastReadAt,
       has_unread: hasUnread,
       unread_count: hasUnread ? 1 : 0,
-      last_message_preview: thread?.last_message_preview || buildMessagePreview(latestMessage?.body || ''),
+      last_message_preview: thread?.last_message_preview || buildMessagePreview(latestMessage?.body || ""),
     };
   });
 }
 
+/**
 /**
  * Verein <-> Gemeinde Thread
  */
