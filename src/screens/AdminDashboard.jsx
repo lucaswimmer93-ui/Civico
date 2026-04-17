@@ -92,6 +92,32 @@ const normalizeSupportThread = (thread) => {
   };
 };
 
+
+const dedupeSupportThreads = (threads = []) => {
+  const normalizedThreads = (threads || []).map(normalizeSupportThread);
+  const bestByKey = new Map();
+
+  for (const thread of normalizedThreads) {
+    const organisation = thread?.organisation || {};
+    const rawEmail = typeof organisation.email === 'string' ? organisation.email.trim().toLowerCase() : '';
+    const rawName = typeof organisation.name === 'string' ? organisation.name.trim().toLowerCase() : '';
+    const dedupeKey = rawEmail || rawName || `${organisation.type || 'unbekannt'}:${organisation.id || thread.id}`;
+    const current = bestByKey.get(dedupeKey);
+    const threadTime = thread?.last_message_at ? new Date(thread.last_message_at).getTime() : 0;
+    const currentTime = current?.last_message_at ? new Date(current.last_message_at).getTime() : 0;
+
+    if (!current || threadTime >= currentTime) {
+      bestByKey.set(dedupeKey, thread);
+    }
+  }
+
+  return Array.from(bestByKey.values()).sort((a, b) => {
+    const timeA = a?.last_message_at ? new Date(a.last_message_at).getTime() : 0;
+    const timeB = b?.last_message_at ? new Date(b.last_message_at).getTime() : 0;
+    return timeB - timeA;
+  });
+};
+
 // ── ANFRAGEN TAB ──────────────────────────────────────────────────────────
 function AnfragenTab() {
   const [anfragen, setAnfragen] = useState([]);
@@ -444,7 +470,7 @@ export default function AdminDashboard({ onBack, logout }) {
       setSupportLoading(true);
       setSupportError('');
       const data = (await getAdminSupportThreads()) || [];
-      const normalized = data.map(normalizeSupportThread);
+      const normalized = dedupeSupportThreads(data);
       setSupportThreads(normalized);
       if (normalized.length > 0) {
         const currentSelectedId = selectedThread?.id;
