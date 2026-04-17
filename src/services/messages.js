@@ -1,12 +1,32 @@
 import { supabase } from "../core/shared";
 
-async function getAuthUserOrThrow() {
+let authUserCache = null;
+let authUserCacheAt = 0;
+let actorCache = null;
+let actorCacheAt = 0;
+const AUTH_CACHE_TTL_MS = 5000;
+const ACTOR_CACHE_TTL_MS = 5000;
+const supportThreadCache = new Map();
+
+function isFresh(timestamp, ttl) {
+  return Date.now() - timestamp < ttl;
+}
+
+export async function getAuthUserOrThrow(forceRefresh = false) {
+  if (!forceRefresh && authUserCache && isFresh(authUserCacheAt, AUTH_CACHE_TTL_MS)) {
+    return authUserCache;
+  }
+
   const sessionRes = await supabase.auth.getSession();
   const sessionError = sessionRes?.error;
   const session = sessionRes?.data?.session || null;
 
   if (sessionError) throw sessionError;
-  if (session?.user) return session.user;
+  if (session?.user) {
+    authUserCache = session.user;
+    authUserCacheAt = Date.now();
+    return session.user;
+  }
 
   const userRes = await supabase.auth.getUser();
   const userError = userRes?.error;
@@ -15,7 +35,24 @@ async function getAuthUserOrThrow() {
   if (userError) throw userError;
   if (!user) throw new Error("Kein eingeloggter User");
 
+  authUserCache = user;
+  authUserCacheAt = Date.now();
   return user;
+}
+
+export function clearMessageServiceCache() {
+  authUserCache = null;
+  authUserCacheAt = 0;
+  actorCache = null;
+  actorCacheAt = 0;
+  supportThreadCache.clear();
+}
+
+if (typeof window !== "undefined" && !window.__civicoMessagesAuthListenerBound) {
+  window.__civicoMessagesAuthListenerBound = true;
+  supabase.auth.onAuthStateChange(() => {
+    clearMessageServiceCache();
+  });
 }
 
 function getStoredLastRole() {
@@ -40,8 +77,12 @@ function getStoredLastRole() {
  * 3. Admin
  * 4. Freiwilliger
  */
-export async function getCurrentActor() {
-  const user = await getAuthUserOrThrow();
+export async function getCurrentActor(forceRefresh = false) {
+  if (!forceRefresh && actorCache && isFresh(actorCacheAt, ACTOR_CACHE_TTL_MS)) {
+    return actorCache;
+  }
+
+  const user = await getAuthUserOrThrow(forceRefresh);
 
   const authId = user.id;
 
@@ -175,7 +216,10 @@ export async function getOrCreateVereinGemeindeThread(vereinId = null) {
     .maybeSingle();
 
   if (existingError) throw existingError;
-  if (existing) return existing;
+  if (existing) {
+    supportThreadCache.set(cacheKey, existing);
+    return existing;
+  }
 
   const { data: created, error: createError } = await supabase
     .from("message_threads")
@@ -219,6 +263,11 @@ export async function getOrCreateSupportThread() {
     throw new Error("Ungültige Rolle für Support-Thread.");
   }
 
+  const cacheKey = `${actor.role}:${actor.organizationId}`;
+  if (supportThreadCache.has(cacheKey)) {
+    return supportThreadCache.get(cacheKey);
+  }
+
   const { data: existing, error: existingError } = await supabase
     .from("message_threads")
     .select("*")
@@ -227,7 +276,10 @@ export async function getOrCreateSupportThread() {
     .maybeSingle();
 
   if (existingError) throw existingError;
-  if (existing) return existing;
+  if (existing) {
+    supportThreadCache.set(cacheKey, existing);
+    return existing;
+  }
 
   const payload = {
     thread_type: "support",
@@ -246,6 +298,7 @@ export async function getOrCreateSupportThread() {
 
   if (createError) throw createError;
 
+  supportThreadCache.set(cacheKey, created);
   return created;
 }
 
@@ -434,7 +487,10 @@ export async function getOrCreateTerminDirectThread(terminId, freiwilligerId = n
     .maybeSingle();
 
   if (existingError) throw existingError;
-  if (existing) return existing;
+  if (existing) {
+    supportThreadCache.set(cacheKey, existing);
+    return existing;
+  }
 
   const { data: created, error: createError } = await supabase
     .from("message_threads")
@@ -595,4 +651,124 @@ export async function markThreadAsRead(threadId) {
     );
 
   if (error) throw error;
+}
+
+
+export async function getUnreadCountsForThreads(threadIds = [], authUserId = null) {
+  const cleanThreadIds = [...new Set((threadIds || []).filter(Boolean))];
+  const userId = authUserId || (await getAuthUserOrThrow()).id;
+
+  if (!cleanThreadIds.length || !userId) {
+    return { unreadByThread: new Map(), unreadTotal: 0 };
+  }
+
+  const [
+    { data: readRows, error: readError },
+    { data: threadRows, error: threadError },
+    { data: messageRows, error: messageError },
+  ] = await Promise.all([
+    supabase
+      .from("message_read_status")
+      .select("thread_id, last_read_at")
+      .eq("user_id", userId)
+      .in("thread_id", cleanThreadIds),
+    supabase
+      .from("message_threads")
+      .select("id, last_message_at")
+      .in("id", cleanThreadIds),
+    supabase
+      .from("messages")
+      .select("thread_id, sender_user_id, created_at")
+      .in("thread_id", cleanThreadIds)
+      .order("created_at", { ascending: false }),
+  ]);
+
+  if (readError) throw readError;
+  if (threadError) throw threadError;
+  if (messageError) throw messageError;
+
+  const readMap = new Map(
+    (readRows || []).map((row) => [
+      row.thread_id,
+      row.last_read_at ? new Date(row.last_read_at).getTime() : 0,
+    ])
+  );
+
+  const latestMessageByThread = new Map();
+  for (const row of messageRows || []) {
+    if (!row?.thread_id || latestMessageByThread.has(row.thread_id)) continue;
+    latestMessageByThread.set(row.thread_id, row);
+  }
+
+  const unreadByThread = new Map();
+
+  for (const thread of threadRows || []) {
+    const threadId = thread?.id;
+    if (!threadId) continue;
+
+    const lastMessageAt = thread?.last_message_at
+      ? new Date(thread.last_message_at).getTime()
+      : 0;
+    const lastReadAt = readMap.get(threadId) || 0;
+    const latestMessage = latestMessageByThread.get(threadId);
+    const lastMessageFromSomeoneElse =
+      latestMessage?.sender_user_id && latestMessage.sender_user_id !== userId;
+
+    unreadByThread.set(
+      threadId,
+      lastMessageAt && lastMessageAt > lastReadAt && lastMessageFromSomeoneElse ? 1 : 0
+    );
+  }
+
+  const unreadTotal = Array.from(unreadByThread.values()).reduce(
+    (sum, value) => sum + value,
+    0
+  );
+
+  return { unreadByThread, unreadTotal };
+}
+
+export async function getThreadReadMeta(threadId, currentUserId = null) {
+  const userId = currentUserId || (await getAuthUserOrThrow()).id;
+
+  if (!threadId || !userId) {
+    return {
+      currentUserId: userId || null,
+      myLastReadAt: null,
+      otherLastReadAt: null,
+      hasOtherReader: false,
+    };
+  }
+
+  const { data, error } = await supabase
+    .from("message_read_status")
+    .select("user_id, last_read_at")
+    .eq("thread_id", threadId);
+
+  if (error) throw error;
+
+  let myLastReadAt = null;
+  let otherLastReadAt = null;
+  let hasOtherReader = false;
+
+  for (const row of data || []) {
+    const ts = row?.last_read_at ? new Date(row.last_read_at).getTime() : null;
+    if (!ts) continue;
+
+    if (row.user_id === userId) {
+      myLastReadAt = ts;
+    } else {
+      hasOtherReader = true;
+      if (!otherLastReadAt || ts > otherLastReadAt) {
+        otherLastReadAt = ts;
+      }
+    }
+  }
+
+  return {
+    currentUserId: userId,
+    myLastReadAt,
+    otherLastReadAt,
+    hasOtherReader,
+  };
 }
