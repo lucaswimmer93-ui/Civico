@@ -1045,13 +1045,21 @@ export default function App() {
         return;
       }
 
-      const { data: readRows, error: readError } = await supabase
-        .from("message_read_status")
-        .select("thread_id, last_read_at")
-        .eq("user_id", freiwilligerProfil.auth_id)
-        .in("thread_id", threadIds);
+      const [{ data: readRows, error: readError }, { data: messageRows, error: messageError }] = await Promise.all([
+        supabase
+          .from("message_read_status")
+          .select("thread_id, last_read_at")
+          .eq("user_id", freiwilligerProfil.auth_id)
+          .in("thread_id", threadIds),
+        supabase
+          .from("messages")
+          .select("thread_id, sender_user_id, created_at")
+          .in("thread_id", threadIds)
+          .order("created_at", { ascending: false }),
+      ]);
 
       if (readError) throw readError;
+      if (messageError) throw messageError;
 
       const readMap = new Map(
         (readRows || []).map((row) => [
@@ -1060,13 +1068,20 @@ export default function App() {
         ])
       );
 
+      const latestMessageByThread = new Map();
+      for (const row of messageRows || []) {
+        if (!row?.thread_id || latestMessageByThread.has(row.thread_id)) continue;
+        latestMessageByThread.set(row.thread_id, row);
+      }
+
       let nextVereinsUnread = 0;
       let nextSupportUnread = 0;
 
       for (const thread of threadList) {
         const lastMessageAt = thread?.last_message_at ? new Date(thread.last_message_at).getTime() : 0;
         const lastReadAt = readMap.get(thread.id) || 0;
-        const isUnread = Boolean(lastMessageAt && lastMessageAt > lastReadAt);
+        const latestMessage = latestMessageByThread.get(thread.id);
+        const isUnread = Boolean(lastMessageAt && lastMessageAt > lastReadAt && latestMessage?.sender_user_id && latestMessage.sender_user_id !== freiwilligerProfil.auth_id);
 
         if (!isUnread) continue;
         if (thread.thread_type === "support") nextSupportUnread += 1;
@@ -1106,13 +1121,21 @@ export default function App() {
         return;
       }
 
-      const { data: readRows, error: readError } = await supabase
-        .from("message_read_status")
-        .select("thread_id, last_read_at")
-        .eq("user_id", adminProfil.auth_id)
-        .in("thread_id", threadIds);
+      const [{ data: readRows, error: readError }, { data: messageRows, error: messageError }] = await Promise.all([
+        supabase
+          .from("message_read_status")
+          .select("thread_id, last_read_at")
+          .eq("user_id", adminProfil.auth_id)
+          .in("thread_id", threadIds),
+        supabase
+          .from("messages")
+          .select("thread_id, sender_user_id, created_at")
+          .in("thread_id", threadIds)
+          .order("created_at", { ascending: false }),
+      ]);
 
       if (readError) throw readError;
+      if (messageError) throw messageError;
 
       const readMap = new Map(
         (readRows || []).map((row) => [
@@ -1121,10 +1144,17 @@ export default function App() {
         ])
       );
 
+      const latestMessageByThread = new Map();
+      for (const row of messageRows || []) {
+        if (!row?.thread_id || latestMessageByThread.has(row.thread_id)) continue;
+        latestMessageByThread.set(row.thread_id, row);
+      }
+
       const unreadCount = threadList.reduce((sum, thread) => {
         const lastMessageAt = thread?.last_message_at ? new Date(thread.last_message_at).getTime() : 0;
         const lastReadAt = readMap.get(thread.id) || 0;
-        return sum + (lastMessageAt && lastMessageAt > lastReadAt ? 1 : 0);
+        const latestMessage = latestMessageByThread.get(thread.id);
+        return sum + (lastMessageAt && lastMessageAt > lastReadAt && latestMessage?.sender_user_id && latestMessage.sender_user_id !== adminProfil.auth_id ? 1 : 0);
       }, 0);
 
       setAdminSupportUnreadCount(unreadCount);
