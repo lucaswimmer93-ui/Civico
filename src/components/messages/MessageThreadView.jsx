@@ -4,7 +4,6 @@ import {
   getThreadMessages,
   sendMessage,
   markThreadAsRead,
-  getThreadReadState,
 } from "../../services/messages";
 
 function formatTime(value) {
@@ -34,7 +33,6 @@ export default function MessageThreadView({
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const [currentUserId, setCurrentUserId] = useState(null);
-  const [lastReadByOthersAt, setLastReadByOthersAt] = useState(null);
   const scrollRef = useRef(null);
 
   const hasThread = useMemo(() => Boolean(threadId), [threadId]);
@@ -65,32 +63,12 @@ export default function MessageThreadView({
     setError("");
 
     try {
-      const [data, readState] = await Promise.all([
-        getThreadMessages(threadId),
-        getThreadReadState(threadId),
-      ]);
-
+      const data = await getThreadMessages(threadId);
       setMessages(data || []);
-      if (readState?.currentUserId) {
-        setCurrentUserId(readState.currentUserId);
+      await markThreadAsRead(threadId);
+      if (typeof onThreadRead === "function") {
+        onThreadRead(threadId);
       }
-      setLastReadByOthersAt(readState?.lastReadByOthersAt || null);
-
-      markThreadAsRead(threadId)
-        .then(async () => {
-          try {
-            const nextReadState = await getThreadReadState(threadId);
-            setLastReadByOthersAt(nextReadState?.lastReadByOthersAt || null);
-            if (typeof onThreadRead === "function") {
-              onThreadRead(threadId);
-            }
-          } catch (innerErr) {
-            console.error("Fehler beim Aktualisieren des Read-Status:", innerErr);
-          }
-        })
-        .catch((innerErr) => {
-          console.error("Fehler beim Markieren als gelesen:", innerErr);
-        });
     } catch (err) {
       console.error("Fehler beim Laden der Nachrichten:", err);
       setError(err?.message || "Nachrichten konnten nicht geladen werden.");
@@ -124,15 +102,8 @@ export default function MessageThreadView({
         },
         async () => {
           try {
-            const [data, readState] = await Promise.all([
-              getThreadMessages(threadId),
-              getThreadReadState(threadId),
-            ]);
+            const data = await getThreadMessages(threadId);
             setMessages(data || []);
-            if (readState?.currentUserId) {
-              setCurrentUserId(readState.currentUserId);
-            }
-            setLastReadByOthersAt(readState?.lastReadByOthersAt || null);
           } catch (err) {
             console.error("Realtime-Update fehlgeschlagen:", err);
           }
@@ -177,19 +148,6 @@ export default function MessageThreadView({
 
   function isOwnMessage(message) {
     return currentUserId && message?.sender_user_id === currentUserId;
-  }
-
-  function getOwnMessageStatus(message) {
-    if (!message?.created_at) return "Gesendet";
-
-    const readTs = lastReadByOthersAt ? new Date(lastReadByOthersAt).getTime() : 0;
-    const messageTs = new Date(message.created_at).getTime();
-
-    if (readTs && readTs >= messageTs) {
-      return "Gelesen";
-    }
-
-    return "Gesendet";
   }
 
   if (!hasThread) {
@@ -309,14 +267,9 @@ export default function MessageThreadView({
                       fontSize: 10,
                       color: own ? "#D9CDB7" : "#8B7355",
                       textAlign: "right",
-                      display: "flex",
-                      justifyContent: "flex-end",
-                      gap: 6,
-                      flexWrap: "wrap",
                     }}
                   >
-                    <span>{formatTime(message.created_at)}</span>
-                    {own ? <span>• {getOwnMessageStatus(message)}</span> : null}
+                    {formatTime(message.created_at)}
                   </div>
                 </div>
               </div>
