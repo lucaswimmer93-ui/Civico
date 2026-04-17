@@ -1,4 +1,4 @@
-import { supabase } from "../lib/supabaseclient";
+import { supabase } from "../core/shared";
 
 function getStoredLastRole() {
   if (typeof window === "undefined") return null;
@@ -302,9 +302,22 @@ export async function getGemeindeVereine() {
  * Admin Support Threads
  */
 export async function getAdminSupportThreads() {
-  const actor = await getCurrentActor();
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
 
-  if (actor.role !== "admin") {
+  if (userError) throw userError;
+  if (!user) throw new Error("Kein eingeloggter User");
+
+  const { data: admin, error: adminError } = await supabase
+    .from("admins")
+    .select("id, auth_id")
+    .eq("auth_id", user.id)
+    .maybeSingle();
+
+  if (adminError) throw adminError;
+  if (!admin) {
     throw new Error("Nur Admin darf Support-Threads abrufen.");
   }
 
