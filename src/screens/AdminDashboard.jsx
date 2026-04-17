@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../core/shared';
 import { Header, Input, SectionLabel, EmptyState } from '../components/ui';
 import MessageThreadView from '../components/messages/MessageThreadView';
-import { getAdminSupportThreads, enrichThreadsWithReadState } from '../services/messages';
+import { getAdminSupportThreads } from '../services/messages';
 
 const cardStyle = {
   background: '#FAF7F2',
@@ -90,32 +90,6 @@ const normalizeSupportThread = (thread) => {
       email: '',
     },
   };
-};
-
-
-const dedupeSupportThreads = (threads = []) => {
-  const normalizedThreads = (threads || []).map(normalizeSupportThread);
-  const bestByKey = new Map();
-
-  for (const thread of normalizedThreads) {
-    const organisation = thread?.organisation || {};
-    const rawEmail = typeof organisation.email === 'string' ? organisation.email.trim().toLowerCase() : '';
-    const rawName = typeof organisation.name === 'string' ? organisation.name.trim().toLowerCase() : '';
-    const dedupeKey = rawEmail || rawName || `${organisation.type || 'unbekannt'}:${organisation.id || thread.id}`;
-    const current = bestByKey.get(dedupeKey);
-    const threadTime = thread?.last_message_at ? new Date(thread.last_message_at).getTime() : 0;
-    const currentTime = current?.last_message_at ? new Date(current.last_message_at).getTime() : 0;
-
-    if (!current || threadTime >= currentTime) {
-      bestByKey.set(dedupeKey, thread);
-    }
-  }
-
-  return Array.from(bestByKey.values()).sort((a, b) => {
-    const timeA = a?.last_message_at ? new Date(a.last_message_at).getTime() : 0;
-    const timeB = b?.last_message_at ? new Date(b.last_message_at).getTime() : 0;
-    return timeB - timeA;
-  });
 };
 
 // ── ANFRAGEN TAB ──────────────────────────────────────────────────────────
@@ -434,7 +408,6 @@ export default function AdminDashboard({ onBack, logout }) {
   const [selectedThread, setSelectedThread] = useState(null);
   const [selectedOrganisation, setSelectedOrganisation] = useState(null);
   const [unreadAnfragen, setUnreadAnfragen] = useState(0);
-  const [supportUnreadCount, setSupportUnreadCount] = useState(0);
 
   useEffect(() => {
     // Load unread count for badge
@@ -471,10 +444,8 @@ export default function AdminDashboard({ onBack, logout }) {
       setSupportLoading(true);
       setSupportError('');
       const data = (await getAdminSupportThreads()) || [];
-      const enriched = await enrichThreadsWithReadState(data);
-      const normalized = dedupeSupportThreads(enriched);
+      const normalized = data.map(normalizeSupportThread);
       setSupportThreads(normalized);
-      setSupportUnreadCount(normalized.reduce((sum, thread) => sum + Number(thread?.unread_count || 0), 0));
       if (normalized.length > 0) {
         const currentSelectedId = selectedThread?.id;
         const selectedMatch = currentSelectedId ? normalized.find((t) => t.id === currentSelectedId) : null;
@@ -563,7 +534,7 @@ export default function AdminDashboard({ onBack, logout }) {
             </span>
           )}
         </button>
-        <button style={tabButtonStyle(activeTab === 'support')} onClick={() => setActiveTab('support')}>💬 Support{supportUnreadCount > 0 && (<span style={{ background: '#E85C5C', color: '#fff', borderRadius: 8, padding: '1px 6px', fontSize: 10, marginLeft: 6, fontWeight: 700 }}>{supportUnreadCount > 9 ? '9+' : supportUnreadCount}</span>)}</button>
+        <button style={tabButtonStyle(activeTab === 'support')} onClick={() => setActiveTab('support')}>💬 Support</button>
         <button style={tabButtonStyle(activeTab === 'sotickts')} onClick={() => setActiveTab('sotickts')}>✍️ So tickt Civico</button>
       </div>
 
@@ -695,7 +666,7 @@ export default function AdminDashboard({ onBack, logout }) {
                   const isSelected = selectedThread?.id === thread.id;
                   return (
                     <button key={thread.id} onClick={() => { setSelectedThread(thread); setSelectedOrganisation(organisation || null); }} style={{ width: '100%', textAlign: 'left', border: isSelected ? '2px solid #2C2416' : '1px solid #E6D9C2', background: isSelected ? '#F3EBDD' : '#FAF7F2', borderRadius: 14, padding: 12, marginBottom: 10, cursor: 'pointer', fontFamily: 'inherit' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center' }}><div style={{ fontWeight: 700 }}>{organisation?.name || 'Unbekannt'}</div>{thread?.has_unread ? <span style={{ background: '#E85C5C', color: '#fff', borderRadius: 999, minWidth: 20, height: 20, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, padding: '0 6px' }}>{thread?.unread_count > 9 ? '9+' : thread?.unread_count || 1}</span> : null}</div>
+                      <div style={{ fontWeight: 700 }}>{organisation?.name || 'Unbekannt'}</div>
                       <div style={{ fontSize: 12, color: '#8B7355', marginTop: 4 }}>{organisation?.type === 'verein' ? 'Verein' : organisation?.type === 'freiwilliger' ? 'Freiwilliger' : organisation?.type === 'gemeinde' ? 'Gemeinde' : 'Unbekannt'}{organisation?.email ? ` • ${organisation.email}` : ''}</div>
                       <div style={{ fontSize: 12, color: '#5C4A32', marginTop: 6 }}>{thread.last_message_preview || 'Keine Vorschau verfügbar'}</div>
                       <div style={{ fontSize: 11, color: '#8B7355', marginTop: 8 }}>{thread.last_message_at ? new Date(thread.last_message_at).toLocaleString('de-DE') : 'Keine Aktivität'}</div>
@@ -710,7 +681,7 @@ export default function AdminDashboard({ onBack, logout }) {
                     <div style={{ fontSize: 18, fontWeight: 700 }}>{selectedOrganisation?.name || 'Support-Verlauf'}</div>
                     <div style={{ fontSize: 12, color: '#8B7355', marginTop: 4 }}>{selectedOrganisation?.type === 'verein' ? 'Verein' : selectedOrganisation?.type === 'freiwilliger' ? 'Freiwilliger' : selectedOrganisation?.type === 'gemeinde' ? 'Gemeinde' : 'Unbekannt'}{selectedOrganisation?.email ? ` • ${selectedOrganisation.email}` : ''}</div>
                   </div>
-                  <MessageThreadView threadId={selectedThread.id} currentUserRole="admin" contextType="support" organisation={selectedOrganisation} onMessageSent={loadSupportThreads} onThreadRead={loadSupportThreads} />
+                  <MessageThreadView threadId={selectedThread.id} currentUserRole="admin" contextType="support" organisation={selectedOrganisation} onMessageSent={loadSupportThreads} />
                 </>
               ) : <EmptyState icon="📨" text="Kein Thread ausgewählt" sub="Wähle links eine Support-Anfrage aus." />}
             </div>
