@@ -38,10 +38,19 @@ export default function MessageThreadView({
   const hasThread = useMemo(() => Boolean(threadId), [threadId]);
 
   async function loadCurrentUser() {
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser();
+    const sessionRes = await supabase.auth.getSession();
+    const sessionError = sessionRes?.error;
+    const sessionUser = sessionRes?.data?.session?.user || null;
+
+    if (sessionError) throw sessionError;
+    if (sessionUser?.id) {
+      setCurrentUserId(sessionUser.id);
+      return;
+    }
+
+    const userRes = await supabase.auth.getUser();
+    const userError = userRes?.error;
+    const user = userRes?.data?.user || null;
 
     if (userError) throw userError;
     setCurrentUserId(user?.id || null);
