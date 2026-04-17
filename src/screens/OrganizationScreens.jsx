@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import MeineGemeindePanel from "../components/messages/MeineGemeindePanel";
 import MessageThreadView from "../components/messages/MessageThreadView";
-import { getTerminDirectThreadsForVerein, getOrCreateTerminDirectThread, getOrCreateSupportThread } from "../services/messages";
+import { getTerminDirectThreadsForVerein, getOrCreateTerminDirectThread, getOrCreateSupportThread, enrichThreadsWithReadState } from "../services/messages";
 import { supabase, T, KATEGORIEN, SKILLS, getSkillLabel, getKat, getMedaille, getNextMedaille, getMedailleName, IMPRESSUM_TEXT, DATENSCHUTZ_TEXT, AGB_TEXT, formatDate, getGemeindeByPlz, isKlarname, isTerminNochNichtGestartet, isTerminAktuell } from '../core/shared';
 import { Header, StelleCard, VereineListe, BottomBar, DatenschutzBox, Input, BigButton, Chip, InfoChip, SectionLabel, RoleCard, EmptyState, ErrorMsg } from '../components/ui';
 
@@ -85,16 +85,23 @@ function VereinDashboard({
   };
 
   const ensureSupportThread = async () => {
-    if (!user?.data?.id) return;
     try {
       setSupportLoading(true);
       setSupportError('');
 
       const thread = await getOrCreateSupportThread();
       setSupportThreadId(thread?.id || null);
+      setSupportThreadMeta(thread || null);
+
+      const enriched = await enrichThreadsWithReadState(thread ? [thread] : []);
+      const unread = enriched.reduce((sum, item) => sum + Number(item?.unread_count || 0), 0);
+      setSupportUnreadCount(unread);
+
+      return thread || null;
     } catch (err) {
       console.error('Fehler beim Laden des Support-Threads:', err);
       setSupportError(err.message || 'Support konnte nicht geladen werden.');
+      return null;
     } finally {
       setSupportLoading(false);
     }
@@ -136,10 +143,12 @@ function VereinDashboard({
           return bTime - aTime;
         });
 
-      setTerminChatThreads(flatChats);
+      const enrichedChats = await enrichThreadsWithReadState(flatChats);
+      setTerminChatThreads(enrichedChats);
+      setTerminUnreadCount(enrichedChats.reduce((sum, item) => sum + Number(item?.unread_count || 0), 0));
       setSelectedCommunicationThread((prev) => {
-        if (prev?.id && flatChats.some((item) => item.id === prev.id)) return prev;
-        return flatChats[0] || null;
+        if (prev?.id && enrichedChats.some((item) => item.id === prev.id)) return enrichedChats.find((item) => item.id === prev.id) || prev;
+        return enrichedChats[0] || null;
       });
 
       if (!supportThreadId) {
@@ -607,7 +616,9 @@ function VereinDashboard({
                 ['termine', '💬 Termin-Chats'],
                 ['gemeinde', '🏛 Meine Gemeinde'],
                 ['support', '🛟 Support'],
-              ].map(([key, label]) => (
+              ].map(([key, label]) => {
+                const badgeCount = key === 'termine' ? terminUnreadCount : key === 'support' ? supportUnreadCount : 0;
+                return (
                 <button
                   key={key}
                   onClick={() => {
@@ -617,6 +628,8 @@ function VereinDashboard({
                   style={{
                     padding: "10px 14px",
                     borderRadius: 12,
+                    display: 'inline-flex',
+                    alignItems: 'center',
                     border: kommunikationTab === key ? "none" : "1px solid #E0D8C8",
                     background: kommunikationTab === key ? "#2C2416" : "#FAF7F2",
                     color: kommunikationTab === key ? "#FAF7F2" : "#2C2416",
@@ -626,9 +639,14 @@ function VereinDashboard({
                     fontWeight: "bold",
                   }}
                 >
-                  {label}
+                  <span>{label}</span>
+                  {badgeCount > 0 ? (
+                    <span style={{ background: '#E85C5C', color: '#fff', borderRadius: 999, minWidth: 18, height: 18, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, padding: '0 5px', marginLeft: 8 }}>
+                      {badgeCount > 9 ? '9+' : badgeCount}
+                    </span>
+                  ) : null}
                 </button>
-              ))}
+              );})}
             </div>
 
             {kommunikationTab === 'termine' && (
@@ -668,9 +686,9 @@ function VereinDashboard({
                               fontFamily: "inherit",
                             }}
                           >
-                            <div style={{ fontSize: 13, fontWeight: "bold", color: "#2C2416", marginBottom: 4 }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'center', marginBottom: 4 }}><div style={{ fontSize: 13, fontWeight: "bold", color: "#2C2416" }}>
                               {thread.freiwillige?.name || "Freiwilliger"}
-                            </div>
+                            </div>{thread?.has_unread ? <span style={{ background: '#E85C5C', color: '#fff', borderRadius: 999, minWidth: 18, height: 18, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 10, fontWeight: 700, padding: '0 5px' }}>{thread?.unread_count > 9 ? '9+' : thread?.unread_count || 1}</span> : null}</div>
                             <div style={{ fontSize: 12, color: "#8B7355", marginBottom: 4 }}>
                               {thread.stelleTitel || "Stelle"}
                             </div>
@@ -693,6 +711,8 @@ function VereinDashboard({
                             verein: user?.data?.name || "Verein",
                             freiwilliger: selectedCommunicationThread?.freiwillige?.name || "Freiwilliger",
                           }}
+                          onMessageSent={loadKommunikationHub}
+                          onThreadRead={loadKommunikationHub}
                         />
                       ) : (
                         <EmptyState
@@ -745,6 +765,8 @@ function VereinDashboard({
                     title="Support"
                     emptyText="Noch keine Support-Nachrichten vorhanden."
                     height={420}
+                    onMessageSent={ensureSupportThread}
+                    onThreadRead={ensureSupportThread}
                   />
                 ) : (
                   <EmptyState
