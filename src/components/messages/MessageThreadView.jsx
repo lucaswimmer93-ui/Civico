@@ -4,6 +4,8 @@ import {
   getThreadMessages,
   sendMessage,
   markThreadAsRead,
+  getAuthUserOrThrow,
+  getThreadReadMeta,
 } from "../../services/messages";
 
 function formatTime(value) {
@@ -33,27 +35,28 @@ export default function MessageThreadView({
   const [sending, setSending] = useState(false);
   const [error, setError] = useState("");
   const [currentUserId, setCurrentUserId] = useState(null);
+  const [otherLastReadAt, setOtherLastReadAt] = useState(null);
   const scrollRef = useRef(null);
 
   const hasThread = useMemo(() => Boolean(threadId), [threadId]);
 
   async function loadCurrentUser() {
-    const sessionRes = await supabase.auth.getSession();
-    const sessionError = sessionRes?.error;
-    const sessionUser = sessionRes?.data?.session?.user || null;
-
-    if (sessionError) throw sessionError;
-    if (sessionUser?.id) {
-      setCurrentUserId(sessionUser.id);
-      return;
-    }
-
-    const userRes = await supabase.auth.getUser();
-    const userError = userRes?.error;
-    const user = userRes?.data?.user || null;
-
-    if (userError) throw userError;
+    const user = await getAuthUserOrThrow();
     setCurrentUserId(user?.id || null);
+    return user?.id || null;
+  }
+
+  async function loadReadMeta(nextUserId = null) {
+    if (!threadId) return;
+    try {
+      const meta = await getThreadReadMeta(threadId, nextUserId || currentUserId || null);
+      setOtherLastReadAt(meta?.otherLastReadAt || null);
+      if (meta?.currentUserId && meta.currentUserId !== currentUserId) {
+        setCurrentUserId(meta.currentUserId);
+      }
+    } catch (err) {
+      console.error("Fehler beim Laden des Read-Status:", err);
+    }
   }
 
   async function loadMessages() {
@@ -63,12 +66,21 @@ export default function MessageThreadView({
     setError("");
 
     try {
+      const userId = currentUserId || (await loadCurrentUser());
       const data = await getThreadMessages(threadId);
       setMessages(data || []);
-      await markThreadAsRead(threadId);
-      if (typeof onThreadRead === "function") {
-        onThreadRead(threadId);
-      }
+
+      loadReadMeta(userId);
+      markThreadAsRead(threadId)
+        .then(() => {
+          if (typeof onThreadRead === "function") {
+            onThreadRead(threadId);
+          }
+          loadReadMeta(userId);
+        })
+        .catch((err) => {
+          console.error("Read-Status konnte nicht gesetzt werden:", err);
+        });
     } catch (err) {
       console.error("Fehler beim Laden der Nachrichten:", err);
       setError(err?.message || "Nachrichten konnten nicht geladen werden.");
@@ -104,9 +116,33 @@ export default function MessageThreadView({
           try {
             const data = await getThreadMessages(threadId);
             setMessages(data || []);
+            loadReadMeta();
+            const latest = (data || [])[data.length - 1];
+            if (latest?.sender_user_id && latest.sender_user_id !== currentUserId) {
+              markThreadAsRead(threadId)
+                .then(() => {
+                  if (typeof onThreadRead === "function") {
+                    onThreadRead(threadId);
+                  }
+                  loadReadMeta();
+                })
+                .catch((err) => console.error("Realtime Read-Status fehlgeschlagen:", err));
+            }
           } catch (err) {
             console.error("Realtime-Update fehlgeschlagen:", err);
           }
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "message_read_status",
+          filter: `thread_id=eq.${threadId}`,
+        },
+        async () => {
+          loadReadMeta();
         }
       )
       .subscribe();
@@ -114,7 +150,8 @@ export default function MessageThreadView({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [threadId]);
+  }, [threadId, currentUserId]);
+
 
   useEffect(() => {
     if (!scrollRef.current) return;
@@ -127,19 +164,39 @@ export default function MessageThreadView({
     if (!threadId || sending) return;
     if (!draft.trim()) return;
 
+    const body = draft.trim();
+    const tempId = `temp-${Date.now()}`;
+
     setSending(true);
     setError("");
+    setDraft("");
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: tempId,
+        thread_id: threadId,
+        sender_user_id: currentUserId,
+        body,
+        created_at: new Date().toISOString(),
+        _localStatus: "sending",
+      },
+    ]);
 
     try {
-      const newMessage = await sendMessage(threadId, draft.trim());
-      setMessages((prev) => [...prev, newMessage]);
-      setDraft("");
+      const newMessage = await sendMessage(threadId, body);
+      setMessages((prev) => prev.map((message) => (
+        message.id === tempId
+          ? { ...newMessage, _localStatus: "sent" }
+          : message
+      )));
 
       if (typeof onMessageSent === "function") {
         onMessageSent(newMessage);
       }
     } catch (err) {
       console.error("Fehler beim Senden:", err);
+      setMessages((prev) => prev.filter((message) => message.id !== tempId));
+      setDraft(body);
       setError(err?.message || "Nachricht konnte nicht gesendet werden.");
     } finally {
       setSending(false);
@@ -148,6 +205,20 @@ export default function MessageThreadView({
 
   function isOwnMessage(message) {
     return currentUserId && message?.sender_user_id === currentUserId;
+  }
+
+
+  function getOwnMessageStatus(message) {
+    if (!message) return "";
+
+    if (message._localStatus === "sending") return "Wird gesendet";
+    const createdAt = message?.created_at ? new Date(message.created_at).getTime() : 0;
+
+    if (otherLastReadAt && createdAt && otherLastReadAt >= createdAt) {
+      return "Gelesen";
+    }
+
+    return "Gesendet";
   }
 
   if (!hasThread) {
@@ -269,7 +340,7 @@ export default function MessageThreadView({
                       textAlign: "right",
                     }}
                   >
-                    {formatTime(message.created_at)}
+                    {formatTime(message.created_at)}{own ? ` · ${getOwnMessageStatus(message)}` : ""}
                   </div>
                 </div>
               </div>
