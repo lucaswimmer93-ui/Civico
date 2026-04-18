@@ -125,6 +125,22 @@ export default function MessageThreadView({
           }
         }
       )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "message_read_status",
+          filter: `thread_id=eq.${threadId}`,
+        },
+        async () => {
+          try {
+            await refreshReadState();
+          } catch (err) {
+            console.error("Realtime Read-Update fehlgeschlagen:", err);
+          }
+        }
+      )
       .subscribe();
 
     return () => {
@@ -165,6 +181,17 @@ export default function MessageThreadView({
 
   function isOwnMessage(message) {
     return currentUserId && message?.sender_user_id === currentUserId;
+  }
+
+  function getOwnMessageStatus(message) {
+    if (!isOwnMessage(message)) return "";
+    if (
+      readState?.lastReadByOthersAt &&
+      readState.lastReadByOthersAt >= message.created_at
+    ) {
+      return "Gelesen";
+    }
+    return "Gesendet";
   }
 
   if (!hasThread) {
@@ -248,6 +275,7 @@ export default function MessageThreadView({
         ) : (
           messages.map((message) => {
             const own = isOwnMessage(message);
+            const status = getOwnMessageStatus(message);
 
             return (
               <div
@@ -287,9 +315,7 @@ export default function MessageThreadView({
                     }}
                   >
                     {formatTime(message.created_at)}
-                    {own
-                      ? ` • ${readState?.lastReadByOthersAt && readState.lastReadByOthersAt >= message.created_at ? "Gelesen" : "Gesendet"}`
-                      : ""}
+                    {own ? ` • ${status}` : ""}
                   </div>
                 </div>
               </div>
