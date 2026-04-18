@@ -2966,6 +2966,9 @@ function FreiwilligerProfil({
 function EinstellungenScreen({
   user,
   setUser,
+  setGemeindeId,
+  loadStellen,
+  loadVereine,
   onBack,
   onHome,
   logout,
@@ -3064,29 +3067,63 @@ function EinstellungenScreen({
       setError(t.klarname);
       return;
     }
+
     setLoading(true);
-    const { error: err } = await supabase
-      .from("freiwillige")
-      .update({ name, plz, umkreis, skills: selectedSkills, sprachen })
-      .eq("id", user.data.id);
-    setLoading(false);
-    if (err) {
-      setError(t.fehlerSpeichern);
-      return;
+
+    try {
+      const gemeinde = plz ? await getGemeindeByPlz(plz) : null;
+      const neueGemeindeId =
+        typeof gemeinde === "object" && gemeinde !== null
+          ? gemeinde.id ?? gemeinde.gemeinde_id ?? null
+          : gemeinde ?? null;
+
+      const { error: err } = await supabase
+        .from("freiwillige")
+        .update({
+          name,
+          plz,
+          gemeinde_id: neueGemeindeId,
+          umkreis,
+          skills: selectedSkills,
+          sprachen,
+        })
+        .eq("id", user.data.id);
+
+      if (err) throw err;
+
+      setUser((prev) => ({
+        ...prev,
+        data: {
+          ...prev.data,
+          name,
+          plz,
+          gemeinde_id: neueGemeindeId,
+          umkreis,
+          skills: selectedSkills,
+          sprachen,
+        },
+      }));
+
+      if (typeof setGemeindeId === "function") {
+        setGemeindeId(neueGemeindeId);
+      }
+
+      if (typeof loadStellen === "function") {
+        await loadStellen(neueGemeindeId, plz, umkreis);
+      }
+
+      if (typeof loadVereine === "function") {
+        await loadVereine(neueGemeindeId);
+      }
+
+      setError("");
+      showToast(t.profilGespeichert);
+    } catch (err) {
+      console.error("Profil speichern fehlgeschlagen:", err);
+      setError(err?.message || t.fehlerSpeichern);
     }
-    setUser((prev) => ({
-      ...prev,
-      data: {
-        ...prev.data,
-        name,
-        plz,
-        umkreis,
-        skills: selectedSkills,
-        sprachen,
-      },
-    }));
-    setError("");
-    showToast(t.profilGespeichert);
+
+    setLoading(false);
   };
 
   const handlePasswortAendern = async () => {
