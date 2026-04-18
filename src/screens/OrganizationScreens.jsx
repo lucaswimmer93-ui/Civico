@@ -1580,7 +1580,7 @@ function StelleErstellenScreen({ verein, onBack, onSave }) {
       ansprechpartner: ansprechpartner || null,
       kontakt_email: kontaktEmail || null,
       dringend,
-      gemeinde_id: verein.gemeinde_id,
+      gemeinde_id: verein.effective_gemeinde_id || verein.gemeinde_id || null,
     };
     const termineData = termine
       .filter((t) => t.datum)

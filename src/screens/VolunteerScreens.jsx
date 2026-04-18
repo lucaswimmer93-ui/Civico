@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { supabase, T, KATEGORIEN, SKILLS, MEDAILLEN, getSkillLabel, getKat, getMedaille, getNextMedaille, getMedailleName, IMPRESSUM_TEXT, DATENSCHUTZ_TEXT, AGB_TEXT, formatDate, getGemeindeByPlz, isKlarname, isTerminNochNichtGestartet, isTerminAktuell } from '../core/shared';
+import { supabase, T, KATEGORIEN, SKILLS, MEDAILLEN, getSkillLabel, getKat, getMedaille, getNextMedaille, getMedailleName, IMPRESSUM_TEXT, DATENSCHUTZ_TEXT, AGB_TEXT, formatDate, isKlarname, isTerminNochNichtGestartet, isTerminAktuell } from '../core/shared';
 import { Header, StelleCard, VereineListe, BottomBar, DatenschutzBox, Input, BigButton, Chip, InfoChip, SectionLabel, RoleCard, EmptyState, ErrorMsg } from '../components/ui';
 import MessageThreadView from '../components/messages/MessageThreadView';
 import { getMyTerminDirectThreads, getOrCreateTerminDirectThread, getOrCreateSupportThread } from '../services/messages';
@@ -3071,18 +3071,11 @@ function EinstellungenScreen({
     setLoading(true);
 
     try {
-      const gemeinde = plz ? await getGemeindeByPlz(plz) : null;
-      const neueGemeindeId =
-        typeof gemeinde === "object" && gemeinde !== null
-          ? gemeinde.id ?? gemeinde.gemeinde_id ?? null
-          : gemeinde ?? null;
-
       const { error: err } = await supabase
         .from("freiwillige")
         .update({
           name,
           plz,
-          gemeinde_id: neueGemeindeId,
           umkreis,
           skills: selectedSkills,
           sprachen,
@@ -3091,13 +3084,23 @@ function EinstellungenScreen({
 
       if (err) throw err;
 
+      const { data: freshProfile, error: freshProfileError } = await supabase
+        .from("freiwillige_mit_effective_gemeinde")
+        .select("*")
+        .eq("id", user.data.id)
+        .single();
+
+      if (freshProfileError) throw freshProfileError;
+
+      const neueGemeindeId = freshProfile?.effective_gemeinde_id || freshProfile?.gemeinde_id || null;
+
       setUser((prev) => ({
         ...prev,
         data: {
           ...prev.data,
+          ...(freshProfile || {}),
           name,
           plz,
-          gemeinde_id: neueGemeindeId,
           umkreis,
           skills: selectedSkills,
           sprachen,
