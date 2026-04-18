@@ -582,7 +582,13 @@ export async function markThreadAsRead(threadId) {
  * Read-Status des Gegenübers für einen Thread laden
  */
 export async function getThreadReadState(threadId) {
-  const actor = await getCurrentActor();
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+
+  if (userError) throw userError;
+  if (!user) return null;
 
   const { data, error } = await supabase
     .from("message_read_status")
@@ -591,7 +597,7 @@ export async function getThreadReadState(threadId) {
 
   if (error) throw error;
 
-  const others = (data || []).filter((row) => row.user_id !== actor.userId);
+  const others = (data || []).filter((row) => row.user_id !== user.id);
 
   const lastReadByOthersAt = others.reduce((latest, row) => {
     if (!row?.last_read_at) return latest;
@@ -600,7 +606,7 @@ export async function getThreadReadState(threadId) {
   }, null);
 
   return {
-    currentUserId: actor.userId,
+    currentUserId: user.id,
     lastReadByOthersAt,
   };
 }
