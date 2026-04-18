@@ -49,6 +49,20 @@ export default function MessageThreadView({
     setCurrentUserId(user?.id || null);
   }
 
+  async function refreshReadState() {
+    if (!threadId) {
+      setReadState(null);
+      return;
+    }
+
+    try {
+      const data = await getThreadReadState(threadId);
+      setReadState(data || null);
+    } catch (err) {
+      console.error("Fehler beim Laden des Read-Status:", err);
+    }
+  }
+
   async function loadMessages() {
     if (!threadId) return;
 
@@ -56,23 +70,14 @@ export default function MessageThreadView({
     setError("");
 
     try {
-      const [data, nextReadState] = await Promise.all([
-        getThreadMessages(threadId),
-        getThreadReadState(threadId),
-      ]);
-
+      const data = await getThreadMessages(threadId);
       setMessages(data || []);
-      setReadState(nextReadState || null);
+      await refreshReadState();
+      setLoading(false);
 
       markThreadAsRead(threadId)
         .then(async () => {
-          try {
-            const refreshedReadState = await getThreadReadState(threadId);
-            setReadState(refreshedReadState || null);
-          } catch (readErr) {
-            console.error("Fehler beim Aktualisieren des Read-Status:", readErr);
-          }
-
+          await refreshReadState();
           if (typeof onThreadRead === "function") {
             onThreadRead(threadId);
           }
@@ -83,7 +88,6 @@ export default function MessageThreadView({
     } catch (err) {
       console.error("Fehler beim Laden der Nachrichten:", err);
       setError(err?.message || "Nachrichten konnten nicht geladen werden.");
-    } finally {
       setLoading(false);
     }
   }
@@ -96,21 +100,6 @@ export default function MessageThreadView({
 
   useEffect(() => {
     loadMessages();
-  }, [threadId]);
-
-  useEffect(() => {
-    if (!threadId) {
-      setReadState(null);
-      return;
-    }
-
-    getThreadReadState(threadId)
-      .then((data) => {
-        setReadState(data || null);
-      })
-      .catch((err) => {
-        console.error("Fehler beim Laden des Thread-Read-Status:", err);
-      });
   }, [threadId]);
 
   useEffect(() => {
@@ -128,13 +117,9 @@ export default function MessageThreadView({
         },
         async () => {
           try {
-            const [data, nextReadState] = await Promise.all([
-              getThreadMessages(threadId),
-              getThreadReadState(threadId),
-            ]);
-
+            const data = await getThreadMessages(threadId);
             setMessages(data || []);
-            setReadState(nextReadState || null);
+            await refreshReadState();
           } catch (err) {
             console.error("Realtime-Update fehlgeschlagen:", err);
           }
@@ -165,13 +150,7 @@ export default function MessageThreadView({
       const newMessage = await sendMessage(threadId, draft.trim());
       setMessages((prev) => [...prev, newMessage]);
       setDraft("");
-
-      try {
-        const nextReadState = await getThreadReadState(threadId);
-        setReadState(nextReadState || null);
-      } catch (readErr) {
-        console.error("Fehler beim Laden des Read-Status nach dem Senden:", readErr);
-      }
+      await refreshReadState();
 
       if (typeof onMessageSent === "function") {
         onMessageSent(newMessage);
