@@ -235,8 +235,8 @@ export default function AdminApp() {
     setLoading(true);
     const [gemeindenRes, vereineRes, freiwilligeRes, stellenRes, einladungenRes] = await Promise.all([
       safeSelect('gemeinden', '*', (q) => q.order('created_at', { ascending: false })),
-      safeSelect('vereine', '*', (q) => q.order('created_at', { ascending: false })),
-      safeSelect('freiwillige', '*', (q) => q.order('created_at', { ascending: false })),
+      safeSelect('vereine_mit_effective_gemeinde', '*', (q) => q.order('created_at', { ascending: false })),
+      safeSelect('freiwillige_mit_effective_gemeinde', '*', (q) => q.order('created_at', { ascending: false })),
       safeSelect('stellen', '*, vereine(id, name, gemeinde_id), termine(id, datum, startzeit, endzeit, freie_plaetze, gesamt_plaetze, bewerbungen(id, freiwilliger_id, bestaetigt, nicht_erschienen))', (q) => q.order('created_at', { ascending: false })),
       safeSelect('verein_einladungen', '*', (q) => q.order('created_at', { ascending: false })),
     ]);

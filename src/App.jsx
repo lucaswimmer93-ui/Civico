@@ -14,7 +14,6 @@ import {
   DATENSCHUTZ_TEXT,
   AGB_TEXT,
   formatDate,
-  getGemeindeByPlz,
   isKlarname,
   isTerminNochNichtGestartet,
   isTerminAktuell,
@@ -327,6 +326,10 @@ console.log("set-password updateUser:", { updateData, updateError });
   );
 }
 
+const FREIWILLIGE_SOURCE = "freiwillige_mit_effective_gemeinde";
+const VEREINE_SOURCE = "vereine_mit_effective_gemeinde";
+const STELLEN_SOURCE = "stellen_mit_effective_gemeinde";
+
 export default function App() {
   const [lang, setLang] = useState("de");
   const t = T[lang];
@@ -514,12 +517,22 @@ export default function App() {
 
   const loadVereine = async (gemeinde_id = null) => {
     try {
+      const effectiveGemeindeId =
+        gemeinde_id ||
+        user?.data?.effective_gemeinde_id ||
+        user?.data?.gemeinde_id ||
+        null;
+
       let query = supabase
-        .from("vereine")
+        .from(VEREINE_SOURCE)
         .select("*")
         .order("name", { ascending: true });
 
-      if (gemeinde_id) query = query.eq("gemeinde_id", gemeinde_id);
+      if (effectiveGemeindeId) {
+        query = query
+          .eq("effective_gemeinde_id", effectiveGemeindeId)
+          .neq("zuordnungsstatus", "konflikt");
+      }
 
       const { data, error } = await query;
       if (error) throw error;
@@ -907,13 +920,13 @@ export default function App() {
       }
 
       let freiwilligeQuery = supabase
-        .from("freiwillige")
-        .select("id, push_token")
+        .from(FREIWILLIGE_SOURCE)
+        .select("id, push_token, effective_gemeinde_id")
         .in("id", erlaubteIds)
         .not("push_token", "is", null);
 
       if (zielGemeindeId) {
-        freiwilligeQuery = freiwilligeQuery.eq("gemeinde_id", zielGemeindeId);
+        freiwilligeQuery = freiwilligeQuery.eq("effective_gemeinde_id", zielGemeindeId).neq("zuordnungsstatus", "konflikt");
       }
 
       const { data: freiwilligeRows, error: freiwilligeError } = await freiwilligeQuery;
@@ -1176,18 +1189,50 @@ export default function App() {
 
 
 
+  const fetchStellenWithRelations = async ({ stelleIds = null } = {}) => {
+    let query = supabase
+      .from("stellen")
+      .select("*, vereine(*), termine(*, bewerbungen(*))")
+      .eq("archiviert", false)
+      .order("created_at", { ascending: false });
+
+    if (Array.isArray(stelleIds)) {
+      if (!stelleIds.length) return [];
+      query = query.in("id", stelleIds);
+    }
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    if (!Array.isArray(stelleIds) || !stelleIds.length) {
+      return data || [];
+    }
+
+    const orderMap = new Map(stelleIds.map((id, index) => [id, index]));
+    return (data || []).sort((a, b) => (orderMap.get(a.id) ?? 999999) - (orderMap.get(b.id) ?? 999999));
+  };
+
   const loadStellen = async (
     gemeinde_id = null,
     plz = null,
     umkreis = null
   ) => {
+    const effectivePlz = plz || (user?.type === "freiwilliger" ? user?.data?.plz : null) || null;
+    const effectiveUmkreis =
+      umkreis ?? (user?.type === "freiwilliger" ? user?.data?.umkreis : null) ?? null;
+    const effectiveGemeindeId =
+      gemeinde_id ||
+      user?.data?.effective_gemeinde_id ||
+      user?.data?.gemeinde_id ||
+      null;
+
     // Umkreisbasiert laden wenn PLZ + Umkreis vorhanden
-    if (plz && umkreis) {
+    if (effectivePlz && effectiveUmkreis) {
       try {
         const { data: plzData, error: plzError } = await supabase
           .from("plz_koordinaten")
           .select("lat, lng")
-          .eq("plz", plz)
+          .eq("plz", effectivePlz)
           .maybeSingle();
 
         if (plzError) {
@@ -1204,7 +1249,7 @@ export default function App() {
         const { data: ids, error: rpcError } = await supabase.rpc("stellen_in_umkreis", {
           user_lat: plzData.lat,
           user_lng: plzData.lng,
-          radius_km: umkreis,
+          radius_km: effectiveUmkreis,
         });
 
         if (rpcError) {
@@ -1213,33 +1258,11 @@ export default function App() {
           return;
         }
 
-        if (!ids || ids.length === 0) {
-          setStellen([]);
-          return;
-        }
-
-        const stelleIds = ids
+        const stelleIds = (ids || [])
           .map((r) => r.stelle_id || r.id || r)
           .filter(Boolean);
 
-        if (!stelleIds.length) {
-          setStellen([]);
-          return;
-        }
-
-        const { data, error } = await supabase
-          .from("stellen")
-          .select("*, vereine(*), termine(*, bewerbungen(*))")
-          .in("id", stelleIds)
-          .eq("archiviert", false)
-          .order("created_at", { ascending: false });
-
-        if (error) {
-          console.error("Stellen im Umkreis konnten nicht geladen werden:", error);
-          setStellen([]);
-          return;
-        }
-
+        const data = await fetchStellenWithRelations({ stelleIds });
         setStellen(data || []);
         return;
       } catch (e) {
@@ -1249,24 +1272,38 @@ export default function App() {
       }
     }
 
-    // Standard: alle Stellen oder nach Gemeinde
-    let query = supabase
-      .from("stellen")
-      .select("*, vereine(*), termine(*, bewerbungen(*))")
-      .eq("archiviert", false)
-      .order("created_at", { ascending: false });
-    if (gemeinde_id) query = query.eq("gemeinde_id", gemeinde_id);
-    const { data } = await query;
-    if (data) setStellen(data);
+    try {
+      if (effectiveGemeindeId) {
+        const { data: stelleRows, error: stelleViewError } = await supabase
+          .from(STELLEN_SOURCE)
+          .select("id")
+          .eq("effective_gemeinde_id", effectiveGemeindeId)
+          .neq("zuordnungsstatus", "konflikt")
+          .order("created_at", { ascending: false });
+
+        if (stelleViewError) throw stelleViewError;
+
+        const stelleIds = (stelleRows || []).map((row) => row.id).filter(Boolean);
+        const data = await fetchStellenWithRelations({ stelleIds });
+        setStellen(data || []);
+        return;
+      }
+
+      const data = await fetchStellenWithRelations();
+      setStellen(data || []);
+    } catch (error) {
+      console.error("STELLEN LADEN FEHLER:", error);
+      setStellen([]);
+    }
   };
 
   const reloadSelected = async (stelleId) => {
-    const { data } = await supabase
-      .from("stellen")
-      .select("*, vereine(*), termine(*, bewerbungen(*))")
-      .eq("id", stelleId)
-      .single();
-    if (data) setSelected(data);
+    try {
+      const data = await fetchStellenWithRelations({ stelleIds: [stelleId] });
+      if (data?.[0]) setSelected(data[0]);
+    } catch (error) {
+      console.error("Ausgewählte Stelle konnte nicht neu geladen werden:", error);
+    }
   };
 
   const autoArchivieren = async (vereinId) => {
@@ -1371,7 +1408,7 @@ export default function App() {
         const roleLoaders = {
           freiwilliger: async () => {
             const { data } = await supabase
-              .from("freiwillige")
+              .from(FREIWILLIGE_SOURCE)
               .select("*")
               .eq("auth_id", session.user.id)
               .maybeSingle();
@@ -1379,7 +1416,7 @@ export default function App() {
           },
           verein: async () => {
             const { data } = await supabase
-              .from("vereine")
+              .from(VEREINE_SOURCE)
               .select("*")
               .eq("auth_id", session.user.id)
               .maybeSingle();
@@ -1421,9 +1458,10 @@ export default function App() {
 
           if (resolvedUser.type === "freiwilliger") {
             const profil = resolvedUser.data;
-            setGemeindeId(profil.gemeinde_id);
-            loadStellen(profil.gemeinde_id, profil.plz, profil.umkreis);
-            loadVereine(profil.gemeinde_id);
+            const effectiveGemeindeId = profil.effective_gemeinde_id || profil.gemeinde_id || null;
+            setGemeindeId(effectiveGemeindeId);
+            loadStellen(effectiveGemeindeId, profil.plz, profil.umkreis);
+            loadVereine(effectiveGemeindeId);
             loadFollows(profil.id);
             loadNotifications(profil.auth_id);
             registerPush(profil.id);
@@ -1434,9 +1472,10 @@ export default function App() {
 
           if (resolvedUser.type === "verein") {
             const verein = resolvedUser.data;
-            setGemeindeId(verein.gemeinde_id);
-            loadStellen(verein.gemeinde_id);
-            loadVereine(verein.gemeinde_id);
+            const effectiveGemeindeId = verein.effective_gemeinde_id || verein.gemeinde_id || null;
+            setGemeindeId(effectiveGemeindeId);
+            loadStellen(effectiveGemeindeId);
+            loadVereine(effectiveGemeindeId);
             setScreen("dashboard");
             autoArchivieren(verein.id);
             loadVereinFollowers(verein.id);
@@ -2815,13 +2854,14 @@ export default function App() {
             }
             setStoredLastRole(type);
             setUser({ type, data });
-            setGemeindeId(gid);
+            const effectiveGemeindeId = data?.effective_gemeinde_id || data?.gemeinde_id || gid || null;
+            setGemeindeId(effectiveGemeindeId);
             if (type === "freiwilliger") {
-              loadStellen(gid, data?.plz, data?.umkreis);
+              loadStellen(effectiveGemeindeId, data?.plz, data?.umkreis);
             } else {
-              loadStellen(gid);
+              loadStellen(effectiveGemeindeId);
             }
-            loadVereine(gid);
+            loadVereine(effectiveGemeindeId);
             setHistory([]);
             if (type === "verein" || type === "organisation") {
               setScreen("dashboard");
