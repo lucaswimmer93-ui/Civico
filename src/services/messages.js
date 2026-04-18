@@ -558,7 +558,13 @@ export async function sendMessage(threadId, body) {
  * Read-Status setzen
  */
 export async function markThreadAsRead(threadId) {
-  const actor = await getCurrentActor();
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+
+  if (userError) throw userError;
+  if (!user) throw new Error("Kein eingeloggter User");
 
   const { error } = await supabase
     .from("message_read_status")
@@ -566,7 +572,7 @@ export async function markThreadAsRead(threadId) {
       [
         {
           thread_id: threadId,
-          user_id: actor.userId,
+          user_id: user.id,
           last_read_at: new Date().toISOString(),
         },
       ],
