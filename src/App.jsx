@@ -1184,44 +1184,80 @@ export default function App() {
     // Umkreisbasiert laden wenn PLZ + Umkreis vorhanden
     if (plz && umkreis) {
       try {
-        const { data: plzData } = await supabase
+        const { data: plzData, error: plzError } = await supabase
           .from("plz_koordinaten")
           .select("lat, lng")
           .eq("plz", plz)
           .maybeSingle();
-        if (plzData) {
-          const { data: ids } = await supabase.rpc("stellen_in_umkreis", {
-            lat: plzData.lat,
-            lng: plzData.lng,
-            radius_km: umkreis,
-          });
-          if (ids && ids.length > 0) {
-            const stelleIds = ids.map((r) => r.stelle_id || r.id || r);
-            const { data } = await supabase
-              .from("stellen")
-              .select("*, vereine(*), termine(*, bewerbungen(*))")
-              .in("id", stelleIds)
-              .order("created_at", { ascending: false });
-            if (data) {
-              setStellen(data);
-              return;
-            }
-          } else {
-            setStellen([]);
-            return;
-          }
+
+        if (plzError) {
+          console.error("PLZ-Koordinaten konnten nicht geladen werden:", plzError);
+          setStellen([]);
+          return;
         }
+
+        if (!plzData?.lat || !plzData?.lng) {
+          setStellen([]);
+          return;
+        }
+
+        const { data: ids, error: rpcError } = await supabase.rpc("stellen_in_umkreis", {
+          lat: plzData.lat,
+          lng: plzData.lng,
+          radius_km: umkreis,
+        });
+
+        if (rpcError) {
+          console.error("stellen_in_umkreis fehlgeschlagen:", rpcError);
+          setStellen([]);
+          return;
+        }
+
+        if (!ids || ids.length === 0) {
+          setStellen([]);
+          return;
+        }
+
+        const stelleIds = ids
+          .map((r) => r.stelle_id || r.id || r)
+          .filter(Boolean);
+
+        if (!stelleIds.length) {
+          setStellen([]);
+          return;
+        }
+
+        const { data, error } = await supabase
+          .from("stellen")
+          .select("*, vereine(*), termine(*, bewerbungen(*))")
+          .in("id", stelleIds)
+          .eq("archiviert", false)
+          .order("created_at", { ascending: false });
+
+        if (error) {
+          console.error("Stellen im Umkreis konnten nicht geladen werden:", error);
+          setStellen([]);
+          return;
+        }
+
+        setStellen(data || []);
+        return;
       } catch (e) {
-        /* fallback */
+        console.error("Umkreis-Logik fehlgeschlagen:", e);
+        setStellen([]);
+        return;
       }
     }
-    // Fallback: alle Stellen oder nach Gemeinde
+
+    // Standard: alle Stellen oder nach Gemeinde
     let query = supabase
       .from("stellen")
       .select("*, vereine(*), termine(*, bewerbungen(*))")
       .eq("archiviert", false)
       .order("created_at", { ascending: false });
+
     if (gemeinde_id) query = query.eq("gemeinde_id", gemeinde_id);
+
     const { data } = await query;
     if (data) setStellen(data);
   };
@@ -1447,13 +1483,28 @@ export default function App() {
         return prev;
       });
     };
+
+    const reloadCurrentStellenView = () => {
+      if (user?.type === "freiwilliger") {
+        loadStellen(gemeindeId, user?.data?.plz, user?.data?.umkreis);
+        return;
+      }
+
+      if (user?.type === "verein" || user?.type === "gemeinde") {
+        loadStellen(gemeindeId);
+        return;
+      }
+
+      loadStellen();
+    };
+
     const channel = supabase
       .channel("civico-realtime")
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "bewerbungen" },
         () => {
-          loadStellen();
+          reloadCurrentStellenView();
           reloadSelectedRealtime();
         }
       )
@@ -1461,15 +1512,16 @@ export default function App() {
         "postgres_changes",
         { event: "*", schema: "public", table: "termine" },
         () => {
-          loadStellen();
+          reloadCurrentStellenView();
           reloadSelectedRealtime();
         }
       )
       .subscribe();
+
     return () => {
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [user?.type, user?.data?.plz, user?.data?.umkreis, gemeindeId]);
 
   useEffect(() => {
     if (user?.type !== "verein" || !user?.data?.id) return;
@@ -1614,14 +1666,15 @@ export default function App() {
   // Filter
   const plzMatch = (s) => {
     if (!filterPlz || filterPlz.length < 2) return true;
+
     const input = filterPlz.toLowerCase().trim();
+
+    // Bei numerischer Eingabe keine Frontend-Umkreislogik mehr:
+    // Die echte Radiusprüfung läuft bereits in loadStellen() über die RPC.
     if (/^[0-9]+$/.test(input)) {
-      if (!s.plz) return true;
-      return (
-        Math.abs(parseInt(s.plz) - parseInt(input)) <=
-        Math.ceil(filterUmkreis / 10) * 10
-      );
+      return true;
     }
+
     return (s.ort || "").toLowerCase().includes(input);
   };
   const gefilterteStellen = stellen.filter(
@@ -2840,9 +2893,6 @@ export default function App() {
         <EinstellungenScreen
           user={user}
           setUser={setUser}
-          setGemeindeId={setGemeindeId}
-          loadStellen={loadStellen}
-          loadVereine={loadVereine}
           onBack={goBack}
           onHome={goHome}
           logout={logout}
