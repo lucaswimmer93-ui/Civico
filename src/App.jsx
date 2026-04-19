@@ -1297,6 +1297,22 @@ export default function App() {
     }
   };
 
+  const applyVolunteerRadiusSearch = async ({ nextPlz = null, nextRadius = null } = {}) => {
+    if (user?.type !== "freiwilliger") return;
+
+    const rawPlz = typeof nextPlz === "string" ? nextPlz : filterPlz;
+    const trimmedPlz = (rawPlz || "").trim();
+    const resolvedPlz = /^[0-9]{5}$/.test(trimmedPlz)
+      ? trimmedPlz
+      : user?.data?.plz || null;
+
+    const resolvedRadius = Number.isFinite(Number(nextRadius))
+      ? Number(nextRadius)
+      : Number(filterUmkreis ?? user?.data?.umkreis ?? 50);
+
+    await loadStellen(gemeindeId, resolvedPlz, resolvedRadius);
+  };
+
   const reloadSelected = async (stelleId) => {
     try {
       const data = await fetchStellenWithRelations({ stelleIds: [stelleId] });
@@ -1502,6 +1518,17 @@ export default function App() {
       }
     });
   }, []);
+
+  useEffect(() => {
+    if (user?.type === "freiwilliger") {
+      setFilterPlz(user?.data?.plz || "");
+      setFilterUmkreis(Number(user?.data?.umkreis) || 50);
+      return;
+    }
+
+    setFilterPlz("");
+    setFilterUmkreis(50);
+  }, [user?.type, user?.data?.plz, user?.data?.umkreis]);
 
   // Realtime subscription
   useEffect(() => {
@@ -2558,6 +2585,12 @@ export default function App() {
                       placeholder="PLZ oder Ort"
                       value={filterPlz}
                       onChange={(e) => setFilterPlz(e.target.value)}
+                      onBlur={() => applyVolunteerRadiusSearch({ nextPlz: filterPlz, nextRadius: filterUmkreis })}
+                      onKeyDown={async (e) => {
+                        if (e.key !== "Enter") return;
+                        e.preventDefault();
+                        await applyVolunteerRadiusSearch({ nextPlz: filterPlz, nextRadius: filterUmkreis });
+                      }}
                       style={{
                         flex: 1,
                         border: "none",
@@ -2570,7 +2603,13 @@ export default function App() {
                     />
                     {filterPlz && (
                       <span
-                        onClick={() => setFilterPlz("")}
+                        onClick={async () => {
+                          setFilterPlz(user?.type === "freiwilliger" ? user?.data?.plz || "" : "");
+                          await applyVolunteerRadiusSearch({
+                            nextPlz: user?.type === "freiwilliger" ? user?.data?.plz || "" : "",
+                            nextRadius: filterUmkreis,
+                          });
+                        }}
                         style={{
                           fontSize: 12,
                           color: "#8B7355",
@@ -2583,7 +2622,11 @@ export default function App() {
                   </div>
                   <select
                     value={filterUmkreis}
-                    onChange={(e) => setFilterUmkreis(parseInt(e.target.value))}
+                    onChange={async (e) => {
+                      const nextRadius = parseInt(e.target.value, 10);
+                      setFilterUmkreis(nextRadius);
+                      await applyVolunteerRadiusSearch({ nextPlz: filterPlz, nextRadius });
+                    }}
                     style={{
                       padding: "8px 10px",
                       borderRadius: 10,
