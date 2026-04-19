@@ -405,9 +405,9 @@ export default function App() {
   const [filterKat, setFilterKat] = useState(null);
   const [filterPlz, setFilterPlz] = useState("");
   const [filterUmkreis, setFilterUmkreis] = useState(50);
+  const [filterName, setFilterName] = useState("");
   const [activeVolunteerPlz, setActiveVolunteerPlz] = useState(null);
   const [activeVolunteerUmkreis, setActiveVolunteerUmkreis] = useState(null);
-  const [filterName, setFilterName] = useState("");
   const [toast, setToast] = useState(null);
   const [gemeindeId, setGemeindeId] = useState(null);
   const [terminWechselModus, setTerminWechselModus] = useState(false);
@@ -1008,32 +1008,6 @@ export default function App() {
     setTimeout(() => setToast(null), 3000);
   };
 
-  const runVolunteerRadiusSearch = async (rawPlz, rawUmkreis) => {
-    if (user?.type !== "freiwilliger") return;
-    const nextPlz = String(rawPlz || "").trim();
-    const nextUmkreis = Number(rawUmkreis);
-
-    if (!/^[0-9]{5}$/.test(nextPlz)) return;
-
-    setFilterPlz(nextPlz);
-    setFilterUmkreis(nextUmkreis);
-    setActiveVolunteerPlz(nextPlz);
-    setActiveVolunteerUmkreis(nextUmkreis);
-    await loadStellen(gemeindeId, nextPlz, nextUmkreis);
-  };
-
-  const resetVolunteerRadiusSearch = async () => {
-    if (user?.type !== "freiwilliger") return;
-    const fallbackPlz = user?.data?.plz || null;
-    const fallbackUmkreis = user?.data?.umkreis ?? 50;
-
-    setFilterPlz("");
-    setFilterUmkreis(fallbackUmkreis);
-    setActiveVolunteerPlz(fallbackPlz);
-    setActiveVolunteerUmkreis(fallbackUmkreis);
-    await loadStellen(gemeindeId, fallbackPlz, fallbackUmkreis);
-  };
-
   const hasRealRoleSession = (expectedRole) => {
     if (!user?.type || user.type !== expectedRole) return false;
     const data = user?.data || {};
@@ -1261,11 +1235,6 @@ export default function App() {
       null;
 
     // Umkreisbasiert laden wenn PLZ + Umkreis vorhanden
-    if (user?.type === "freiwilliger") {
-      setActiveVolunteerPlz(effectivePlz || null);
-      setActiveVolunteerUmkreis(effectiveUmkreis ?? null);
-    }
-
     if (effectivePlz && effectiveUmkreis) {
       try {
         const { data: plzData, error: plzError } = await supabase
@@ -1335,6 +1304,49 @@ export default function App() {
       setStellen([]);
     }
   };
+
+  const executeVolunteerRadiusSearch = async ({ nextPlz, nextUmkreis, fallbackToProfile = false } = {}) => {
+    if (user?.type !== "freiwilliger") return;
+
+    const normalizedPlz = (nextPlz ?? filterPlz ?? "").trim();
+    const radius = Number(nextUmkreis ?? filterUmkreis ?? user?.data?.umkreis ?? 50);
+
+    if (fallbackToProfile) {
+      const profilePlz = user?.data?.plz || "";
+      const profileRadius = Number(user?.data?.umkreis ?? 50);
+      setFilterPlz(profilePlz);
+      setFilterUmkreis(profileRadius);
+      setActiveVolunteerPlz(profilePlz || null);
+      setActiveVolunteerUmkreis(profileRadius);
+      await loadStellen(gemeindeId, profilePlz || null, profileRadius);
+      return;
+    }
+
+    if (/^[0-9]{5}$/.test(normalizedPlz)) {
+      setActiveVolunteerPlz(normalizedPlz);
+      setActiveVolunteerUmkreis(radius);
+      await loadStellen(gemeindeId, normalizedPlz, radius);
+      return;
+    }
+
+    const profilePlz = user?.data?.plz || null;
+    const profileRadius = Number(user?.data?.umkreis ?? 50);
+    setActiveVolunteerPlz(profilePlz);
+    setActiveVolunteerUmkreis(radius);
+    await loadStellen(gemeindeId, profilePlz, radius);
+  };
+
+  useEffect(() => {
+    if (user?.type !== "freiwilliger") return;
+
+    const profilePlz = user?.data?.plz || "";
+    const profileRadius = Number(user?.data?.umkreis ?? 50);
+
+    setFilterPlz((prev) => (prev && prev.trim().length > 0 ? prev : profilePlz));
+    setFilterUmkreis((prev) => (Number.isFinite(Number(prev)) ? Number(prev) : profileRadius));
+    setActiveVolunteerPlz((prev) => prev || profilePlz || null);
+    setActiveVolunteerUmkreis((prev) => (prev ?? profileRadius));
+  }, [user?.type, user?.data?.plz, user?.data?.umkreis]);
 
   const reloadSelected = async (stelleId) => {
     try {
@@ -1499,9 +1511,10 @@ export default function App() {
             const profil = resolvedUser.data;
             const effectiveGemeindeId = profil.effective_gemeinde_id || profil.gemeinde_id || null;
             setGemeindeId(effectiveGemeindeId);
-            setFilterUmkreis(profil.umkreis || 50);
             setActiveVolunteerPlz(profil.plz || null);
             setActiveVolunteerUmkreis(profil.umkreis ?? 50);
+            setFilterPlz(profil.plz || "");
+            setFilterUmkreis(profil.umkreis ?? 50);
             loadStellen(effectiveGemeindeId, profil.plz, profil.umkreis);
             loadVereine(effectiveGemeindeId);
             loadFollows(profil.id);
@@ -1565,7 +1578,11 @@ export default function App() {
 
     const reloadCurrentStellenView = () => {
       if (user?.type === "freiwilliger") {
-        loadStellen(gemeindeId, activeVolunteerPlz || user?.data?.plz, activeVolunteerUmkreis ?? user?.data?.umkreis);
+        loadStellen(
+          gemeindeId,
+          activeVolunteerPlz || user?.data?.plz,
+          activeVolunteerUmkreis ?? user?.data?.umkreis
+        );
         return;
       }
 
@@ -1740,11 +1757,6 @@ export default function App() {
     };
   }, [user?.type, user?.data?.id, user?.data?.auth_id]);
 
-  useEffect(() => {
-    if (user?.type !== "freiwilliger") return;
-    setFilterUmkreis(activeVolunteerUmkreis ?? user?.data?.umkreis ?? 50);
-  }, [user?.type, user?.data?.umkreis, activeVolunteerUmkreis]);
-
 
   // Filter
   const plzMatch = (s) => {
@@ -1896,7 +1908,7 @@ export default function App() {
           }
         }
       }
-      await loadStellen(gemeindeId, activeVolunteerPlz || user?.data?.plz, activeVolunteerUmkreis ?? user?.data?.umkreis);
+      await loadStellen(gemeindeId, user?.data?.plz, user?.data?.umkreis);
       await reloadSelected(stelleId);
     } catch (err) {
       showToast("Fehler beim Buchen.", "#E85C5C");
@@ -1908,7 +1920,7 @@ export default function App() {
     await supabase.rpc("increment_plaetze", { termin_id: alterTerminId });
     setTerminWechselModus(true);
     showToast("Wähle einen neuen Termin →");
-    await loadStellen(gemeindeId, activeVolunteerPlz || user?.data?.plz, activeVolunteerUmkreis ?? user?.data?.umkreis);
+    await loadStellen(gemeindeId, user?.data?.plz, user?.data?.umkreis);
     if (selected?.id) await reloadSelected(selected.id);
   };
 
@@ -2057,7 +2069,7 @@ export default function App() {
           }
         }
       }
-      await loadStellen(gemeindeId, activeVolunteerPlz || user?.data?.plz, activeVolunteerUmkreis ?? user?.data?.umkreis);
+      await loadStellen(gemeindeId, user?.data?.plz, user?.data?.umkreis);
       if (selected?.id) await reloadSelected(selected.id);
       goBack();
     } catch (err) {
@@ -2147,7 +2159,7 @@ export default function App() {
       erschienen ? "#3A7D44" : "#E85C5C"
     );
 
-    await loadStellen(gemeindeId, activeVolunteerPlz || user?.data?.plz, activeVolunteerUmkreis ?? user?.data?.umkreis);
+    await loadStellen(gemeindeId, user?.data?.plz, user?.data?.umkreis);
   };
 
   const openDetail = async (stelle) => {
@@ -2606,17 +2618,13 @@ export default function App() {
                       value={filterPlz}
                       onChange={(e) => setFilterPlz(e.target.value)}
                       onKeyDown={async (e) => {
-                        if (e.key !== "Enter") return;
-                        const value = String(filterPlz || "").trim();
-                        if (/^[0-9]{5}$/.test(value)) {
-                          await runVolunteerRadiusSearch(value, filterUmkreis);
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          await executeVolunteerRadiusSearch({ nextPlz: e.currentTarget.value, nextUmkreis: filterUmkreis });
                         }
                       }}
-                      onBlur={async () => {
-                        const value = String(filterPlz || "").trim();
-                        if (/^[0-9]{5}$/.test(value)) {
-                          await runVolunteerRadiusSearch(value, filterUmkreis);
-                        }
+                      onBlur={async (e) => {
+                        await executeVolunteerRadiusSearch({ nextPlz: e.currentTarget.value, nextUmkreis: filterUmkreis });
                       }}
                       style={{
                         flex: 1,
@@ -2630,12 +2638,8 @@ export default function App() {
                     />
                     {filterPlz && (
                       <span
-                        onClick={() => {
-                          if (user?.type === "freiwilliger") {
-                            resetVolunteerRadiusSearch();
-                          } else {
-                            setFilterPlz("");
-                          }
+                        onClick={async () => {
+                          await executeVolunteerRadiusSearch({ fallbackToProfile: true });
                         }}
                         style={{
                           fontSize: 12,
@@ -2652,18 +2656,7 @@ export default function App() {
                     onChange={async (e) => {
                       const nextRadius = parseInt(e.target.value, 10);
                       setFilterUmkreis(nextRadius);
-                      if (user?.type !== "freiwilliger") return;
-
-                      const numericSearch = String(filterPlz || "").trim();
-                      const nextPlz = /^[0-9]{5}$/.test(numericSearch)
-                        ? numericSearch
-                        : (activeVolunteerPlz || user?.data?.plz || null);
-
-                      if (!nextPlz) return;
-
-                      setActiveVolunteerPlz(nextPlz);
-                      setActiveVolunteerUmkreis(nextRadius);
-                      await loadStellen(gemeindeId, nextPlz, nextRadius);
+                      await executeVolunteerRadiusSearch({ nextPlz: filterPlz, nextUmkreis: nextRadius });
                     }}
                     style={{
                       padding: "8px 10px",
@@ -2938,9 +2931,6 @@ export default function App() {
             const effectiveGemeindeId = data?.effective_gemeinde_id || data?.gemeinde_id || gid || null;
             setGemeindeId(effectiveGemeindeId);
             if (type === "freiwilliger") {
-              setFilterUmkreis(data?.umkreis || 50);
-              setActiveVolunteerPlz(data?.plz || null);
-              setActiveVolunteerUmkreis(data?.umkreis ?? 50);
               loadStellen(effectiveGemeindeId, data?.plz, data?.umkreis);
             } else {
               loadStellen(effectiveGemeindeId);
@@ -2958,6 +2948,10 @@ export default function App() {
               setScreen("home");
             }
             if (type === "freiwilliger") {
+              setActiveVolunteerPlz(data?.plz || null);
+              setActiveVolunteerUmkreis(data?.umkreis ?? 50);
+              setFilterPlz(data?.plz || "");
+              setFilterUmkreis(data?.umkreis ?? 50);
               loadFollows(data.id);
               loadNotifications(data.auth_id);
               registerPush(data.id);
