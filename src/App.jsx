@@ -3598,11 +3598,6 @@ export default function App() {
                   ort: stelleData?.ort ?? "",
                   plz: stelleData?.plz ?? "",
                   status: stelleData?.status ?? "aktiv",
-                  gesamt_plaetze:
-                    stelleData?.gesamt_plaetze === "" ||
-                    stelleData?.gesamt_plaetze == null
-                      ? null
-                      : Number(stelleData.gesamt_plaetze),
                   updated_at: new Date().toISOString(),
                 };
 
