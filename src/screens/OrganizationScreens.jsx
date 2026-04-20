@@ -213,7 +213,7 @@ function VereinDashboard({
               border: "none",
               color: "#8B7355",
               fontSize: 13,
-              cursor: "pointer",
+              cursor: user?.data?.verifiziert === false ? "not-allowed" : "pointer",
               fontFamily: "inherit",
             }}
           >
@@ -414,7 +414,7 @@ function VereinDashboard({
           </button>
           <button
             onClick={() => {
-              if (!user.data.verifiziert) {
+              if (user?.data?.verifiziert === false) {
                 showToast(
                   "Dein Verein muss erst freigeschaltet werden.",
                   "#E8A87C"
@@ -428,7 +428,7 @@ function VereinDashboard({
               padding: "12px",
               borderRadius: 12,
               border: "none",
-              background: user.data.verifiziert
+              background: user?.data?.verifiziert === true
                 ? "linear-gradient(135deg, #2C2416, #4A3C28)"
                 : "#C4B89A",
               color: "#F4F0E8",
@@ -457,7 +457,7 @@ function VereinDashboard({
             👤 Profil
           </button>
         </div>
-        {!user.data.verifiziert && (
+        {user?.data?.verifiziert === false && (
           <div
             style={{
               background: "#FFF8E8",
@@ -584,7 +584,7 @@ function VereinDashboard({
                             color: s.warteliste.length >= 3 ? "#B53A2D" : "#A05A2C",
                           }}
                         >
-                          📋 {s.warteliste.length} auf Warteliste
+                          📋 {s.warteliste.length} in der Warteliste
                         </div>
                       )}
                       <div style={{ fontSize: 12, color: "#8B7355", marginTop: 4 }}>
@@ -974,7 +974,7 @@ function VereinStelleDetail({
                 color: stelle.warteliste.length >= 3 ? "#B53A2D" : "#A05A2C",
               }}
             >
-              📋 {stelle.warteliste.length} auf Warteliste
+              📋 {stelle.warteliste.length} in der Warteliste
             </div>
           )}
           <div style={{ fontSize: 13, color: "#8B7355", marginTop: 4 }}>
@@ -1038,7 +1038,7 @@ function VereinStelleDetail({
                     marginBottom: 10,
                   }}
                 >
-                  📋 {wartelisten[t.id].length} auf Warteliste
+                  📋 {wartelisten[t.id].length} in der Warteliste
                 </div>
               )}
 
