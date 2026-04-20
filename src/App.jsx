@@ -734,8 +734,8 @@ export default function App() {
         stelle_id: stelleId,
         termin_id: terminId,
         freiwilliger_id: user.data.id,
-        freiwilliger_name: user.data.name || null,
-        freiwilliger_email: user.data.email || null,
+        name: user.data.name || null,
+        email: user.data.email || null,
         position,
       };
 
@@ -1988,8 +1988,8 @@ export default function App() {
           p_stelle_id: nextOnList.stelle_id,
           p_termin_id: terminId,
           p_freiwilliger_id: nextOnList.freiwilliger_id,
-          p_name: nextOnList.freiwilliger_name,
-          p_email: nextOnList.freiwilliger_email,
+          p_name: nextOnList.name || nextOnList.freiwilliger_name,
+          p_email: nextOnList.email || nextOnList.freiwilliger_email,
         });
         if (erfolg) {
           // Freiwilligen benachrichtigen
@@ -2033,7 +2033,7 @@ export default function App() {
               .insert({
                 verein_id: selected.verein_id,
                 titel: "🔄 Warteliste nachgerückt",
-                text: `${nextOnList.freiwilliger_name || nextOnList.name || "Jemand"} ist automatisch von der Warteliste nachgerückt.`,
+                text: `${nextOnList.name || nextOnList.freiwilliger_name || "Jemand"} ist automatisch von der Warteliste nachgerückt.`,
                 typ: "warteliste",
                 gelesen: false,
               })
@@ -2043,7 +2043,7 @@ export default function App() {
               vereinId: selected.verein_id,
               notificationType: "warteliste",
               title: "🔄 Warteliste nachgerückt",
-              body: `${nextOnList.freiwilliger_name || nextOnList.name || "Jemand"} ist automatisch von der Warteliste nachgerückt.`,
+              body: `${nextOnList.name || nextOnList.freiwilliger_name || "Jemand"} ist automatisch von der Warteliste nachgerückt.`,
               url: "/",
             });
           }
@@ -3205,8 +3205,8 @@ export default function App() {
                   p_stelle_id: nextOnList.stelle_id,
                   p_termin_id: terminId,
                   p_freiwilliger_id: nextOnList.freiwilliger_id,
-                  p_name: nextOnList.freiwilliger_name || nextOnList.name || null,
-                  p_email: nextOnList.freiwilliger_email || nextOnList.email || null,
+                  p_name: nextOnList.name || nextOnList.freiwilliger_name || null,
+                  p_email: nextOnList.email || nextOnList.freiwilliger_email || null,
                 });
 
                 if (erfolg) {
