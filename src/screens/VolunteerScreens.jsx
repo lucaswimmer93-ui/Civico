@@ -755,14 +755,22 @@ function DetailScreen({
                 ) : user && user?.type !== "verein" ? (
                   <button
                     onClick={async () => {
-                      if (isOnWaitlist) return;
+                      if (isOnWaitlist) {
+                        if (!onWartelisteRemove) return;
+                        await onWartelisteRemove(stelle.id, t.id);
+                        setDetailWaitlistTerminIds((prev) =>
+                          prev.filter(id => id !== t.id)
+                        );
+                        return;
+                      }
+
                       if (!onWarteliste) return;
                       await onWarteliste(stelle.id, t.id);
                       setDetailWaitlistTerminIds((prev) =>
                         prev.includes(t.id) ? prev : [...prev, t.id]
                       );
                     }}
-                    disabled={isOnWaitlist}
+                    
                     style={{
                       width: "100%",
                       padding: "10px",
@@ -777,7 +785,7 @@ function DetailScreen({
                       opacity: isOnWaitlist ? 0.95 : 1,
                     }}
                   >
-                    {isOnWaitlist ? "📋 Du bist auf der Warteliste" : "📋 Auf die Warteliste"}
+                    {isOnWaitlist ? "❌ Von Warteliste entfernen" : "📋 Auf die Warteliste"}
                   </button>
                 ) : null}
               </div>
