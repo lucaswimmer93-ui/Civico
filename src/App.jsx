@@ -2922,6 +2922,7 @@ export default function App() {
           follows={follows}
           onToggleFollowKat={toggleFollowKategorie}
           onWarteliste={handleWarteliste}
+            onWartelisteRemove={handleWartelisteRemove}
         />
       )}
 
