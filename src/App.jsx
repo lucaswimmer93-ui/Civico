@@ -693,6 +693,31 @@ export default function App() {
   };
 
   // ── Warteliste ─────────────────────────────────────────────────────────────
+  const handleWartelisteRemove = async (stelleId, terminId) => {
+    if (!user?.data?.id) return;
+
+    try {
+      const { error } = await supabase
+        .from("warteliste")
+        .delete()
+        .eq("termin_id", terminId)
+        .eq("freiwilliger_id", user.data.id);
+
+      if (error) {
+        console.error("WARTELISTE DELETE FEHLER:", error);
+        showToast("Fehler beim Entfernen von der Warteliste.", "#E85C5C");
+        return;
+      }
+
+      showToast("Du wurdest von der Warteliste entfernt.", "#E8A87C");
+      await loadStellen(gemeindeId, user?.data?.plz, user?.data?.umkreis);
+      if (selected?.id) await reloadSelected(selected.id);
+    } catch (err) {
+      console.error("WARTELISTE REMOVE FEHLER:", err);
+      showToast("Fehler beim Entfernen von der Warteliste.", "#E85C5C");
+    }
+  };
+
   const handleWarteliste = async (stelleId, terminId) => {
     if (!user) {
       navigateTo("login");
