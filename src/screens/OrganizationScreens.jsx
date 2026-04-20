@@ -574,6 +574,17 @@ function VereinDashboard({
                     >
                       <div style={{ fontWeight: "bold", fontSize: 14 }}>
                         {s.titel}
+            {((s?.warteliste?.length || 0) > 0) && (
+              <div style={{
+                marginTop: 6,
+                fontSize: 12,
+                fontWeight: "bold",
+                color: (s.warteliste.length >= 3) ? "#B53A2D" : "#A05A2C"
+              }}>
+                📋 {s.warteliste.length} auf Warteliste
+              </div>
+            )}
+
                       </div>
                       <div style={{ fontSize: 12, color: "#8B7355", marginTop: 4 }}>
                         📍 {s.ort} · 👥 {gesamtAnmeldungen} Anmeldungen · 👁️ {s.aufrufe || 0} Aufrufe
@@ -952,7 +963,18 @@ function VereinStelleDetail({
             border: "1px solid #E0D8C8",
           }}
         >
-          <div style={{ fontSize: 18, fontWeight: "bold" }}>{stelle.titel}</div>
+          <div style={{ fontSize: 18, fontWeight: "bold" }}>{stelle.titel}
+            {((s?.warteliste?.length || 0) > 0) && (
+              <div style={{
+                marginTop: 6,
+                fontSize: 12,
+                fontWeight: "bold",
+                color: (s.warteliste.length >= 3) ? "#B53A2D" : "#A05A2C"
+              }}>
+                📋 {s.warteliste.length} auf Warteliste
+              </div>
+            )}
+</div>
           <div style={{ fontSize: 13, color: "#8B7355", marginTop: 4 }}>
             {stelle.ort} · 👁️ {stelle.aufrufe || 0} Aufrufe
           </div>
@@ -1877,6 +1899,17 @@ function StelleErstellenScreen({ verein, onBack, onSave }) {
                 <input
                   type="date"
                   value={t.datum}
+            {((t?.warteliste?.length || 0) > 0) && (
+              <div style={{
+                marginTop: 4,
+                fontSize: 11,
+                color: "#E8A87C",
+                fontWeight: "bold"
+              }}>
+                📋 {t.warteliste.length} Warteliste
+              </div>
+            )}
+
                   onChange={(e) => updateTermin(i, "datum", e.target.value)}
                   style={{
                     flex: 2,
@@ -2914,7 +2947,18 @@ function StelleBearbeitenScreen({ stelle, verein, onBack, onSave }) {
                         weekday: "short",
                         day: "2-digit",
                         month: "2-digit",
-                      })}`
+                      }
+            {((t?.warteliste?.length || 0) > 0) && (
+              <div style={{
+                marginTop: 4,
+                fontSize: 11,
+                color: "#E8A87C",
+                fontWeight: "bold"
+              }}>
+                📋 {t.warteliste.length} Warteliste
+              </div>
+            )}
+)}`
                     : "Neuer Termin"}
                   {t.absagen && " – WIRD ABGESAGT"}
                 </div>
@@ -2939,6 +2983,17 @@ function StelleBearbeitenScreen({ stelle, verein, onBack, onSave }) {
                   <input
                     type="date"
                     value={t.datum}
+            {((t?.warteliste?.length || 0) > 0) && (
+              <div style={{
+                marginTop: 4,
+                fontSize: 11,
+                color: "#E8A87C",
+                fontWeight: "bold"
+              }}>
+                📋 {t.warteliste.length} Warteliste
+              </div>
+            )}
+
                     onChange={(e) => updateTermin(i, "datum", e.target.value)}
                     style={{
                       width: "100%",
@@ -3707,6 +3762,17 @@ function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
                   >
                     <div style={{ fontSize: 18, fontWeight: "bold", color: "#2C2416", marginBottom: 10 }}>
                       {stelle.titel}
+            {((s?.warteliste?.length || 0) > 0) && (
+              <div style={{
+                marginTop: 6,
+                fontSize: 12,
+                fontWeight: "bold",
+                color: (s.warteliste.length >= 3) ? "#B53A2D" : "#A05A2C"
+              }}>
+                📋 {s.warteliste.length} auf Warteliste
+              </div>
+            )}
+
                     </div>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
                       <span style={{ fontSize: 11, background: "#EDE8DE", padding: "3px 8px", borderRadius: 6, color: "#5B9BD5" }}>

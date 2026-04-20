@@ -236,6 +236,7 @@ function DetailScreen({
   follows,
   onToggleFollowKat,
   onWarteliste,
+  onWartelisteRemove,
 }) {
   const kat = getKat(stelle.kategorie);
   const lang = "de";
@@ -755,22 +756,14 @@ function DetailScreen({
                 ) : user && user?.type !== "verein" ? (
                   <button
                     onClick={async () => {
-                      if (isOnWaitlist) {
-                        if (!onWartelisteRemove) { console.warn('Remove handler fehlt'); return; }
-                        await (onWartelisteRemove ? onWartelisteRemove : async ()=>{})(stelle.id, t.id);
-                        setDetailWaitlistTerminIds((prev) =>
-                          prev.filter(id => id !== t.id)
-                        );
-                        return;
-                      }
-
+                      if (isOnWaitlist) return;
                       if (!onWarteliste) return;
                       await onWarteliste(stelle.id, t.id);
                       setDetailWaitlistTerminIds((prev) =>
                         prev.includes(t.id) ? prev : [...prev, t.id]
                       );
                     }}
-                    
+                    disabled={isOnWaitlist}
                     style={{
                       width: "100%",
                       padding: "10px",
@@ -2286,6 +2279,7 @@ function FreiwilligerProfil({
   follows = { vereine: [], kategorien: [] },
   onToggleFollow,
   onVereinClick,
+  onWartelisteRemove,
 }) {
   const [terminWechselStelle, setTerminWechselStelle] = useState(null);
   const [meineWarteliste, setMeineWarteliste] = useState([]);
@@ -2296,15 +2290,47 @@ function FreiwilligerProfil({
   const jetzt = new Date();
 
   useEffect(() => {
+    let active = true;
+
     supabase
       .from("warteliste")
-      .select("*")
+      .select(`
+        id,
+        position,
+        created_at,
+        termin_id,
+        stelle_id,
+        termine:termin_id (
+          id,
+          datum,
+          startzeit,
+          endzeit
+        ),
+        stellen:stelle_id (
+          id,
+          titel,
+          ort,
+          vereine (
+            name
+          )
+        )
+      `)
       .eq("freiwilliger_id", user.data.id)
       .order("created_at", { ascending: true })
-      .then(({ data }) => {
-        if (data) setMeineWarteliste(data);
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (error) {
+          console.error("MEINE WARTELISTE LADEN FEHLER:", error);
+          setMeineWarteliste([]);
+          return;
+        }
+        setMeineWarteliste(data || []);
       });
-  }, []);
+
+    return () => {
+      active = false;
+    };
+  }, [user.data.id]);
 
 
   useEffect(() => {
@@ -2765,6 +2791,103 @@ function FreiwilligerProfil({
             </div>
           </div>
         )}
+
+        {/* Meine Warteliste */}
+        <div
+          style={{
+            background: "#FAF7F2",
+            borderRadius: 14,
+            padding: "16px",
+            marginBottom: 14,
+            border: "1px solid #E0D8C8",
+          }}
+        >
+          <div
+            style={{
+              fontSize: 11,
+              color: "#8B7355",
+              letterSpacing: 2,
+              textTransform: "uppercase",
+              marginBottom: 10,
+            }}
+          >
+            Meine Warteliste
+          </div>
+
+          {meineWarteliste.length === 0 ? (
+            <div style={{ fontSize: 13, color: "#8B7355" }}>
+              Du stehst aktuell auf keiner Warteliste.
+            </div>
+          ) : (
+            meineWarteliste.map((w) => {
+              const termin = w.termine || {};
+              const stelle = w.stellen || {};
+              const vereinName = stelle?.vereine?.name || "Verein";
+              return (
+                <div
+                  key={w.id}
+                  style={{
+                    borderTop: "1px solid #F0EBE0",
+                    padding: "12px 0",
+                  }}
+                >
+                  <div style={{ fontSize: 14, fontWeight: "bold", color: "#2C2416" }}>
+                    {stelle.titel || "Stelle"}
+                  </div>
+                  <div style={{ fontSize: 12, color: "#8B7355", marginTop: 2 }}>
+                    {vereinName}
+                    {stelle.ort ? ` · ${stelle.ort}` : ""}
+                  </div>
+                  <div style={{ fontSize: 12, color: "#5C4A2A", marginTop: 6 }}>
+                    📅 {termin?.datum ? formatDate(termin.datum) : "Termin offen"}
+                    {termin?.startzeit ? ` · ${termin.startzeit}` : ""}
+                    {termin?.endzeit ? ` – ${termin.endzeit}` : ""}
+                  </div>
+                  <div
+                    style={{
+                      marginTop: 8,
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                      padding: "6px 10px",
+                      borderRadius: 999,
+                      background: "#F6EFE4",
+                      color: "#8B5E34",
+                      fontSize: 12,
+                      fontWeight: "bold",
+                    }}
+                  >
+                    📋 Platz {w.position} auf der Warteliste
+                  </div>
+                  <div style={{ fontSize: 12, color: "#8B7355", marginTop: 8 }}>
+                    Status: Wartend
+                  </div>
+                  <button
+                    onClick={async () => {
+                      if (!onWartelisteRemove) return;
+                      await onWartelisteRemove(w.stelle_id, w.termin_id);
+                      setMeineWarteliste((prev) => prev.filter((item) => item.id !== w.id));
+                    }}
+                    style={{
+                      marginTop: 10,
+                      padding: "8px 12px",
+                      borderRadius: 10,
+                      border: "1px solid #E85C5C",
+                      background: "transparent",
+                      color: "#E85C5C",
+                      fontSize: 12,
+                      fontFamily: "inherit",
+                      fontWeight: "bold",
+                      cursor: "pointer",
+                    }}
+                  >
+                    ❌ Von Warteliste entfernen
+                  </button>
+                </div>
+              );
+            })
+          )}
+        </div>
 
         {/* Alle Aktionen (inkl. vergangene) */}
         <div
