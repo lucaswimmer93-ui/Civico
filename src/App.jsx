@@ -693,6 +693,39 @@ export default function App() {
   };
 
   // ── Warteliste ─────────────────────────────────────────────────────────────
+  const handleWarteliste = async (stelleId, terminId) => {
+    if (!user) {
+      navigateTo("login");
+      return;
+    }
+    const { data: existing } = await supabase
+      .from("warteliste")
+      .select("id, position")
+      .eq("termin_id", terminId)
+      .eq("freiwilliger_id", user.data.id)
+      .maybeSingle();
+    if (existing) {
+      showToast(`Wartelistenplatz ${existing.position}`, "#E8A87C");
+      return;
+    }
+    const { count } = await supabase
+      .from("warteliste")
+      .select("id", { count: "exact", head: true })
+      .eq("termin_id", terminId);
+    const position = (count || 0) + 1;
+    await supabase.from("warteliste").insert({
+      stelle_id: stelleId,
+      termin_id: terminId,
+      freiwilliger_id: user.data.id,
+      name: user.data.name,
+      email: user.data.email,
+      position,
+    });
+    showToast(`✓ Wartelistenplatz ${position}`, "#E8A87C");
+    await loadStellen(gemeindeId, user.data.plz, user.data.umkreis);
+  };
+
+
   const handleWartelisteRemove = async (stelleId, terminId) => {
     if (!user?.data?.id) return;
 
@@ -712,78 +745,9 @@ export default function App() {
       showToast("Du wurdest von der Warteliste entfernt.", "#E8A87C");
       await loadStellen(gemeindeId, user?.data?.plz, user?.data?.umkreis);
       if (selected?.id) await reloadSelected(selected.id);
-    } catch (err) {
-      console.error("WARTELISTE REMOVE FEHLER:", err);
-      showToast("Fehler beim Entfernen von der Warteliste.", "#E85C5C");
-    }
-  };
-
-  const handleWarteliste = async (stelleId, terminId) => {
-    if (!user) {
-      navigateTo("login");
-      return;
-    }
-
-    try {
-      const { data: existing, error: existingError } = await supabase
-        .from("warteliste")
-        .select("id, position")
-        .eq("termin_id", terminId)
-        .eq("freiwilliger_id", user.data.id)
-        .maybeSingle();
-
-      if (existingError) {
-        console.error("WARTELISTE CHECK FEHLER:", existingError);
-        showToast("Fehler beim Prüfen der Warteliste.", "#E85C5C");
-        return;
-      }
-
-      if (existing) {
-        showToast(`Wartelistenplatz ${existing.position}`, "#E8A87C");
-        return;
-      }
-
-      const { count, error: countError } = await supabase
-        .from("warteliste")
-        .select("id", { count: "exact", head: true })
-        .eq("termin_id", terminId);
-
-      if (countError) {
-        console.error("WARTELISTE COUNT FEHLER:", countError);
-        showToast("Fehler beim Ermitteln des Wartelistenplatzes.", "#E85C5C");
-        return;
-      }
-
-      const position = (count || 0) + 1;
-      const payload = {
-        stelle_id: stelleId,
-        termin_id: terminId,
-        freiwilliger_id: user.data.id,
-        name: user.data.name || null,
-        email: user.data.email || null,
-        position,
-      };
-
-      const { error: insertError } = await supabase.from("warteliste").insert(payload);
-
-      if (insertError) {
-        if (insertError.code === "23505") {
-          console.warn("WARTELISTE DOPPELT:", insertError, payload);
-          showToast("Du stehst bereits auf der Warteliste.", "#E8A87C");
-          await loadStellen(gemeindeId, user.data.plz, user.data.umkreis);
-          return;
-        }
-
-        console.error("WARTELISTE INSERT FEHLER:", insertError, payload);
-        showToast("Fehler beim Eintragen in die Warteliste.", "#E85C5C");
-        return;
-      }
-
-      showToast(`✓ Wartelistenplatz ${position}`, "#E8A87C");
-      await loadStellen(gemeindeId, user.data.plz, user.data.umkreis);
     } catch (error) {
-      console.error("WARTELISTE FEHLER:", error);
-      showToast("Fehler bei der Warteliste.", "#E85C5C");
+      console.error("WARTELISTE REMOVE FEHLER:", error);
+      showToast("Fehler beim Entfernen von der Warteliste.", "#E85C5C");
     }
   };
 
@@ -1265,7 +1229,7 @@ export default function App() {
   const fetchStellenWithRelations = async ({ stelleIds = null } = {}) => {
     let query = supabase
       .from("stellen")
-      .select("*, vereine(*), termine(*, bewerbungen(*))")
+      .select("*, vereine(*), termine(*, bewerbungen(*)), warteliste(*)")
       .order("created_at", { ascending: false });
 
     if (Array.isArray(stelleIds)) {
@@ -1489,35 +1453,12 @@ export default function App() {
             return data ? { type: "freiwilliger", data } : null;
           },
           verein: async () => {
-            const [{ data: vereinViewData }, { data: vereinBaseData, error: vereinBaseError }] = await Promise.all([
-              supabase
-                .from(VEREINE_SOURCE)
-                .select("*")
-                .eq("auth_id", session.user.id)
-                .maybeSingle(),
-              supabase
-                .from("vereine")
-                .select("*")
-                .eq("auth_id", session.user.id)
-                .maybeSingle(),
-            ]);
-
-            if (vereinBaseError) {
-              console.error("VEREIN BASIS LADEN FEHLER:", vereinBaseError);
-            }
-
-            const mergedVerein = vereinBaseData
-              ? {
-                  ...vereinViewData,
-                  ...vereinBaseData,
-                  effective_gemeinde_id:
-                    vereinViewData?.effective_gemeinde_id ||
-                    vereinBaseData?.gemeinde_id ||
-                    null,
-                }
-              : vereinViewData;
-
-            return mergedVerein ? { type: "verein", data: mergedVerein } : null;
+            const { data } = await supabase
+              .from(VEREINE_SOURCE)
+              .select("*")
+              .eq("auth_id", session.user.id)
+              .maybeSingle();
+            return data ? { type: "verein", data } : null;
           },
           gemeinde: async () => {
             const { data } = await supabase
@@ -1607,7 +1548,7 @@ export default function App() {
         if (prev?.id) {
           supabase
             .from("stellen")
-            .select("*, vereine(*), termine(*, bewerbungen(*))")
+            .select("*, vereine(*), termine(*, bewerbungen(*)), warteliste(*)")
             .eq("id", prev.id)
             .single()
             .then(({ data }) => {
@@ -2020,8 +1961,8 @@ export default function App() {
           p_stelle_id: nextOnList.stelle_id,
           p_termin_id: terminId,
           p_freiwilliger_id: nextOnList.freiwilliger_id,
-          p_name: nextOnList.name || nextOnList.freiwilliger_name,
-          p_email: nextOnList.email || nextOnList.freiwilliger_email,
+          p_name: nextOnList.freiwilliger_name,
+          p_email: nextOnList.freiwilliger_email,
         });
         if (erfolg) {
           // Freiwilligen benachrichtigen
@@ -2065,7 +2006,7 @@ export default function App() {
               .insert({
                 verein_id: selected.verein_id,
                 titel: "🔄 Warteliste nachgerückt",
-                text: `${nextOnList.name || nextOnList.freiwilliger_name || "Jemand"} ist automatisch von der Warteliste nachgerückt.`,
+                text: `${nextOnList.freiwilliger_name} ist automatisch von der Warteliste nachgerückt.`,
                 typ: "warteliste",
                 gelesen: false,
               })
@@ -2075,7 +2016,7 @@ export default function App() {
               vereinId: selected.verein_id,
               notificationType: "warteliste",
               title: "🔄 Warteliste nachgerückt",
-              body: `${nextOnList.name || nextOnList.freiwilliger_name || "Jemand"} ist automatisch von der Warteliste nachgerückt.`,
+              body: `${nextOnList.freiwilliger_name} ist automatisch von der Warteliste nachgerückt.`,
               url: "/",
             });
           }
@@ -2947,7 +2888,7 @@ export default function App() {
           follows={follows}
           onToggleFollowKat={toggleFollowKategorie}
           onWarteliste={handleWarteliste}
-            onWartelisteRemove={handleWartelisteRemove}
+          onWartelisteRemove={handleWartelisteRemove}
         />
       )}
 
@@ -3046,6 +2987,7 @@ export default function App() {
             setSelectedVerein(v);
             navigateTo("verein-profil");
           }}
+          onWartelisteRemove={handleWartelisteRemove}
         />
       )}
 
@@ -3178,6 +3120,95 @@ export default function App() {
               )}
             </div>
           )}
+
+          <div
+            style={{
+              background: "#FAF7F2",
+              border: "1px solid #E0D8C8",
+              borderRadius: 16,
+              padding: 16,
+              margin: "0 16px 16px",
+            }}
+          >
+            <div
+              style={{
+                fontSize: 11,
+                color: "#8B7355",
+                letterSpacing: 2,
+                textTransform: "uppercase",
+                marginBottom: 10,
+              }}
+            >
+              Wartelisten-Überblick
+            </div>
+
+            {(stellen || []).length === 0 ? (
+              <div style={{ fontSize: 13, color: "#8B7355" }}>
+                Noch keine Stellen vorhanden.
+              </div>
+            ) : (
+              (stellen || []).map((s) => {
+                const wartelisteCount = s?.warteliste?.length || 0;
+                return (
+                  <div
+                    key={`warteliste-overview-${s.id}`}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 12,
+                      padding: "10px 0",
+                      borderTop: "1px solid #F0EBE0",
+                    }}
+                  >
+                    <div style={{ minWidth: 0 }}>
+                      <div
+                        style={{
+                          fontSize: 14,
+                          fontWeight: "bold",
+                          color: "#2C2416",
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        {s.titel}
+                      </div>
+                      <div style={{ fontSize: 12, color: "#8B7355" }}>
+                        {wartelisteCount > 0
+                          ? `${wartelisteCount} auf Warteliste`
+                          : "Keine Warteliste"}
+                      </div>
+                    </div>
+
+                    <div
+                      style={{
+                        padding: "6px 10px",
+                        borderRadius: 999,
+                        fontSize: 12,
+                        fontWeight: "bold",
+                        background:
+                          wartelisteCount >= 3
+                            ? "rgba(232,92,92,0.12)"
+                            : wartelisteCount >= 1
+                            ? "rgba(232,168,124,0.16)"
+                            : "#F0EBE0",
+                        color:
+                          wartelisteCount >= 3
+                            ? "#B53A2D"
+                            : wartelisteCount >= 1
+                            ? "#A05A2C"
+                            : "#8B7355",
+                      }}
+                    >
+                      📋 {wartelisteCount}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
           <VereinDashboard
             user={user}
             stellen={stellen}
@@ -3238,8 +3269,8 @@ export default function App() {
                   p_stelle_id: nextOnList.stelle_id,
                   p_termin_id: terminId,
                   p_freiwilliger_id: nextOnList.freiwilliger_id,
-                  p_name: nextOnList.name || nextOnList.freiwilliger_name || null,
-                  p_email: nextOnList.email || nextOnList.freiwilliger_email || null,
+                  p_name: nextOnList.freiwilliger_name,
+                  p_email: nextOnList.freiwilliger_email,
                 });
 
                 if (erfolg) {
@@ -3268,7 +3299,7 @@ export default function App() {
               await loadStellen(gemeindeId);
               const { data } = await supabase
                 .from("stellen")
-                .select("*, vereine(*), termine(*, bewerbungen(*))")
+                .select("*, vereine(*), termine(*, bewerbungen(*)), warteliste(*)")
                 .eq("id", selected.id)
                 .single();
               if (data) setSelected(data);
@@ -3336,7 +3367,7 @@ export default function App() {
               await loadStellen(gemeindeId);
               const { data } = await supabase
                 .from("stellen")
-                .select("*, vereine(*), termine(*, bewerbungen(*))")
+                .select("*, vereine(*), termine(*, bewerbungen(*)), warteliste(*)")
                 .eq("id", selected.id)
                 .maybeSingle();
               if (data) {
@@ -3437,7 +3468,7 @@ export default function App() {
               await loadStellen(gemeindeId);
               const { data } = await supabase
                 .from("stellen")
-                .select("*, vereine(*), termine(*, bewerbungen(*))")
+                .select("*, vereine(*), termine(*, bewerbungen(*)), warteliste(*)")
                 .eq("id", selected.id)
                 .single();
               if (data) setSelected(data);
@@ -3676,146 +3707,92 @@ export default function App() {
             verein={user.data}
             onBack={goBack}
             onSave={async (stelleData, termineData) => {
-              try {
-                const cleanStelle = {
-                  titel: stelleData?.titel ?? "",
-                  beschreibung: stelleData?.beschreibung ?? "",
-                  kategorie: stelleData?.kategorie ?? null,
-                  ort: stelleData?.ort ?? "",
-                  plz: stelleData?.plz ?? "",
-                  status: stelleData?.status ?? "aktiv",
-                  gesamt_plaetze:
-                    stelleData?.gesamt_plaetze === "" ||
-                    stelleData?.gesamt_plaetze == null
-                      ? null
-                      : Number(stelleData.gesamt_plaetze),
-                  updated_at: new Date().toISOString(),
-                };
+              await supabase
+                .from("stellen")
+                .update(stelleData)
+                .eq("id", selected.id);
+              // Abgesagte Termine löschen + Freiwillige benachrichtigen
+              const abgesagt = termineData.filter((t) => t.absagen && t.id);
+              for (const t of abgesagt) {
+                const { error: markCancelledError } = await supabase
+                  .from("termine")
+                  .update({ abgesagt: true })
+                  .eq("id", t.id);
+                if (markCancelledError) throw markCancelledError;
 
-                const { data: updatedStelle, error: stelleError } = await supabase
-                  .from("stellen")
-                  .update(cleanStelle)
-                  .eq("id", selected.id)
-                  .select()
-                  .single();
+                const { error: rpcError } = await supabase.rpc(
+                  "queue_termin_cancelled_for_termin",
+                  { p_termin_id: t.id }
+                );
+                if (rpcError) throw rpcError;
 
-                if (stelleError) {
-                  console.error("❌ Fehler beim Update der Stelle:", stelleError);
-                  showToast("✗ Stelle konnte nicht gespeichert werden");
-                  return;
-                }
+                const { error: bewerbungenDeleteError } = await supabase
+                  .from("bewerbungen")
+                  .delete()
+                  .eq("termin_id", t.id);
+                if (bewerbungenDeleteError) throw bewerbungenDeleteError;
 
-                // Abgesagte Termine löschen + Freiwillige benachrichtigen
-                const abgesagt = termineData.filter((t) => t.absagen && t.id);
-                for (const t of abgesagt) {
-                  const { error: markCancelledError } = await supabase
-                    .from("termine")
-                    .update({ abgesagt: true })
-                    .eq("id", t.id);
-                  if (markCancelledError) throw markCancelledError;
+                const { error: wartelisteDeleteError } = await supabase
+                  .from("warteliste")
+                  .delete()
+                  .eq("termin_id", t.id);
+                if (wartelisteDeleteError) throw wartelisteDeleteError;
 
+                const { error: terminDeleteError } = await supabase
+                  .from("termine")
+                  .delete()
+                  .eq("id", t.id);
+                if (terminDeleteError) throw terminDeleteError;
+              }
+              // Verschobene Termine updaten
+              const geaendert = termineData.filter((t) => !t.absagen && t.id);
+              for (const t of geaendert) {
+                const original = (selected.termine || []).find(
+                  (ot) => ot.id === t.id
+                );
+                await supabase
+                  .from("termine")
+                  .update({
+                    datum: t.datum,
+                    startzeit: t.startzeit,
+                    endzeit: t.endzeit || null,
+                  })
+                  .eq("id", t.id);
+                if (
+                  original &&
+                  (
+                    original.datum !== t.datum ||
+                    original.startzeit !== t.startzeit ||
+                    (original.endzeit || null) !== (t.endzeit || null)
+                  )
+                ) {
                   const { error: rpcError } = await supabase.rpc(
-                    "queue_termin_cancelled_for_termin",
+                    "queue_termin_rescheduled_for_termin",
                     { p_termin_id: t.id }
                   );
                   if (rpcError) throw rpcError;
-
-                  const { error: bewerbungenDeleteError } = await supabase
-                    .from("bewerbungen")
-                    .delete()
-                    .eq("termin_id", t.id);
-                  if (bewerbungenDeleteError) throw bewerbungenDeleteError;
-
-                  const { error: wartelisteDeleteError } = await supabase
-                    .from("warteliste")
-                    .delete()
-                    .eq("termin_id", t.id);
-                  if (wartelisteDeleteError) throw wartelisteDeleteError;
-
-                  const { error: terminDeleteError } = await supabase
-                    .from("termine")
-                    .delete()
-                    .eq("id", t.id);
-                  if (terminDeleteError) throw terminDeleteError;
                 }
-
-                // Verschobene Termine updaten
-                const geaendert = termineData.filter((t) => !t.absagen && t.id);
-                for (const t of geaendert) {
-                  const original = (selected.termine || []).find(
-                    (ot) => ot.id === t.id
-                  );
-
-                  const { error: terminUpdateError } = await supabase
-                    .from("termine")
-                    .update({
+              }
+              // Neue Termine einfügen
+              const neu = termineData.filter(
+                (t) => !t.absagen && !t.id && t.datum
+              );
+              if (neu.length > 0)
+                await supabase
+                  .from("termine")
+                  .insert(
+                    neu.map((t) => ({
                       datum: t.datum,
                       startzeit: t.startzeit,
                       endzeit: t.endzeit || null,
-                      freie_plaetze:
-                        t.plaetze === "" || t.plaetze == null
-                          ? null
-                          : Number(t.plaetze),
-                      gesamt_plaetze:
-                        t.plaetze === "" || t.plaetze == null
-                          ? null
-                          : Number(t.plaetze),
-                    })
-                    .eq("id", t.id);
-
-                  if (terminUpdateError) throw terminUpdateError;
-
-                  if (
-                    original &&
-                    (
-                      original.datum !== t.datum ||
-                      original.startzeit !== t.startzeit ||
-                      (original.endzeit || null) !== (t.endzeit || null)
-                    )
-                  ) {
-                    const { error: rpcError } = await supabase.rpc(
-                      "queue_termin_rescheduled_for_termin",
-                      { p_termin_id: t.id }
-                    );
-                    if (rpcError) throw rpcError;
-                  }
-                }
-
-                // Neue Termine einfügen
-                const neu = termineData.filter(
-                  (t) => !t.absagen && !t.id && t.datum
-                );
-                if (neu.length > 0) {
-                  const { error: insertError } = await supabase
-                    .from("termine")
-                    .insert(
-                      neu.map((t) => ({
-                        datum: t.datum,
-                        startzeit: t.startzeit,
-                        endzeit: t.endzeit || null,
-                        freie_plaetze:
-                          t.plaetze === "" || t.plaetze == null
-                            ? null
-                            : Number(t.plaetze),
-                        gesamt_plaetze:
-                          t.plaetze === "" || t.plaetze == null
-                            ? null
-                            : Number(t.plaetze),
-                        stelle_id: selected.id,
-                      }))
-                    );
-
-                  if (insertError) throw insertError;
-                }
-
-                console.log("✅ Stelle gespeichert:", updatedStelle);
-                showToast("✓ Stelle aktualisiert!");
-                await loadStellen(gemeindeId);
-                goBack();
-              } catch (error) {
-                console.error("❌ Fehler beim Speichern:", error);
-                showToast("✗ Änderungen konnten nicht gespeichert werden");
-              }
+                      freie_plaetze: t.plaetze,
+                      gesamt_plaetze: t.plaetze,
+                      stelle_id: selected.id,
+                    }))
+                  );
+              showToast("✓ Stelle aktualisiert!");
+              await loadStellen(gemeindeId);
+              goBack();
             }}
           />
         )}
