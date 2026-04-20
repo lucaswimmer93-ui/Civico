@@ -742,6 +742,13 @@ export default function App() {
       const { error: insertError } = await supabase.from("warteliste").insert(payload);
 
       if (insertError) {
+        if (insertError.code === "23505") {
+          console.warn("WARTELISTE DOPPELT:", insertError, payload);
+          showToast("Du stehst bereits auf der Warteliste.", "#E8A87C");
+          await loadStellen(gemeindeId, user.data.plz, user.data.umkreis);
+          return;
+        }
+
         console.error("WARTELISTE INSERT FEHLER:", insertError, payload);
         showToast("Fehler beim Eintragen in die Warteliste.", "#E85C5C");
         return;
