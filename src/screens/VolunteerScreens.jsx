@@ -756,8 +756,8 @@ function DetailScreen({
                   <button
                     onClick={async () => {
                       if (isOnWaitlist) {
-                        if (!onWartelisteRemove) return;
-                        await onWartelisteRemove(stelle.id, t.id);
+                        if (!onWartelisteRemove) { console.warn('Remove handler fehlt'); return; }
+                        await (onWartelisteRemove ? onWartelisteRemove : async ()=>{})(stelle.id, t.id);
                         setDetailWaitlistTerminIds((prev) =>
                           prev.filter(id => id !== t.id)
                         );
