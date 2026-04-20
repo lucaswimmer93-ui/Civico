@@ -698,31 +698,61 @@ export default function App() {
       navigateTo("login");
       return;
     }
-    const { data: existing } = await supabase
-      .from("warteliste")
-      .select("id, position")
-      .eq("termin_id", terminId)
-      .eq("freiwilliger_id", user.data.id)
-      .maybeSingle();
-    if (existing) {
-      showToast(`Wartelistenplatz ${existing.position}`, "#E8A87C");
-      return;
+
+    try {
+      const { data: existing, error: existingError } = await supabase
+        .from("warteliste")
+        .select("id, position")
+        .eq("termin_id", terminId)
+        .eq("freiwilliger_id", user.data.id)
+        .maybeSingle();
+
+      if (existingError) {
+        console.error("WARTELISTE CHECK FEHLER:", existingError);
+        showToast("Fehler beim Prüfen der Warteliste.", "#E85C5C");
+        return;
+      }
+
+      if (existing) {
+        showToast(`Wartelistenplatz ${existing.position}`, "#E8A87C");
+        return;
+      }
+
+      const { count, error: countError } = await supabase
+        .from("warteliste")
+        .select("id", { count: "exact", head: true })
+        .eq("termin_id", terminId);
+
+      if (countError) {
+        console.error("WARTELISTE COUNT FEHLER:", countError);
+        showToast("Fehler beim Ermitteln des Wartelistenplatzes.", "#E85C5C");
+        return;
+      }
+
+      const position = (count || 0) + 1;
+      const payload = {
+        stelle_id: stelleId,
+        termin_id: terminId,
+        freiwilliger_id: user.data.id,
+        freiwilliger_name: user.data.name || null,
+        freiwilliger_email: user.data.email || null,
+        position,
+      };
+
+      const { error: insertError } = await supabase.from("warteliste").insert(payload);
+
+      if (insertError) {
+        console.error("WARTELISTE INSERT FEHLER:", insertError, payload);
+        showToast("Fehler beim Eintragen in die Warteliste.", "#E85C5C");
+        return;
+      }
+
+      showToast(`✓ Wartelistenplatz ${position}`, "#E8A87C");
+      await loadStellen(gemeindeId, user.data.plz, user.data.umkreis);
+    } catch (error) {
+      console.error("WARTELISTE FEHLER:", error);
+      showToast("Fehler bei der Warteliste.", "#E85C5C");
     }
-    const { count } = await supabase
-      .from("warteliste")
-      .select("id", { count: "exact", head: true })
-      .eq("termin_id", terminId);
-    const position = (count || 0) + 1;
-    await supabase.from("warteliste").insert({
-      stelle_id: stelleId,
-      termin_id: terminId,
-      freiwilliger_id: user.data.id,
-      name: user.data.name,
-      email: user.data.email,
-      position,
-    });
-    showToast(`✓ Wartelistenplatz ${position}`, "#E8A87C");
-    await loadStellen(gemeindeId, user.data.plz, user.data.umkreis);
   };
 
   const logout = async () => {
@@ -1427,12 +1457,35 @@ export default function App() {
             return data ? { type: "freiwilliger", data } : null;
           },
           verein: async () => {
-            const { data } = await supabase
-              .from(VEREINE_SOURCE)
-              .select("*")
-              .eq("auth_id", session.user.id)
-              .maybeSingle();
-            return data ? { type: "verein", data } : null;
+            const [{ data: vereinViewData }, { data: vereinBaseData, error: vereinBaseError }] = await Promise.all([
+              supabase
+                .from(VEREINE_SOURCE)
+                .select("*")
+                .eq("auth_id", session.user.id)
+                .maybeSingle(),
+              supabase
+                .from("vereine")
+                .select("*")
+                .eq("auth_id", session.user.id)
+                .maybeSingle(),
+            ]);
+
+            if (vereinBaseError) {
+              console.error("VEREIN BASIS LADEN FEHLER:", vereinBaseError);
+            }
+
+            const mergedVerein = vereinBaseData
+              ? {
+                  ...vereinViewData,
+                  ...vereinBaseData,
+                  effective_gemeinde_id:
+                    vereinViewData?.effective_gemeinde_id ||
+                    vereinBaseData?.gemeinde_id ||
+                    null,
+                }
+              : vereinViewData;
+
+            return mergedVerein ? { type: "verein", data: mergedVerein } : null;
           },
           gemeinde: async () => {
             const { data } = await supabase
@@ -1980,7 +2033,7 @@ export default function App() {
               .insert({
                 verein_id: selected.verein_id,
                 titel: "🔄 Warteliste nachgerückt",
-                text: `${nextOnList.freiwilliger_name} ist automatisch von der Warteliste nachgerückt.`,
+                text: `${nextOnList.freiwilliger_name || nextOnList.name || "Jemand"} ist automatisch von der Warteliste nachgerückt.`,
                 typ: "warteliste",
                 gelesen: false,
               })
@@ -1990,7 +2043,7 @@ export default function App() {
               vereinId: selected.verein_id,
               notificationType: "warteliste",
               title: "🔄 Warteliste nachgerückt",
-              body: `${nextOnList.freiwilliger_name} ist automatisch von der Warteliste nachgerückt.`,
+              body: `${nextOnList.freiwilliger_name || nextOnList.name || "Jemand"} ist automatisch von der Warteliste nachgerückt.`,
               url: "/",
             });
           }
@@ -3152,8 +3205,8 @@ export default function App() {
                   p_stelle_id: nextOnList.stelle_id,
                   p_termin_id: terminId,
                   p_freiwilliger_id: nextOnList.freiwilliger_id,
-                  p_name: nextOnList.freiwilliger_name,
-                  p_email: nextOnList.freiwilliger_email,
+                  p_name: nextOnList.freiwilliger_name || nextOnList.name || null,
+                  p_email: nextOnList.freiwilliger_email || nextOnList.email || null,
                 });
 
                 if (erfolg) {
@@ -3598,6 +3651,11 @@ export default function App() {
                   ort: stelleData?.ort ?? "",
                   plz: stelleData?.plz ?? "",
                   status: stelleData?.status ?? "aktiv",
+                  gesamt_plaetze:
+                    stelleData?.gesamt_plaetze === "" ||
+                    stelleData?.gesamt_plaetze == null
+                      ? null
+                      : Number(stelleData.gesamt_plaetze),
                   updated_at: new Date().toISOString(),
                 };
 
