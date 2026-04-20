@@ -244,6 +244,39 @@ function DetailScreen({
   const [detailTerminChatLoading, setDetailTerminChatLoading] = useState({});
   const [detailTerminChatErrors, setDetailTerminChatErrors] = useState({});
   const [detailTerminChatOpen, setDetailTerminChatOpen] = useState({});
+  const [detailWaitlistTerminIds, setDetailWaitlistTerminIds] = useState([]);
+  useEffect(() => {
+    let active = true;
+
+    async function loadDetailWaitlist() {
+      if (!user?.data?.id || user?.type === "verein") {
+        if (active) setDetailWaitlistTerminIds([]);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("warteliste")
+        .select("termin_id")
+        .eq("freiwilliger_id", user.data.id);
+
+      if (!active) return;
+
+      if (error) {
+        console.error("DETAIL WARTELISTE LADEN FEHLER:", error);
+        setDetailWaitlistTerminIds([]);
+        return;
+      }
+
+      setDetailWaitlistTerminIds((data || []).map((row) => row.termin_id).filter(Boolean));
+    }
+
+    loadDetailWaitlist();
+
+    return () => {
+      active = false;
+    };
+  }, [user?.data?.id, user?.type, stelle?.id]);
+
 
   const openDetailTerminChat = async (terminId) => {
     if (!terminId) return null;
@@ -498,6 +531,7 @@ function DetailScreen({
                 )
               : null;
             const { freiePlaetze, angemeldet, belegt } = getTerminPlaetze(t);
+            const isOnWaitlist = detailWaitlistTerminIds.includes(t.id);
             return (
               <div
                 key={t.id}
@@ -720,23 +754,30 @@ function DetailScreen({
                   </div>
                 ) : user && user?.type !== "verein" ? (
                   <button
-                    onClick={() =>
-                      onWarteliste && onWarteliste(stelle.id, t.id)
-                    }
+                    onClick={async () => {
+                      if (isOnWaitlist) return;
+                      if (!onWarteliste) return;
+                      await onWarteliste(stelle.id, t.id);
+                      setDetailWaitlistTerminIds((prev) =>
+                        prev.includes(t.id) ? prev : [...prev, t.id]
+                      );
+                    }}
+                    disabled={isOnWaitlist}
                     style={{
                       width: "100%",
                       padding: "10px",
                       borderRadius: 10,
-                      border: "1px solid #E8A87C",
-                      background: "transparent",
-                      color: "#E8A87C",
+                      border: `1px solid ${isOnWaitlist ? "#D9C8A8" : "#E8A87C"}`,
+                      background: isOnWaitlist ? "#F6EFE4" : "transparent",
+                      color: isOnWaitlist ? "#8B7355" : "#E8A87C",
                       fontSize: 13,
                       fontFamily: "inherit",
                       fontWeight: "bold",
-                      cursor: "pointer",
+                      cursor: isOnWaitlist ? "default" : "pointer",
+                      opacity: isOnWaitlist ? 0.95 : 1,
                     }}
                   >
-                    📋 Auf die Warteliste
+                    {isOnWaitlist ? "📋 Du bist auf der Warteliste" : "📋 Auf die Warteliste"}
                   </button>
                 ) : null}
               </div>
