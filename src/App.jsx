@@ -698,79 +698,46 @@ export default function App() {
       navigateTo("login");
       return;
     }
+    const { data: existingList, error: existingError } = await supabase
+      .from("warteliste")
+      .select("id, position, freiwilliger_id")
+      .eq("termin_id", Number(terminId));
 
-    try {
-      const { data: existing, error: existingError } = await supabase
-        .from("warteliste")
-        .select("id, position")
-        .eq("termin_id", terminId)
-        .eq("freiwilliger_id", user.data.id)
-        .maybeSingle();
-
-      if (existingError) {
-        console.error("WARTELISTE CHECK FEHLER:", existingError);
-        showToast("Fehler beim Prüfen der Warteliste.", "#E85C5C");
-        return;
-      }
-
-      if (existing) {
-        showToast(`Wartelistenplatz ${existing.position}`, "#E8A87C");
-        return;
-      }
-
-      const { count, error: countError } = await supabase
-        .from("warteliste")
-        .select("id", { count: "exact", head: true })
-        .eq("termin_id", terminId);
-
-      if (countError) {
-        console.error("WARTELISTE COUNT FEHLER:", countError);
-        showToast("Fehler beim Ermitteln des Wartelistenplatzes.", "#E85C5C");
-        return;
-      }
-
-      const position = (count || 0) + 1;
-
-      const { data: existingWl, error: existingWlError } = await supabase
-        .from("warteliste")
-        .select("id")
-        .eq("termin_id", terminId)
-        .eq("freiwilliger_id", user.data.id)
-        .maybeSingle();
-
-      if (existingWlError) {
-        console.error("WARTELISTE CHECK FEHLER:", existingWlError);
-        showToast("Fehler beim Prüfen der Warteliste.", "#E85C5C");
-        return;
-      }
-
-      if (existingWl) {
-        showToast("Du stehst bereits auf der Warteliste.", "#E8A87C");
-        return;
-      }
-
-      const { error: insertError } = await supabase.from("warteliste").insert({
-        stelle_id: stelleId,
-        termin_id: terminId,
-        freiwilliger_id: user.data.id,
-        name: user.data.name,
-        email: user.data.email,
-        position,
-      });
-
-      if (insertError) {
-        console.error("WARTELISTE INSERT FEHLER:", insertError);
-        showToast("Fehler beim Eintragen in die Warteliste.", "#E85C5C");
-        return;
-      }
-
-      showToast(`✓ Wartelistenplatz ${position}`, "#E8A87C");
-      await loadStellen(gemeindeId, user.data.plz, user.data.umkreis);
-      if (selected?.id) await reloadSelected(selected.id);
-    } catch (error) {
-      console.error("WARTELISTE FEHLER:", error);
-      showToast("Fehler beim Eintragen in die Warteliste.", "#E85C5C");
+    if (existingError) {
+      console.error("WARTELISTE CHECK FEHLER:", existingError);
+      showToast("Fehler beim Prüfen der Warteliste.", "#E85C5C");
+      return;
     }
+
+    const existing = (existingList || []).find(
+      (w) => String(w.freiwilliger_id) === String(user.data.id)
+    );
+
+    if (existing) {
+      showToast(`Wartelistenplatz ${existing.position}`, "#E8A87C");
+      return;
+    }
+
+    const position = (existingList?.length || 0) + 1;
+
+    const { error: insertError } = await supabase.from("warteliste").insert({
+      stelle_id: stelleId,
+      termin_id: Number(terminId),
+      freiwilliger_id: user.data.id,
+      name: user.data.name,
+      email: user.data.email,
+      position,
+    });
+
+    if (insertError) {
+      console.error("WARTELISTE INSERT FEHLER:", insertError);
+      showToast("Fehler beim Eintragen in die Warteliste.", "#E85C5C");
+      return;
+    }
+
+    showToast(`✓ Wartelistenplatz ${position}`, "#E8A87C");
+    await loadStellen(gemeindeId, user.data.plz, user.data.umkreis);
+    if (selected?.id) await reloadSelected(selected.id);
   };
 
 
@@ -1564,6 +1531,7 @@ export default function App() {
             loadVereine(effectiveGemeindeId);
             setScreen("dashboard");
             autoArchivieren(verein.id);
+            loadVereinFollowers(verein.id);
             loadVereinNotifications(verein.id);
             return;
           }
@@ -2993,6 +2961,7 @@ export default function App() {
             }
             if (type === "verein") {
               autoArchivieren(data.id);
+              loadVereinFollowers(data.id);
               loadVereinNotifications(data.id);
             }
           }}
@@ -3182,10 +3151,7 @@ export default function App() {
               navigateTo("stelle-bearbeiten");
             }}
             onNeu={() => navigateTo("stelle-erstellen")}
-            onProfil={() => {
-              loadVereinFollowers(user?.data?.id);
-              navigateTo("verein-profil-eigen");
-            }}
+            onProfil={() => navigateTo("verein-profil-eigen")}
             onAnalyse={() => navigateTo("analyse")}
             onMeineGemeinde={() => navigateTo("verein-gemeinde")}
             logout={logout}
@@ -3669,10 +3635,22 @@ export default function App() {
             onBack={goBack}
             onSave={async (stelleData, termineData) => {
               try {
+                console.log("APP_ONSAVE_START", {
+                  stelleData,
+                  termineData,
+                  selected,
+                });
+
                 const { error: stelleUpdateError } = await supabase
                   .from("stellen")
                   .update(stelleData)
                   .eq("id", selected.id);
+
+                console.log("STELLE_UPDATE_RESULT", {
+                  stelleUpdateError,
+                  selectedId: selected.id,
+                });
+
                 if (stelleUpdateError) throw stelleUpdateError;
 
                 // Abgesagte Termine löschen + Freiwillige benachrichtigen
