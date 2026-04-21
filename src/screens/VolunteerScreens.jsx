@@ -565,7 +565,13 @@ function DetailScreen({
                 )
               : null;
             const { freiePlaetze, angemeldet, belegt } = getTerminPlaetze(t);
-            const isOnWaitlist = detailWaitlistTerminIds.includes(t.id);
+            const waitlistEntry =
+                      (meineWarteliste || []).find(
+                        (w) => String(w.termin_id) === String(t.id)
+                      ) ||
+                      detailWaitlistInfo?.[t.id] ||
+                      null;
+                    const isOnWaitlist = !!waitlistEntry;
             const waitlistInfo = detailWaitlistInfo[t.id] || null;
             return (
               <div
