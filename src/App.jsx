@@ -760,7 +760,7 @@ export default function App() {
 
       if (!waitlistUserId) {
         showToast("Dein Profil konnte nicht eindeutig zugeordnet werden.", "#E85C5C");
-        return;
+        return { ok: false, reason: "missing_user" };
       }
 
       const { data: existingList, error: existingError } = await supabase
@@ -773,7 +773,7 @@ export default function App() {
       if (existingError) {
         console.error("WARTELISTE CHECK FEHLER:", existingError);
         showToast("Fehler beim Prüfen der Warteliste.", "#E85C5C");
-        return;
+        return { ok: false, reason: "check_failed" };
       }
 
       const existing = (existingList || []).find(
@@ -783,7 +783,13 @@ export default function App() {
       if (existing) {
         showToast(`Wartelistenplatz ${existing.position}`, "#E8A87C");
         if (selected?.id) await reloadSelected(selected.id);
-        return;
+        return {
+          ok: true,
+          action: "already_on_waitlist",
+          position: Number(existing.position) || null,
+          total: existingList?.length || 0,
+          waitlistUserId,
+        };
       }
 
       const position = (existingList?.length || 0) + 1;
@@ -801,19 +807,33 @@ export default function App() {
         if (insertError.code === "23505") {
           showToast("Du stehst bereits auf der Warteliste.", "#E8A87C");
           if (selected?.id) await reloadSelected(selected.id);
-          return;
+          return {
+            ok: true,
+            action: "already_on_waitlist",
+            position,
+            total: existingList?.length || position,
+            waitlistUserId,
+          };
         }
         console.error("WARTELISTE INSERT FEHLER:", insertError);
         showToast("Fehler beim Eintragen in die Warteliste.", "#E85C5C");
-        return;
+        return { ok: false, reason: "insert_failed", error: insertError };
       }
 
       showToast(`✓ Wartelistenplatz ${position}`, "#E8A87C");
       await loadStellen(gemeindeId, user.data.plz, user.data.umkreis);
       if (selected?.id) await reloadSelected(selected.id);
+      return {
+        ok: true,
+        action: "added_to_waitlist",
+        position,
+        total: position,
+        waitlistUserId,
+      };
     } catch (error) {
       console.error("HANDLE WARTELISTE FEHLER:", error);
       showToast("Fehler beim Eintragen in die Warteliste.", "#E85C5C");
+      return { ok: false, reason: "exception", error };
     }
   };
 
@@ -823,7 +843,7 @@ export default function App() {
       const freiwilligerRecord = await getCurrentFreiwilligerRecord();
       const waitlistUserId = freiwilligerRecord?.id;
 
-      if (!waitlistUserId) return;
+      if (!waitlistUserId) return { ok: false, reason: "missing_user" };
 
       const { error } = await supabase
         .from("warteliste")
@@ -834,15 +854,17 @@ export default function App() {
       if (error) {
         console.error("WARTELISTE DELETE FEHLER:", error);
         showToast("Fehler beim Entfernen von der Warteliste.", "#E85C5C");
-        return;
+        return { ok: false, reason: "delete_failed", error };
       }
 
       showToast("Du wurdest von der Warteliste entfernt.", "#E8A87C");
       await loadStellen(gemeindeId, user?.data?.plz, user?.data?.umkreis);
       if (selected?.id) await reloadSelected(selected.id);
+      return { ok: true, action: "removed_from_waitlist", waitlistUserId };
     } catch (error) {
       console.error("WARTELISTE REMOVE FEHLER:", error);
       showToast("Fehler beim Entfernen von der Warteliste.", "#E85C5C");
+      return { ok: false, reason: "exception", error };
     }
   };
 
