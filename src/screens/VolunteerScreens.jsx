@@ -275,11 +275,12 @@ function DetailScreen({
 
     async function loadDetailWaitlist() {
       const terminIds = (termine || []).map((termin) => termin?.id).filter(Boolean);
-      const waitlistUserId = await getResolvedFreiwilligerId(user);
 
-      if (!active) return;
+      const myUserIds = [user?.data?.auth_id, user?.data?.id]
+        .filter(Boolean)
+        .map((value) => String(value));
 
-      if (!waitlistUserId || user?.type === "verein" || terminIds.length === 0) {
+      if (myUserIds.length === 0 || user?.type === "verein" || terminIds.length === 0) {
         if (active) {
           setDetailWaitlistTerminIds([]);
           setDetailWaitlistInfo({});
@@ -293,6 +294,14 @@ function DetailScreen({
         .in("termin_id", terminIds)
         .order("position", { ascending: true })
         .order("created_at", { ascending: true });
+
+      console.log("DETAIL WL DEBUG", {
+        stelleId: stelle?.id,
+        terminIds,
+        userData: user?.data,
+        myUserIds,
+        wartelisteRows: data,
+      });
 
       if (!active) return;
 
@@ -313,8 +322,21 @@ function DetailScreen({
       const info = {};
       const ids = [];
       for (const [terminId, rows] of Object.entries(grouped)) {
-        const myIndex = rows.findIndex(
-          (row) => String(row?.freiwilliger_id) === String(waitlistUserId)
+        const debugRows = rows.map((row) => ({
+          termin_id: row?.termin_id,
+          freiwilliger_id: String(row?.freiwilliger_id),
+          position: row?.position,
+          matches: myUserIds.includes(String(row?.freiwilliger_id)),
+        }));
+
+        console.log("DETAIL WL MATCH DEBUG", {
+          terminId,
+          myUserIds,
+          debugRows,
+        });
+
+        const myIndex = rows.findIndex((row) =>
+          myUserIds.includes(String(row?.freiwilliger_id))
         );
         if (myIndex >= 0) {
           const myRow = rows[myIndex];
@@ -344,6 +366,7 @@ function DetailScreen({
     (termine || []).map((termin) => termin?.id).filter(Boolean).join("|"),
     JSON.stringify(stelle?.warteliste || []),
   ]);
+
 
   const openDetailTerminChat = async (terminId) => {
     if (!terminId) return null;
@@ -825,8 +848,7 @@ function DetailScreen({
                     onClick={async () => {
                       if (isOnWaitlist) {
                         if (!onWartelisteRemove) return;
-                        const result = await onWartelisteRemove(stelle.id, t.id);
-                        if (!result?.ok) return;
+                        await onWartelisteRemove(stelle.id, t.id);
                         setDetailWaitlistTerminIds((prev) => prev.filter((terminId) => terminId !== t.id));
                         setDetailWaitlistInfo((prev) => {
                           const next = { ...prev };
@@ -837,24 +859,20 @@ function DetailScreen({
                       }
 
                       if (!onWarteliste) return;
-                      const result = await onWarteliste(stelle.id, t.id);
-                      if (!result?.ok) return;
+                      await onWarteliste(stelle.id, t.id);
 
-                      if (result?.action === "added_to_waitlist" || result?.action === "already_on_waitlist") {
-                        const nextPosition = Number(result?.position || 0) || 1;
-                        const nextTotal = Number(result?.total || 0) || nextPosition;
-                        setDetailWaitlistTerminIds((prev) =>
-                          prev.includes(t.id) ? prev : [...prev, t.id]
-                        );
-                        setDetailWaitlistInfo((prev) => ({
-                          ...prev,
-                          [t.id]: {
-                            id: prev?.[t.id]?.id || null,
-                            position: nextPosition,
-                            total: nextTotal,
-                          },
-                        }));
-                      }
+                      const nextTotal = Number(waitlistInfo?.total || 0) + 1;
+                      setDetailWaitlistTerminIds((prev) =>
+                        prev.includes(t.id) ? prev : [...prev, t.id]
+                      );
+                      setDetailWaitlistInfo((prev) => ({
+                        ...prev,
+                        [t.id]: {
+                          id: prev?.[t.id]?.id || null,
+                          position: prev?.[t.id]?.position || nextTotal,
+                          total: nextTotal,
+                        },
+                      }));
                     }}
                     style={{
                       width: "100%",
