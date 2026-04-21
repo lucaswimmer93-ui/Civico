@@ -275,12 +275,11 @@ function DetailScreen({
 
     async function loadDetailWaitlist() {
       const terminIds = (termine || []).map((termin) => termin?.id).filter(Boolean);
+      const waitlistUserId = await getResolvedFreiwilligerId(user);
 
-      const myUserIds = [user?.data?.auth_id, user?.data?.id]
-        .filter(Boolean)
-        .map((value) => String(value));
+      if (!active) return;
 
-      if (myUserIds.length === 0 || user?.type === "verein" || terminIds.length === 0) {
+      if (!waitlistUserId || user?.type === "verein" || terminIds.length === 0) {
         if (active) {
           setDetailWaitlistTerminIds([]);
           setDetailWaitlistInfo({});
@@ -314,8 +313,8 @@ function DetailScreen({
       const info = {};
       const ids = [];
       for (const [terminId, rows] of Object.entries(grouped)) {
-        const myIndex = rows.findIndex((row) =>
-          myUserIds.includes(String(row?.freiwilliger_id))
+        const myIndex = rows.findIndex(
+          (row) => String(row?.freiwilliger_id) === String(waitlistUserId)
         );
         if (myIndex >= 0) {
           const myRow = rows[myIndex];
@@ -345,7 +344,6 @@ function DetailScreen({
     (termine || []).map((termin) => termin?.id).filter(Boolean).join("|"),
     JSON.stringify(stelle?.warteliste || []),
   ]);
-
 
   const openDetailTerminChat = async (terminId) => {
     if (!terminId) return null;
@@ -827,7 +825,8 @@ function DetailScreen({
                     onClick={async () => {
                       if (isOnWaitlist) {
                         if (!onWartelisteRemove) return;
-                        await onWartelisteRemove(stelle.id, t.id);
+                        const result = await onWartelisteRemove(stelle.id, t.id);
+                        if (!result?.ok) return;
                         setDetailWaitlistTerminIds((prev) => prev.filter((terminId) => terminId !== t.id));
                         setDetailWaitlistInfo((prev) => {
                           const next = { ...prev };
@@ -838,20 +837,24 @@ function DetailScreen({
                       }
 
                       if (!onWarteliste) return;
-                      await onWarteliste(stelle.id, t.id);
+                      const result = await onWarteliste(stelle.id, t.id);
+                      if (!result?.ok) return;
 
-                      const nextTotal = Number(waitlistInfo?.total || 0) + 1;
-                      setDetailWaitlistTerminIds((prev) =>
-                        prev.includes(t.id) ? prev : [...prev, t.id]
-                      );
-                      setDetailWaitlistInfo((prev) => ({
-                        ...prev,
-                        [t.id]: {
-                          id: prev?.[t.id]?.id || null,
-                          position: prev?.[t.id]?.position || nextTotal,
-                          total: nextTotal,
-                        },
-                      }));
+                      if (result?.action === "added_to_waitlist" || result?.action === "already_on_waitlist") {
+                        const nextPosition = Number(result?.position || 0) || 1;
+                        const nextTotal = Number(result?.total || 0) || nextPosition;
+                        setDetailWaitlistTerminIds((prev) =>
+                          prev.includes(t.id) ? prev : [...prev, t.id]
+                        );
+                        setDetailWaitlistInfo((prev) => ({
+                          ...prev,
+                          [t.id]: {
+                            id: prev?.[t.id]?.id || null,
+                            position: nextPosition,
+                            total: nextTotal,
+                          },
+                        }));
+                      }
                     }}
                     style={{
                       width: "100%",
