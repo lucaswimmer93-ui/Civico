@@ -1999,7 +1999,7 @@ function StelleErstellenScreen({ verein, onBack, onSave }) {
                 </div>
                 <input
                   type="number"
-                  min="1"
+                  min="0"
                   value={t.plaetze}
                   onChange={(e) =>
                     updateTermin(i, "plaetze", parseInt(e.target.value) || 1)
@@ -2717,7 +2717,16 @@ function StelleBearbeitenScreen({ stelle, verein, onBack, onSave }) {
       datum: t.datum || "",
       startzeit: t.startzeit || "",
       endzeit: t.endzeit || "",
-      plaetze: t.freie_plaetze || 5,
+      plaetze:
+        t?.freie_plaetze !== undefined && t?.freie_plaetze !== null
+          ? Number(t.freie_plaetze)
+          : 5,
+      aktiveBewerbungen: Array.isArray(t?.bewerbungen)
+        ? t.bewerbungen.filter((b) => {
+            const status = String(b?.status || "").toLowerCase();
+            return !["storniert", "abgesagt", "cancelled", "canceled"].includes(status);
+          }).length
+        : 0,
       absagen: false,
     }))
   );
@@ -3092,6 +3101,16 @@ function StelleBearbeitenScreen({ stelle, verein, onBack, onSave }) {
               setError("Titel und Beschreibung ausfüllen.");
               return;
             }
+
+            console.log("STELLE_EDIT_BUTTON", {
+              titel,
+              beschreibung,
+              standort,
+              dringend,
+              kategorie,
+              termine,
+            });
+
             onSave(
               { titel, beschreibung, aufwand, standort, dringend, kategorie },
               termine
