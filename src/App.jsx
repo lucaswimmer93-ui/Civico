@@ -692,6 +692,61 @@ export default function App() {
     }
   };
 
+  const getCurrentFreiwilligerRecord = async () => {
+    if (!user || user?.type !== "freiwilliger") {
+      return { id: null, authId: null, name: user?.data?.name || "", email: user?.data?.email || "" };
+    }
+
+    const authId = user?.data?.auth_id || null;
+    const fallbackId = user?.data?.id || null;
+
+    if (authId) {
+      const { data, error } = await supabase
+        .from("freiwillige")
+        .select("id, auth_id, name, email")
+        .eq("auth_id", authId)
+        .maybeSingle();
+
+      if (error) {
+        console.error("FREIWILLIGER LOOKUP FEHLER:", error);
+        throw error;
+      }
+
+      if (data?.id) {
+        return {
+          id: data.id,
+          authId: data.auth_id || authId,
+          name: data.name || user?.data?.name || "",
+          email: data.email || user?.data?.email || "",
+        };
+      }
+    }
+
+    if (fallbackId) {
+      const { data, error } = await supabase
+        .from("freiwillige")
+        .select("id, auth_id, name, email")
+        .eq("id", fallbackId)
+        .maybeSingle();
+
+      if (error) {
+        console.error("FREIWILLIGER FALLBACK LOOKUP FEHLER:", error);
+        throw error;
+      }
+
+      if (data?.id) {
+        return {
+          id: data.id,
+          authId: data.auth_id || authId || null,
+          name: data.name || user?.data?.name || "",
+          email: data.email || user?.data?.email || "",
+        };
+      }
+    }
+
+    throw new Error("Kein freiwillige-Datensatz für den eingeloggten Nutzer gefunden.");
+  };
+
   // ── Warteliste ─────────────────────────────────────────────────────────────
   const handleWarteliste = async (stelleId, terminId) => {
     if (!user) {
@@ -699,14 +754,15 @@ export default function App() {
       return;
     }
 
-    const waitlistUserId = user?.data?.auth_id || user?.data?.id || null;
-
-    if (!waitlistUserId) {
-      showToast("Dein Profil konnte nicht eindeutig zugeordnet werden.", "#E85C5C");
-      return;
-    }
-
     try {
+      const freiwilligerRecord = await getCurrentFreiwilligerRecord();
+      const waitlistUserId = freiwilligerRecord?.id;
+
+      if (!waitlistUserId) {
+        showToast("Dein Profil konnte nicht eindeutig zugeordnet werden.", "#E85C5C");
+        return;
+      }
+
       const { data: existingList, error: existingError } = await supabase
         .from("warteliste")
         .select("id, position, freiwilliger_id")
@@ -736,8 +792,8 @@ export default function App() {
         stelle_id: stelleId,
         termin_id: terminId,
         freiwilliger_id: waitlistUserId,
-        name: user.data.name,
-        email: user.data.email,
+        name: freiwilligerRecord?.name || user?.data?.name || "",
+        email: freiwilligerRecord?.email || user?.data?.email || "",
         position,
       });
 
@@ -763,11 +819,12 @@ export default function App() {
 
 
   const handleWartelisteRemove = async (stelleId, terminId) => {
-    const waitlistUserId = user?.data?.auth_id || user?.data?.id || null;
-
-    if (!waitlistUserId) return;
-
     try {
+      const freiwilligerRecord = await getCurrentFreiwilligerRecord();
+      const waitlistUserId = freiwilligerRecord?.id;
+
+      if (!waitlistUserId) return;
+
       const { error } = await supabase
         .from("warteliste")
         .delete()
