@@ -699,11 +699,20 @@ export default function App() {
       return;
     }
 
+    const waitlistUserId = user?.data?.auth_id || user?.data?.id || null;
+
+    if (!waitlistUserId) {
+      showToast("Dein Profil konnte nicht eindeutig zugeordnet werden.", "#E85C5C");
+      return;
+    }
+
     try {
       const { data: existingList, error: existingError } = await supabase
         .from("warteliste")
         .select("id, position, freiwilliger_id")
-        .eq("termin_id", terminId);
+        .eq("termin_id", terminId)
+        .order("position", { ascending: true })
+        .order("created_at", { ascending: true });
 
       if (existingError) {
         console.error("WARTELISTE CHECK FEHLER:", existingError);
@@ -712,11 +721,12 @@ export default function App() {
       }
 
       const existing = (existingList || []).find(
-        (w) => String(w.freiwilliger_id) === String(user.data.id)
+        (w) => String(w?.freiwilliger_id) === String(waitlistUserId)
       );
 
       if (existing) {
         showToast(`Wartelistenplatz ${existing.position}`, "#E8A87C");
+        if (selected?.id) await reloadSelected(selected.id);
         return;
       }
 
@@ -725,7 +735,7 @@ export default function App() {
       const { error: insertError } = await supabase.from("warteliste").insert({
         stelle_id: stelleId,
         termin_id: terminId,
-        freiwilliger_id: user.data.id,
+        freiwilliger_id: waitlistUserId,
         name: user.data.name,
         email: user.data.email,
         position,
@@ -734,6 +744,7 @@ export default function App() {
       if (insertError) {
         if (insertError.code === "23505") {
           showToast("Du stehst bereits auf der Warteliste.", "#E8A87C");
+          if (selected?.id) await reloadSelected(selected.id);
           return;
         }
         console.error("WARTELISTE INSERT FEHLER:", insertError);
@@ -743,14 +754,7 @@ export default function App() {
 
       showToast(`✓ Wartelistenplatz ${position}`, "#E8A87C");
       await loadStellen(gemeindeId, user.data.plz, user.data.umkreis);
-      if (selected?.id) {
-        const { data: refreshedSelected } = await supabase
-          .from("stellen")
-          .select("*, vereine(*), termine(*, bewerbungen(*)), warteliste(*)")
-          .eq("id", selected.id)
-          .single();
-        if (refreshedSelected) setSelected(refreshedSelected);
-      }
+      if (selected?.id) await reloadSelected(selected.id);
     } catch (error) {
       console.error("HANDLE WARTELISTE FEHLER:", error);
       showToast("Fehler beim Eintragen in die Warteliste.", "#E85C5C");
@@ -759,14 +763,16 @@ export default function App() {
 
 
   const handleWartelisteRemove = async (stelleId, terminId) => {
-    if (!user?.data?.id) return;
+    const waitlistUserId = user?.data?.auth_id || user?.data?.id || null;
+
+    if (!waitlistUserId) return;
 
     try {
       const { error } = await supabase
         .from("warteliste")
         .delete()
         .eq("termin_id", terminId)
-        .eq("freiwilliger_id", user.data.id);
+        .eq("freiwilliger_id", waitlistUserId);
 
       if (error) {
         console.error("WARTELISTE DELETE FEHLER:", error);
