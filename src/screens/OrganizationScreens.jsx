@@ -85,10 +85,23 @@ function VereinDashboard({
   };
 
   const ensureSupportThread = async () => {
-    if (!user?.data?.id) return;
+    if (!user?.data?.id) return null;
+
     try {
       setSupportLoading(true);
       setSupportError('');
+
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError) {
+        console.error('Fehler beim Prüfen der Supabase-Session:', sessionError);
+        setSupportError(sessionError.message || 'Support konnte nicht geladen werden.');
+        return null;
+      }
+
+      if (!sessionData?.session) {
+        console.warn('Kein Supabase-Session gefunden – Support-Thread wird nicht automatisch erstellt.');
+        return null;
+      }
 
       const { data: existing, error: existingError } = await supabase
         .from('message_threads')
@@ -103,7 +116,7 @@ function VereinDashboard({
 
       if (existing?.id) {
         setSupportThreadId(existing.id);
-        return;
+        return existing.id;
       }
 
       const { data: created, error: createError } = await supabase
@@ -119,10 +132,13 @@ function VereinDashboard({
         .single();
 
       if (createError) throw createError;
-      setSupportThreadId(created?.id || null);
+      const createdId = created?.id || null;
+      setSupportThreadId(createdId);
+      return createdId;
     } catch (err) {
       console.error('Fehler beim Laden des Support-Threads:', err);
-      setSupportError(err.message || 'Support konnte nicht geladen werden.');
+      setSupportError(err?.message || 'Support konnte nicht geladen werden.');
+      return null;
     } finally {
       setSupportLoading(false);
     }
@@ -1999,7 +2015,7 @@ function StelleErstellenScreen({ verein, onBack, onSave }) {
                 </div>
                 <input
                   type="number"
-                  min="0"
+                  min="1"
                   value={t.plaetze}
                   onChange={(e) =>
                     updateTermin(i, "plaetze", parseInt(e.target.value) || 1)
@@ -2717,16 +2733,7 @@ function StelleBearbeitenScreen({ stelle, verein, onBack, onSave }) {
       datum: t.datum || "",
       startzeit: t.startzeit || "",
       endzeit: t.endzeit || "",
-      plaetze:
-        t?.freie_plaetze !== undefined && t?.freie_plaetze !== null
-          ? Number(t.freie_plaetze)
-          : 5,
-      aktiveBewerbungen: Array.isArray(t?.bewerbungen)
-        ? t.bewerbungen.filter((b) => {
-            const status = String(b?.status || "").toLowerCase();
-            return !["storniert", "abgesagt", "cancelled", "canceled"].includes(status);
-          }).length
-        : 0,
+      plaetze: t.freie_plaetze || 5,
       absagen: false,
     }))
   );
@@ -3101,16 +3108,6 @@ function StelleBearbeitenScreen({ stelle, verein, onBack, onSave }) {
               setError("Titel und Beschreibung ausfüllen.");
               return;
             }
-
-            console.log("STELLE_EDIT_BUTTON", {
-              titel,
-              beschreibung,
-              standort,
-              dringend,
-              kategorie,
-              termine,
-            });
-
             onSave(
               { titel, beschreibung, aufwand, standort, dringend, kategorie },
               termine
