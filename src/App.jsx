@@ -758,9 +758,17 @@ export default function App() {
       const freiwilligerRecord = await getCurrentFreiwilligerRecord();
       const waitlistUserId = freiwilligerRecord?.id;
 
+      console.log("WL INSERT DEBUG", {
+        userData: user?.data,
+        freiwilligerRecord,
+        waitlistUserId,
+        stelleId,
+        terminId,
+      });
+
       if (!waitlistUserId) {
         showToast("Dein Profil konnte nicht eindeutig zugeordnet werden.", "#E85C5C");
-        return { ok: false, reason: "missing_user" };
+        return;
       }
 
       const { data: existingList, error: existingError } = await supabase
@@ -770,10 +778,19 @@ export default function App() {
         .order("position", { ascending: true })
         .order("created_at", { ascending: true });
 
+      console.log("WL EXISTING DEBUG", {
+        terminId,
+        existingList,
+        waitlistUserId,
+        match: (existingList || []).find(
+          (w) => String(w?.freiwilliger_id) === String(waitlistUserId)
+        ),
+      });
+
       if (existingError) {
         console.error("WARTELISTE CHECK FEHLER:", existingError);
         showToast("Fehler beim Prüfen der Warteliste.", "#E85C5C");
-        return { ok: false, reason: "check_failed" };
+        return;
       }
 
       const existing = (existingList || []).find(
@@ -783,13 +800,7 @@ export default function App() {
       if (existing) {
         showToast(`Wartelistenplatz ${existing.position}`, "#E8A87C");
         if (selected?.id) await reloadSelected(selected.id);
-        return {
-          ok: true,
-          action: "already_on_waitlist",
-          position: Number(existing.position) || null,
-          total: existingList?.length || 0,
-          waitlistUserId,
-        };
+        return;
       }
 
       const position = (existingList?.length || 0) + 1;
@@ -807,33 +818,19 @@ export default function App() {
         if (insertError.code === "23505") {
           showToast("Du stehst bereits auf der Warteliste.", "#E8A87C");
           if (selected?.id) await reloadSelected(selected.id);
-          return {
-            ok: true,
-            action: "already_on_waitlist",
-            position,
-            total: existingList?.length || position,
-            waitlistUserId,
-          };
+          return;
         }
         console.error("WARTELISTE INSERT FEHLER:", insertError);
         showToast("Fehler beim Eintragen in die Warteliste.", "#E85C5C");
-        return { ok: false, reason: "insert_failed", error: insertError };
+        return;
       }
 
       showToast(`✓ Wartelistenplatz ${position}`, "#E8A87C");
       await loadStellen(gemeindeId, user.data.plz, user.data.umkreis);
       if (selected?.id) await reloadSelected(selected.id);
-      return {
-        ok: true,
-        action: "added_to_waitlist",
-        position,
-        total: position,
-        waitlistUserId,
-      };
     } catch (error) {
       console.error("HANDLE WARTELISTE FEHLER:", error);
       showToast("Fehler beim Eintragen in die Warteliste.", "#E85C5C");
-      return { ok: false, reason: "exception", error };
     }
   };
 
@@ -843,7 +840,7 @@ export default function App() {
       const freiwilligerRecord = await getCurrentFreiwilligerRecord();
       const waitlistUserId = freiwilligerRecord?.id;
 
-      if (!waitlistUserId) return { ok: false, reason: "missing_user" };
+      if (!waitlistUserId) return;
 
       const { error } = await supabase
         .from("warteliste")
@@ -854,17 +851,15 @@ export default function App() {
       if (error) {
         console.error("WARTELISTE DELETE FEHLER:", error);
         showToast("Fehler beim Entfernen von der Warteliste.", "#E85C5C");
-        return { ok: false, reason: "delete_failed", error };
+        return;
       }
 
       showToast("Du wurdest von der Warteliste entfernt.", "#E8A87C");
       await loadStellen(gemeindeId, user?.data?.plz, user?.data?.umkreis);
       if (selected?.id) await reloadSelected(selected.id);
-      return { ok: true, action: "removed_from_waitlist", waitlistUserId };
     } catch (error) {
       console.error("WARTELISTE REMOVE FEHLER:", error);
       showToast("Fehler beim Entfernen von der Warteliste.", "#E85C5C");
-      return { ok: false, reason: "exception", error };
     }
   };
 
