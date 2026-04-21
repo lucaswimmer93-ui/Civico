@@ -246,29 +246,62 @@ function DetailScreen({
   const [detailTerminChatErrors, setDetailTerminChatErrors] = useState({});
   const [detailTerminChatOpen, setDetailTerminChatOpen] = useState({});
   const [detailWaitlistTerminIds, setDetailWaitlistTerminIds] = useState([]);
+  const [detailWaitlistInfo, setDetailWaitlistInfo] = useState({});
+
   useEffect(() => {
     let active = true;
 
     async function loadDetailWaitlist() {
-      if (!user?.data?.id || user?.type === "verein") {
-        if (active) setDetailWaitlistTerminIds([]);
+      const terminIds = (termine || []).map((termin) => termin?.id).filter(Boolean);
+
+      if (!user?.data?.id || user?.type === "verein" || terminIds.length === 0) {
+        if (active) {
+          setDetailWaitlistTerminIds([]);
+          setDetailWaitlistInfo({});
+        }
         return;
       }
 
       const { data, error } = await supabase
         .from("warteliste")
-        .select("termin_id")
-        .eq("freiwilliger_id", user.data.id);
+        .select("id, termin_id, freiwilliger_id, position, created_at")
+        .in("termin_id", terminIds)
+        .order("position", { ascending: true })
+        .order("created_at", { ascending: true });
 
       if (!active) return;
 
       if (error) {
         console.error("DETAIL WARTELISTE LADEN FEHLER:", error);
         setDetailWaitlistTerminIds([]);
+        setDetailWaitlistInfo({});
         return;
       }
 
-      setDetailWaitlistTerminIds((data || []).map((row) => row.termin_id).filter(Boolean));
+      const grouped = {};
+      for (const row of data || []) {
+        if (!row?.termin_id) continue;
+        if (!grouped[row.termin_id]) grouped[row.termin_id] = [];
+        grouped[row.termin_id].push(row);
+      }
+
+      const info = {};
+      const ids = [];
+      for (const [terminId, rows] of Object.entries(grouped)) {
+        const myIndex = rows.findIndex((row) => row?.freiwilliger_id === user.data.id);
+        if (myIndex >= 0) {
+          const myRow = rows[myIndex];
+          ids.push(terminId);
+          info[terminId] = {
+            id: myRow?.id || null,
+            position: Number(myRow?.position) || myIndex + 1,
+            total: rows.length,
+          };
+        }
+      }
+
+      setDetailWaitlistTerminIds(ids);
+      setDetailWaitlistInfo(info);
     }
 
     loadDetailWaitlist();
@@ -276,7 +309,7 @@ function DetailScreen({
     return () => {
       active = false;
     };
-  }, [user?.data?.id, user?.type, stelle?.id]);
+  }, [user?.data?.id, user?.type, stelle?.id, termine.length]);
 
 
   const openDetailTerminChat = async (terminId) => {
@@ -533,6 +566,7 @@ function DetailScreen({
               : null;
             const { freiePlaetze, angemeldet, belegt } = getTerminPlaetze(t);
             const isOnWaitlist = detailWaitlistTerminIds.includes(t.id);
+            const waitlistInfo = detailWaitlistInfo[t.id] || null;
             return (
               <div
                 key={t.id}
@@ -756,14 +790,34 @@ function DetailScreen({
                 ) : user && user?.type !== "verein" ? (
                   <button
                     onClick={async () => {
-                      if (isOnWaitlist) return;
+                      if (isOnWaitlist) {
+                        if (!onWartelisteRemove) return;
+                        await onWartelisteRemove(stelle.id, t.id);
+                        setDetailWaitlistTerminIds((prev) => prev.filter((terminId) => terminId !== t.id));
+                        setDetailWaitlistInfo((prev) => {
+                          const next = { ...prev };
+                          delete next[t.id];
+                          return next;
+                        });
+                        return;
+                      }
+
                       if (!onWarteliste) return;
                       await onWarteliste(stelle.id, t.id);
+
+                      const nextTotal = Number(waitlistInfo?.total || 0) + 1;
                       setDetailWaitlistTerminIds((prev) =>
                         prev.includes(t.id) ? prev : [...prev, t.id]
                       );
+                      setDetailWaitlistInfo((prev) => ({
+                        ...prev,
+                        [t.id]: {
+                          id: prev?.[t.id]?.id || null,
+                          position: prev?.[t.id]?.position || nextTotal,
+                          total: nextTotal,
+                        },
+                      }));
                     }}
-                    disabled={isOnWaitlist}
                     style={{
                       width: "100%",
                       padding: "10px",
@@ -774,11 +828,13 @@ function DetailScreen({
                       fontSize: 13,
                       fontFamily: "inherit",
                       fontWeight: "bold",
-                      cursor: isOnWaitlist ? "default" : "pointer",
+                      cursor: "pointer",
                       opacity: isOnWaitlist ? 0.95 : 1,
                     }}
                   >
-                    {isOnWaitlist ? "❌ Von Warteliste entfernen" : "📋 Auf die Warteliste"}
+                    {isOnWaitlist
+                      ? `❌ Warteliste verlassen · Platz ${waitlistInfo?.position || '-'} von ${waitlistInfo?.total || '-'}`
+                      : "📋 Auf die Warteliste"}
                   </button>
                 ) : null}
               </div>

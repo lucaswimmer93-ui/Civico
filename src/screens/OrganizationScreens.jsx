@@ -76,7 +76,46 @@ function VereinDashboard({
   const [vereinKommunikationError, setVereinKommunikationError] = useState('');
   const [terminChatThreads, setTerminChatThreads] = useState([]);
   const [selectedCommunicationThread, setSelectedCommunicationThread] = useState(null);
+  const [wartelistenByTermin, setWartelistenByTermin] = useState({});
 
+  useEffect(() => {
+    let active = true;
+    const terminIds = (meineStellen || [])
+      .flatMap((stelle) => stelle?.termine || [])
+      .map((termin) => termin?.id)
+      .filter(Boolean);
+
+    if (!terminIds.length) {
+      setWartelistenByTermin({});
+      return () => {
+        active = false;
+      };
+    }
+
+    supabase
+      .from('warteliste')
+      .select('id, termin_id')
+      .in('termin_id', terminIds)
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (error) {
+          console.error('WARTELISTEN FÜR VEREIN LADEN FEHLER:', error);
+          setWartelistenByTermin({});
+          return;
+        }
+
+        const grouped = {};
+        for (const row of data || []) {
+          if (!row?.termin_id) continue;
+          grouped[row.termin_id] = (grouped[row.termin_id] || 0) + 1;
+        }
+        setWartelistenByTermin(grouped);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [user?.data?.id, meineStellen.length, stellen]);
 
   const supportOrganisation = {
     type: 'verein',
@@ -573,6 +612,10 @@ function VereinDashboard({
                   (sum, t) => sum + aktiveBewerbungen(t.bewerbungen || []).length,
                   0
                 );
+                const wartelistenCount = (s.termine || []).reduce(
+                  (sum, t) => sum + Number(wartelistenByTermin?.[t.id] || 0),
+                  0
+                );
                 return (
                   <div
                     key={s.id}
@@ -591,20 +634,8 @@ function VereinDashboard({
                       <div style={{ fontWeight: "bold", fontSize: 14 }}>
                         {s.titel}
                       </div>
-                      {((s?.warteliste?.length || 0) > 0) && (
-                        <div
-                          style={{
-                            marginTop: 6,
-                            fontSize: 12,
-                            fontWeight: "bold",
-                            color: s.warteliste.length >= 3 ? "#B53A2D" : "#A05A2C",
-                          }}
-                        >
-                          📋 {s.warteliste.length} in der Warteliste
-                        </div>
-                      )}
                       <div style={{ fontSize: 12, color: "#8B7355", marginTop: 4 }}>
-                        📍 {s.ort} · 👥 {gesamtAnmeldungen} Anmeldungen · 👁️ {s.aufrufe || 0} Aufrufe
+                        📍 {s.ort} · 👥 {gesamtAnmeldungen} Anmeldungen · 👁️ {s.aufrufe || 0} Aufrufe{wartelistenCount > 0 ? ` · 📋 ${wartelistenCount} auf Warteliste` : ""}
                       </div>
                     </div>
                     <div style={{ display: "flex", gap: 8 }}>
