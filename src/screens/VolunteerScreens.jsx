@@ -288,7 +288,7 @@ function DetailScreen({
       const info = {};
       const ids = [];
       for (const [terminId, rows] of Object.entries(grouped)) {
-        const myIndex = rows.findIndex((row) => row?.freiwilliger_id === user.data.id);
+        const myIndex = rows.findIndex((row) => String(row?.freiwilliger_id) === String(user.data.id));
         if (myIndex >= 0) {
           const myRow = rows[myIndex];
           ids.push(terminId);
