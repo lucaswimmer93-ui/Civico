@@ -1,4 +1,4 @@
-import { supabase } from "../lib/supabaseclient";
+import { supabase } from "../core/shared";
 
 function getStoredLastRole() {
   if (typeof window === "undefined") return null;
@@ -558,13 +558,7 @@ export async function sendMessage(threadId, body) {
  * Read-Status setzen
  */
 export async function markThreadAsRead(threadId) {
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser();
-
-  if (userError) throw userError;
-  if (!user) throw new Error("Kein eingeloggter User");
+  const actor = await getCurrentActor();
 
   const { error } = await supabase
     .from("message_read_status")
@@ -572,7 +566,7 @@ export async function markThreadAsRead(threadId) {
       [
         {
           thread_id: threadId,
-          user_id: user.id,
+          user_id: actor.userId,
           last_read_at: new Date().toISOString(),
         },
       ],
@@ -588,13 +582,7 @@ export async function markThreadAsRead(threadId) {
  * Read-Status des Gegenübers für einen Thread laden
  */
 export async function getThreadReadState(threadId) {
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser();
-
-  if (userError) throw userError;
-  if (!user) return null;
+  const actor = await getCurrentActor();
 
   const { data, error } = await supabase
     .from("message_read_status")
@@ -603,7 +591,7 @@ export async function getThreadReadState(threadId) {
 
   if (error) throw error;
 
-  const others = (data || []).filter((row) => row.user_id !== user.id);
+  const others = (data || []).filter((row) => row.user_id !== actor.userId);
 
   const lastReadByOthersAt = others.reduce((latest, row) => {
     if (!row?.last_read_at) return latest;
@@ -612,7 +600,7 @@ export async function getThreadReadState(threadId) {
   }, null);
 
   return {
-    currentUserId: user.id,
+    currentUserId: actor.userId,
     lastReadByOthersAt,
   };
 }
