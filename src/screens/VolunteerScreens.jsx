@@ -288,7 +288,12 @@ function DetailScreen({
       const info = {};
       const ids = [];
       for (const [terminId, rows] of Object.entries(grouped)) {
-        const myIndex = rows.findIndex((row) => String(row?.freiwilliger_id) === String(user.data.id));
+        const myUserIds = [user?.data?.auth_id, user?.data?.id]
+          .filter(Boolean)
+          .map((value) => String(value));
+        const myIndex = rows.findIndex((row) =>
+          myUserIds.includes(String(row?.freiwilliger_id))
+        );
         if (myIndex >= 0) {
           const myRow = rows[myIndex];
           ids.push(terminId);
@@ -311,6 +316,7 @@ function DetailScreen({
     };
   }, [
     user?.data?.id,
+    user?.data?.auth_id,
     user?.type,
     stelle?.id,
     (termine || []).map((termin) => termin?.id).filter(Boolean).join("|"),
