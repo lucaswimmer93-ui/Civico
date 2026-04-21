@@ -730,7 +730,26 @@ export default function App() {
       }
 
       const position = (count || 0) + 1;
-      const { error: insertError } = await supabase.from("warteliste").insert({
+      const { error: insertError } = // check existing waitlist entry
+const { data: existingWl, error: existingWlError } = await supabase
+  .from("warteliste")
+  .select("id")
+  .eq("termin_id", terminId)
+  .eq("freiwilliger_id", user.data.id)
+  .maybeSingle();
+
+if (existingWlError) {
+  console.error("WARTELISTE CHECK FEHLER:", existingWlError);
+  showToast("Fehler beim Prüfen der Warteliste", "red");
+  return;
+}
+
+if (existingWl) {
+  showToast("Du stehst bereits auf der Warteliste", "#E8A87C");
+  return;
+}
+
+await supabase.from("warteliste").insert({
         stelle_id: stelleId,
         termin_id: terminId,
         freiwilliger_id: user.data.id,
