@@ -19,6 +19,28 @@ const bewerbungIstAktiv = (bewerbung) => {
   return !["storniert", "abgesagt", "cancelled", "canceled"].includes(status);
 };
 
+const getResolvedFreiwilligerId = async (user) => {
+  const authId = user?.data?.auth_id || null;
+  const fallbackId = user?.data?.id || null;
+
+  if (authId) {
+    const { data, error } = await supabase
+      .from("freiwillige")
+      .select("id")
+      .eq("auth_id", authId)
+      .maybeSingle();
+
+    if (error) {
+      console.error("FREIWILLIGER RESOLVE FEHLER:", error);
+      return null;
+    }
+
+    if (data?.id) return data.id;
+  }
+
+  return fallbackId || null;
+};
+
 const getVereinLogoSrc = (verein) => {
   const raw = verein?.logo_url || verein?.logo || "";
   if (typeof raw !== "string") return "";
@@ -2360,49 +2382,53 @@ function FreiwilligerProfil({
 
   useEffect(() => {
     let active = true;
-    const waitlistUserId = user?.data?.auth_id || user?.data?.id || null;
 
-    if (!waitlistUserId) {
-      setMeineWarteliste([]);
-      return () => {
-        active = false;
-      };
+    async function loadMeineWarteliste() {
+      const waitlistUserId = await getResolvedFreiwilligerId(user);
+
+      if (!active) return;
+
+      if (!waitlistUserId) {
+        setMeineWarteliste([]);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("warteliste")
+        .select(`
+          id,
+          position,
+          created_at,
+          termin_id,
+          stelle_id,
+          termine:termin_id (
+            id,
+            datum,
+            startzeit,
+            endzeit
+          ),
+          stellen:stelle_id (
+            id,
+            titel,
+            ort,
+            vereine (
+              name
+            )
+          )
+        `)
+        .eq("freiwilliger_id", waitlistUserId)
+        .order("created_at", { ascending: true });
+
+      if (!active) return;
+      if (error) {
+        console.error("MEINE WARTELISTE LADEN FEHLER:", error);
+        setMeineWarteliste([]);
+        return;
+      }
+      setMeineWarteliste(data || []);
     }
 
-    supabase
-      .from("warteliste")
-      .select(`
-        id,
-        position,
-        created_at,
-        termin_id,
-        stelle_id,
-        termine:termin_id (
-          id,
-          datum,
-          startzeit,
-          endzeit
-        ),
-        stellen:stelle_id (
-          id,
-          titel,
-          ort,
-          vereine (
-            name
-          )
-        )
-      `)
-      .eq("freiwilliger_id", waitlistUserId)
-      .order("created_at", { ascending: true })
-      .then(({ data, error }) => {
-        if (!active) return;
-        if (error) {
-          console.error("MEINE WARTELISTE LADEN FEHLER:", error);
-          setMeineWarteliste([]);
-          return;
-        }
-        setMeineWarteliste(data || []);
-      });
+    loadMeineWarteliste();
 
     return () => {
       active = false;
