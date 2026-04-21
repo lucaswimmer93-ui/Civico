@@ -732,6 +732,10 @@ export default function App() {
       });
 
       if (insertError) {
+        if (insertError.code === "23505") {
+          showToast("Du stehst bereits auf der Warteliste.", "#E8A87C");
+          return;
+        }
         console.error("WARTELISTE INSERT FEHLER:", insertError);
         showToast("Fehler beim Eintragen in die Warteliste.", "#E85C5C");
         return;
@@ -739,7 +743,14 @@ export default function App() {
 
       showToast(`✓ Wartelistenplatz ${position}`, "#E8A87C");
       await loadStellen(gemeindeId, user.data.plz, user.data.umkreis);
-      if (selected?.id) await reloadSelected(selected.id);
+      if (selected?.id) {
+        const { data: refreshedSelected } = await supabase
+          .from("stellen")
+          .select("*, vereine(*), termine(*, bewerbungen(*)), warteliste(*)")
+          .eq("id", selected.id)
+          .single();
+        if (refreshedSelected) setSelected(refreshedSelected);
+      }
     } catch (error) {
       console.error("HANDLE WARTELISTE FEHLER:", error);
       showToast("Fehler beim Eintragen in die Warteliste.", "#E85C5C");
