@@ -3619,131 +3619,92 @@ export default function App() {
             verein={user.data}
             onBack={goBack}
             onSave={async (stelleData, termineData) => {
-              try {
-                console.log("APP_ONSAVE_START", {
-                  stelleData,
-                  termineData,
-                  selected,
-                });
+              await supabase
+                .from("stellen")
+                .update(stelleData)
+                .eq("id", selected.id);
+              // Abgesagte Termine löschen + Freiwillige benachrichtigen
+              const abgesagt = termineData.filter((t) => t.absagen && t.id);
+              for (const t of abgesagt) {
+                const { error: markCancelledError } = await supabase
+                  .from("termine")
+                  .update({ abgesagt: true })
+                  .eq("id", t.id);
+                if (markCancelledError) throw markCancelledError;
 
-                const { error: stelleUpdateError } = await supabase
-                  .from("stellen")
-                  .update(stelleData)
-                  .eq("id", selected.id);
+                const { error: rpcError } = await supabase.rpc(
+                  "queue_termin_cancelled_for_termin",
+                  { p_termin_id: t.id }
+                );
+                if (rpcError) throw rpcError;
 
-                console.log("STELLE_UPDATE_RESULT", {
-                  stelleUpdateError,
-                  selectedId: selected.id,
-                });
+                const { error: bewerbungenDeleteError } = await supabase
+                  .from("bewerbungen")
+                  .delete()
+                  .eq("termin_id", t.id);
+                if (bewerbungenDeleteError) throw bewerbungenDeleteError;
 
-                if (stelleUpdateError) throw stelleUpdateError;
+                const { error: wartelisteDeleteError } = await supabase
+                  .from("warteliste")
+                  .delete()
+                  .eq("termin_id", t.id);
+                if (wartelisteDeleteError) throw wartelisteDeleteError;
 
-                // Abgesagte Termine löschen + Freiwillige benachrichtigen
-                const abgesagt = termineData.filter((t) => t.absagen && t.id);
-                for (const t of abgesagt) {
-                  const { error: markCancelledError } = await supabase
-                    .from("termine")
-                    .update({ abgesagt: true })
-                    .eq("id", t.id);
-                  if (markCancelledError) throw markCancelledError;
-
+                const { error: terminDeleteError } = await supabase
+                  .from("termine")
+                  .delete()
+                  .eq("id", t.id);
+                if (terminDeleteError) throw terminDeleteError;
+              }
+              // Verschobene Termine updaten
+              const geaendert = termineData.filter((t) => !t.absagen && t.id);
+              for (const t of geaendert) {
+                const original = (selected.termine || []).find(
+                  (ot) => ot.id === t.id
+                );
+                await supabase
+                  .from("termine")
+                  .update({
+                    datum: t.datum,
+                    startzeit: t.startzeit,
+                    endzeit: t.endzeit || null,
+                  })
+                  .eq("id", t.id);
+                if (
+                  original &&
+                  (
+                    original.datum !== t.datum ||
+                    original.startzeit !== t.startzeit ||
+                    (original.endzeit || null) !== (t.endzeit || null)
+                  )
+                ) {
                   const { error: rpcError } = await supabase.rpc(
-                    "queue_termin_cancelled_for_termin",
+                    "queue_termin_rescheduled_for_termin",
                     { p_termin_id: t.id }
                   );
                   if (rpcError) throw rpcError;
-
-                  const { error: bewerbungenDeleteError } = await supabase
-                    .from("bewerbungen")
-                    .delete()
-                    .eq("termin_id", t.id);
-                  if (bewerbungenDeleteError) throw bewerbungenDeleteError;
-
-                  const { error: wartelisteDeleteError } = await supabase
-                    .from("warteliste")
-                    .delete()
-                    .eq("termin_id", t.id);
-                  if (wartelisteDeleteError) throw wartelisteDeleteError;
-
-                  const { error: terminDeleteError } = await supabase
-                    .from("termine")
-                    .delete()
-                    .eq("id", t.id);
-                  if (terminDeleteError) throw terminDeleteError;
                 }
-
-                // Bestehende Termine updaten
-                const geaendert = termineData.filter((t) => !t.absagen && t.id);
-                for (const t of geaendert) {
-                  const original = (selected.termine || []).find(
-                    (ot) => ot.id === t.id
-                  );
-                  const aktiveBewerbungen = Number(
-                    t?.aktiveBewerbungen ??
-                      (original?.bewerbungen || []).filter((b) => {
-                        const status = String(b?.status || "").toLowerCase();
-                        return !["storniert", "abgesagt", "cancelled", "canceled"].includes(status);
-                      }).length ??
-                      0
-                  );
-                  const freiePlaetze = Math.max(0, Number(t?.plaetze) || 0);
-                  const gesamtPlaetze = freiePlaetze + aktiveBewerbungen;
-
-                  const { error: terminUpdateError } = await supabase
-                    .from("termine")
-                    .update({
+              }
+              // Neue Termine einfügen
+              const neu = termineData.filter(
+                (t) => !t.absagen && !t.id && t.datum
+              );
+              if (neu.length > 0)
+                await supabase
+                  .from("termine")
+                  .insert(
+                    neu.map((t) => ({
                       datum: t.datum,
                       startzeit: t.startzeit,
                       endzeit: t.endzeit || null,
-                      freie_plaetze: freiePlaetze,
-                      gesamt_plaetze: gesamtPlaetze,
-                    })
-                    .eq("id", t.id);
-                  if (terminUpdateError) throw terminUpdateError;
-
-                  if (
-                    original &&
-                    (
-                      original.datum !== t.datum ||
-                      original.startzeit !== t.startzeit ||
-                      (original.endzeit || null) !== (t.endzeit || null)
-                    )
-                  ) {
-                    const { error: rpcError } = await supabase.rpc(
-                      "queue_termin_rescheduled_for_termin",
-                      { p_termin_id: t.id }
-                    );
-                    if (rpcError) throw rpcError;
-                  }
-                }
-
-                // Neue Termine einfügen
-                const neu = termineData.filter(
-                  (t) => !t.absagen && !t.id && t.datum
-                );
-                if (neu.length > 0) {
-                  const { error: insertError } = await supabase
-                    .from("termine")
-                    .insert(
-                      neu.map((t) => ({
-                        datum: t.datum,
-                        startzeit: t.startzeit,
-                        endzeit: t.endzeit || null,
-                        freie_plaetze: Math.max(0, Number(t?.plaetze) || 0),
-                        gesamt_plaetze: Math.max(0, Number(t?.plaetze) || 0),
-                        stelle_id: selected.id,
-                      }))
-                    );
-                  if (insertError) throw insertError;
-                }
-
-                showToast("✓ Stelle aktualisiert!");
-                await loadStellen(gemeindeId);
-                goBack();
-              } catch (error) {
-                console.error("STELLE BEARBEITEN FEHLER:", error);
-                showToast("Fehler beim Speichern der Stelle.", "#E85C5C");
-              }
+                      freie_plaetze: t.plaetze,
+                      gesamt_plaetze: t.plaetze,
+                      stelle_id: selected.id,
+                    }))
+                  );
+              showToast("✓ Stelle aktualisiert!");
+              await loadStellen(gemeindeId);
+              goBack();
             }}
           />
         )}
