@@ -309,7 +309,12 @@ function DetailScreen({
     return () => {
       active = false;
     };
-  }, [user?.data?.id, user?.type, stelle?.id, termine.length]);
+  }, [
+    user?.data?.id,
+    user?.type,
+    stelle?.id,
+    (termine || []).map((termin) => termin?.id).filter(Boolean).join("|"),
+  ]);
 
 
   const openDetailTerminChat = async (terminId) => {
@@ -565,14 +570,8 @@ function DetailScreen({
                 )
               : null;
             const { freiePlaetze, angemeldet, belegt } = getTerminPlaetze(t);
-            const waitlistEntry =
-                      (meineWarteliste || []).find(
-                        (w) => String(w.termin_id) === String(t.id)
-                      ) ||
-                      detailWaitlistInfo?.[t.id] ||
-                      null;
-                    const isOnWaitlist = !!waitlistEntry;
-            const waitlistInfo = detailWaitlistInfo[t.id] || null;
+            const waitlistInfo = detailWaitlistInfo?.[t.id] || null;
+            const isOnWaitlist = !!waitlistInfo;
             return (
               <div
                 key={t.id}
