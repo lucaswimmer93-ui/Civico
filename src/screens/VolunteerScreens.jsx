@@ -254,7 +254,11 @@ function DetailScreen({
     async function loadDetailWaitlist() {
       const terminIds = (termine || []).map((termin) => termin?.id).filter(Boolean);
 
-      if (!user?.data?.id || user?.type === "verein" || terminIds.length === 0) {
+      const myUserIds = [user?.data?.auth_id, user?.data?.id]
+        .filter(Boolean)
+        .map((value) => String(value));
+
+      if (myUserIds.length === 0 || user?.type === "verein" || terminIds.length === 0) {
         if (active) {
           setDetailWaitlistTerminIds([]);
           setDetailWaitlistInfo({});
@@ -288,9 +292,6 @@ function DetailScreen({
       const info = {};
       const ids = [];
       for (const [terminId, rows] of Object.entries(grouped)) {
-        const myUserIds = [user?.data?.auth_id, user?.data?.id]
-          .filter(Boolean)
-          .map((value) => String(value));
         const myIndex = rows.findIndex((row) =>
           myUserIds.includes(String(row?.freiwilliger_id))
         );
@@ -320,6 +321,7 @@ function DetailScreen({
     user?.type,
     stelle?.id,
     (termine || []).map((termin) => termin?.id).filter(Boolean).join("|"),
+    JSON.stringify(stelle?.warteliste || []),
   ]);
 
 
@@ -1616,7 +1618,7 @@ function FreiwilligenDashboard({
         const { data: bewerbungen, error: bewerbungenError } = await supabase
           .from("bewerbungen")
           .select("id, termin_id, stelle_id, status, bestaetigt")
-          .eq("freiwilliger_id", user.data.id)
+          .in("freiwilliger_id", [user.data.auth_id, user.data.id].filter(Boolean))
           .or("status.eq.erschienen,bestaetigt.eq.true");
 
         if (bewerbungenError) throw bewerbungenError;
