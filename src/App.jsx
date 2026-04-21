@@ -698,46 +698,31 @@ export default function App() {
       navigateTo("login");
       return;
     }
-    const { data: existingList, error: existingError } = await supabase
+    const { data: existing } = await supabase
       .from("warteliste")
-      .select("id, position, freiwilliger_id")
-      .eq("termin_id", Number(terminId));
-
-    if (existingError) {
-      console.error("WARTELISTE CHECK FEHLER:", existingError);
-      showToast("Fehler beim Prüfen der Warteliste.", "#E85C5C");
-      return;
-    }
-
-    const existing = (existingList || []).find(
-      (w) => String(w.freiwilliger_id) === String(user.data.id)
-    );
-
+      .select("id, position")
+      .eq("termin_id", terminId)
+      .eq("freiwilliger_id", user.data.id)
+      .maybeSingle();
     if (existing) {
       showToast(`Wartelistenplatz ${existing.position}`, "#E8A87C");
       return;
     }
-
-    const position = (existingList?.length || 0) + 1;
-
-    const { error: insertError } = await supabase.from("warteliste").insert({
+    const { count } = await supabase
+      .from("warteliste")
+      .select("id", { count: "exact", head: true })
+      .eq("termin_id", terminId);
+    const position = (count || 0) + 1;
+    await supabase.from("warteliste").insert({
       stelle_id: stelleId,
-      termin_id: Number(terminId),
+      termin_id: terminId,
       freiwilliger_id: user.data.id,
       name: user.data.name,
       email: user.data.email,
       position,
     });
-
-    if (insertError) {
-      console.error("WARTELISTE INSERT FEHLER:", insertError);
-      showToast("Fehler beim Eintragen in die Warteliste.", "#E85C5C");
-      return;
-    }
-
     showToast(`✓ Wartelistenplatz ${position}`, "#E8A87C");
     await loadStellen(gemeindeId, user.data.plz, user.data.umkreis);
-    if (selected?.id) await reloadSelected(selected.id);
   };
 
 
@@ -3635,22 +3620,10 @@ export default function App() {
             onBack={goBack}
             onSave={async (stelleData, termineData) => {
               try {
-                console.log("APP_ONSAVE_START", {
-                  stelleData,
-                  termineData,
-                  selected,
-                });
-
                 const { error: stelleUpdateError } = await supabase
                   .from("stellen")
                   .update(stelleData)
                   .eq("id", selected.id);
-
-                console.log("STELLE_UPDATE_RESULT", {
-                  stelleUpdateError,
-                  selectedId: selected.id,
-                });
-
                 if (stelleUpdateError) throw stelleUpdateError;
 
                 // Abgesagte Termine löschen + Freiwillige benachrichtigen
