@@ -2360,6 +2360,14 @@ function FreiwilligerProfil({
 
   useEffect(() => {
     let active = true;
+    const waitlistUserId = user?.data?.auth_id || user?.data?.id || null;
+
+    if (!waitlistUserId) {
+      setMeineWarteliste([]);
+      return () => {
+        active = false;
+      };
+    }
 
     supabase
       .from("warteliste")
@@ -2384,7 +2392,7 @@ function FreiwilligerProfil({
           )
         )
       `)
-      .eq("freiwilliger_id", user.data.id)
+      .eq("freiwilliger_id", waitlistUserId)
       .order("created_at", { ascending: true })
       .then(({ data, error }) => {
         if (!active) return;
@@ -2399,7 +2407,7 @@ function FreiwilligerProfil({
     return () => {
       active = false;
     };
-  }, [user.data.id]);
+  }, [user?.data?.id, user?.data?.auth_id]);
 
 
   useEffect(() => {
