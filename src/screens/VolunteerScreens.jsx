@@ -281,6 +281,7 @@ function DetailScreen({
   const [detailTerminChatOpen, setDetailTerminChatOpen] = useState({});
   const [detailWaitlistTerminIds, setDetailWaitlistTerminIds] = useState([]);
   const [detailWaitlistInfo, setDetailWaitlistInfo] = useState({});
+  const [detailWaitlistLoading, setDetailWaitlistLoading] = useState(true);
 
   useEffect(() => {
     let active = true;
@@ -288,10 +289,13 @@ function DetailScreen({
     async function loadDetailWaitlist() {
       const terminIds = (termine || []).map((termin) => termin?.id).filter(Boolean);
 
+      if (active) setDetailWaitlistLoading(true);
+
       if (user?.type === "verein" || terminIds.length === 0) {
         if (active) {
           setDetailWaitlistTerminIds([]);
           setDetailWaitlistInfo({});
+          setDetailWaitlistLoading(false);
         }
         return;
       }
@@ -302,6 +306,7 @@ function DetailScreen({
         if (active) {
           setDetailWaitlistTerminIds([]);
           setDetailWaitlistInfo({});
+          setDetailWaitlistLoading(false);
         }
         return;
       }
@@ -319,6 +324,7 @@ function DetailScreen({
         console.error("DETAIL WARTELISTE LADEN FEHLER:", error);
         setDetailWaitlistTerminIds([]);
         setDetailWaitlistInfo({});
+        setDetailWaitlistLoading(false);
         return;
       }
 
@@ -348,6 +354,7 @@ function DetailScreen({
 
       setDetailWaitlistTerminIds(ids);
       setDetailWaitlistInfo(info);
+      setDetailWaitlistLoading(false);
     }
 
     loadDetailWaitlist();
@@ -620,6 +627,7 @@ function DetailScreen({
             const { freiePlaetze, angemeldet, belegt } = getTerminPlaetze(t);
             const waitlistInfo = detailWaitlistInfo?.[t.id] || null;
             const isOnWaitlist = !!waitlistInfo;
+            const isWaitlistLoading = detailWaitlistLoading && user && user?.type !== "verein" && belegt;
             return (
               <div
                 key={t.id}
@@ -841,54 +849,73 @@ function DetailScreen({
                     ⏳ Termin läuft gerade – Anmeldung nicht mehr möglich
                   </div>
                 ) : user && user?.type !== "verein" ? (
-                  <button
-                    onClick={async () => {
-                      if (isOnWaitlist) {
-                        if (!onWartelisteRemove) return;
-                        await onWartelisteRemove(stelle.id, t.id);
-                        setDetailWaitlistTerminIds((prev) => prev.filter((terminId) => terminId !== t.id));
-                        setDetailWaitlistInfo((prev) => {
-                          const next = { ...prev };
-                          delete next[t.id];
-                          return next;
-                        });
-                        return;
-                      }
+                  isWaitlistLoading ? (
+                    <div
+                      style={{
+                        width: "100%",
+                        padding: "10px",
+                        borderRadius: 10,
+                        border: "1px solid #E0D8C8",
+                        background: "#F6F1E8",
+                        color: "#8B7355",
+                        fontSize: 13,
+                        fontFamily: "inherit",
+                        fontWeight: "bold",
+                        textAlign: "center",
+                      }}
+                    >
+                      Wartelistenstatus wird geladen …
+                    </div>
+                  ) : (
+                    <button
+                      onClick={async () => {
+                        if (isOnWaitlist) {
+                          if (!onWartelisteRemove) return;
+                          await onWartelisteRemove(stelle.id, t.id);
+                          setDetailWaitlistTerminIds((prev) => prev.filter((terminId) => terminId !== t.id));
+                          setDetailWaitlistInfo((prev) => {
+                            const next = { ...prev };
+                            delete next[t.id];
+                            return next;
+                          });
+                          return;
+                        }
 
-                      if (!onWarteliste) return;
-                      await onWarteliste(stelle.id, t.id);
+                        if (!onWarteliste) return;
+                        await onWarteliste(stelle.id, t.id);
 
-                      const nextTotal = Number(waitlistInfo?.total || 0) + 1;
-                      setDetailWaitlistTerminIds((prev) =>
-                        prev.includes(t.id) ? prev : [...prev, t.id]
-                      );
-                      setDetailWaitlistInfo((prev) => ({
-                        ...prev,
-                        [t.id]: {
-                          id: prev?.[t.id]?.id || null,
-                          position: prev?.[t.id]?.position || nextTotal,
-                          total: nextTotal,
-                        },
-                      }));
-                    }}
-                    style={{
-                      width: "100%",
-                      padding: "10px",
-                      borderRadius: 10,
-                      border: `1px solid ${isOnWaitlist ? "#D9C8A8" : "#E8A87C"}`,
-                      background: isOnWaitlist ? "#F6EFE4" : "transparent",
-                      color: isOnWaitlist ? "#8B7355" : "#E8A87C",
-                      fontSize: 13,
-                      fontFamily: "inherit",
-                      fontWeight: "bold",
-                      cursor: "pointer",
-                      opacity: isOnWaitlist ? 0.95 : 1,
-                    }}
-                  >
-                    {isOnWaitlist
-                      ? `❌ Warteliste verlassen · Platz ${waitlistInfo?.position || '-'} von ${waitlistInfo?.total || '-'}`
-                      : "📋 Auf die Warteliste"}
-                  </button>
+                        const nextTotal = Number(waitlistInfo?.total || 0) + 1;
+                        setDetailWaitlistTerminIds((prev) =>
+                          prev.includes(t.id) ? prev : [...prev, t.id]
+                        );
+                        setDetailWaitlistInfo((prev) => ({
+                          ...prev,
+                          [t.id]: {
+                            id: prev?.[t.id]?.id || null,
+                            position: prev?.[t.id]?.position || nextTotal,
+                            total: nextTotal,
+                          },
+                        }));
+                      }}
+                      style={{
+                        width: "100%",
+                        padding: "10px",
+                        borderRadius: 10,
+                        border: `1px solid ${isOnWaitlist ? "#D9C8A8" : "#E8A87C"}`,
+                        background: isOnWaitlist ? "#F6EFE4" : "transparent",
+                        color: isOnWaitlist ? "#8B7355" : "#E8A87C",
+                        fontSize: 13,
+                        fontFamily: "inherit",
+                        fontWeight: "bold",
+                        cursor: "pointer",
+                        opacity: isOnWaitlist ? 0.95 : 1,
+                      }}
+                    >
+                      {isOnWaitlist
+                        ? `❌ Warteliste verlassen · Platz ${waitlistInfo?.position || '-'} von ${waitlistInfo?.total || '-'}`
+                        : "📋 Auf die Warteliste"}
+                    </button>
+                  )
                 ) : null}
               </div>
             );
