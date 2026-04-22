@@ -693,38 +693,40 @@ export default function App() {
   };
 
   const getCurrentWartelisteFreiwilliger = async () => {
-    const authId = user?.data?.auth_id || user?.auth_id || null;
-    const fallbackId = user?.data?.id || null;
+    let authUid = null;
 
-    if (authId) {
-      const { data, error } = await supabase
-        .from("freiwillige")
-        .select("id, auth_id")
-        .eq("auth_id", authId)
-        .maybeSingle();
-
+    try {
+      const { data, error } = await supabase.auth.getUser();
       if (error) {
-        console.error("FREIWILLIGER LOOKUP FEHLER:", error);
+        console.error("AUTH USER LOOKUP FEHLER:", error);
       }
-
-      if (data?.id) return data;
+      authUid = data?.user?.id || null;
+    } catch (error) {
+      console.error("AUTH USER LOOKUP EXCEPTION:", error);
     }
 
-    if (fallbackId) {
-      const { data, error } = await supabase
-        .from("freiwillige")
-        .select("id, auth_id")
-        .eq("id", fallbackId)
-        .maybeSingle();
+    const authId = authUid || user?.data?.auth_id || user?.auth_id || null;
 
-      if (error) {
-        console.error("FREIWILLIGER FALLBACK LOOKUP FEHLER:", error);
-      }
-
-      if (data?.id) return data;
+    if (!authId) {
+      return null;
     }
 
-    return null;
+    const { data, error } = await supabase
+      .from("freiwillige")
+      .select("id, auth_id")
+      .eq("auth_id", authId)
+      .single();
+
+    if (error) {
+      console.error("FREIWILLIGER LOOKUP FEHLER:", error);
+      return null;
+    }
+
+    if (!data?.id) {
+      return null;
+    }
+
+    return data;
   };
 
   // ── Warteliste ─────────────────────────────────────────────────────────────
@@ -790,7 +792,7 @@ export default function App() {
         .single();
 
       if (insertError) {
-        if (insertError.code === "23505" || insertError.code === "409") {
+        if (insertError.code === "23505" || insertError.status === 409) {
           const { data: refreshedList } = await supabase
             .from("warteliste")
             .select("id, position, freiwilliger_id")
@@ -816,12 +818,13 @@ export default function App() {
               : null,
           };
         }
+
         console.error("WARTELISTE INSERT FEHLER:", insertError);
         showToast("Fehler beim Eintragen in die Warteliste.", "#E85C5C");
-        return { ok: false, status: "insert_failed" };
+        return { ok: false, status: "insert_failed", error: insertError };
       }
 
-      showToast(`✓ Wartelistenplatz ${position}`, "#E8A87C");
+      showToast(`✓ Wartelistenplatz ${insertedRow?.position || position}`, "#E8A87C");
       await loadStellen(gemeindeId, user.data.plz, user.data.umkreis);
       if (selected?.id) await reloadSelected(selected.id);
       return {
@@ -836,13 +839,13 @@ export default function App() {
     } catch (error) {
       console.error("HANDLE WARTELISTE FEHLER:", error);
       showToast("Fehler beim Eintragen in die Warteliste.", "#E85C5C");
-      return { ok: false, status: "exception" };
+      return { ok: false, status: "unexpected_error", error };
     }
   };
 
 
   const handleWartelisteRemove = async (stelleId, terminId) => {
-    if (!user) return { ok: false, status: "login_required" };
+    if (!user) return { ok: false, status: "missing_user" };
 
     try {
       const freiwilligerRecord = await getCurrentWartelisteFreiwilliger();
@@ -853,35 +856,26 @@ export default function App() {
         return { ok: false, status: "missing_freiwilliger" };
       }
 
-      const { data: removedRows, error } = await supabase
+      const { error } = await supabase
         .from("warteliste")
         .delete()
         .eq("termin_id", terminId)
-        .eq("freiwilliger_id", waitlistUserId)
-        .select("id");
+        .eq("freiwilliger_id", waitlistUserId);
 
       if (error) {
         console.error("WARTELISTE DELETE FEHLER:", error);
         showToast("Fehler beim Entfernen von der Warteliste.", "#E85C5C");
-        return { ok: false, status: "remove_failed" };
+        return { ok: false, status: "delete_failed", error };
       }
 
-      const wasRemoved = Array.isArray(removedRows) ? removedRows.length > 0 : false;
-
-      if (wasRemoved) {
-        showToast("Du wurdest von der Warteliste entfernt.", "#E8A87C");
-      }
-
+      showToast("Du wurdest von der Warteliste entfernt.", "#E8A87C");
       await loadStellen(gemeindeId, user?.data?.plz, user?.data?.umkreis);
       if (selected?.id) await reloadSelected(selected.id);
-      return {
-        ok: true,
-        status: wasRemoved ? "removed_from_waitlist" : "not_on_waitlist",
-      };
+      return { ok: true, status: "removed_from_waitlist" };
     } catch (error) {
       console.error("WARTELISTE REMOVE FEHLER:", error);
       showToast("Fehler beim Entfernen von der Warteliste.", "#E85C5C");
-      return { ok: false, status: "exception" };
+      return { ok: false, status: "unexpected_error", error };
     }
   };
 
