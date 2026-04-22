@@ -59,23 +59,38 @@ const getTerminPlaetze = (termin) => {
   };
 };
 
+
 const resolveCurrentFreiwilligerId = async (user) => {
-  const authId = user?.data?.auth_id || user?.auth_id || null;
-  const fallbackId = user?.data?.id || null;
+  let authUid = null;
 
-  if (authId) {
-    const { data, error } = await supabase
-      .from("freiwillige")
-      .select("id")
-      .eq("auth_id", authId)
-      .maybeSingle();
-
-    if (!error && data?.id) return String(data.id);
-    if (error) console.error("FREIWILLIGER RESOLVE FEHLER:", error);
+  try {
+    const { data, error } = await supabase.auth.getUser();
+    if (error) {
+      console.error("AUTH USER LOOKUP FEHLER:", error);
+    }
+    authUid = data?.user?.id || null;
+  } catch (error) {
+    console.error("AUTH USER LOOKUP EXCEPTION:", error);
   }
 
-  if (fallbackId) return String(fallbackId);
-  return null;
+  const authId = authUid || user?.data?.auth_id || user?.auth_id || null;
+
+  if (!authId) {
+    return null;
+  }
+
+  const { data, error } = await supabase
+    .from("freiwillige")
+    .select("id")
+    .eq("auth_id", authId)
+    .single();
+
+  if (error) {
+    console.error("FREIWILLIGER RESOLVE FEHLER:", error);
+    return null;
+  }
+
+  return data?.id ? String(data.id) : null;
 };
 
 const berechneTerminStunden = (termin, stelle = null) => {
@@ -830,8 +845,7 @@ function DetailScreen({
                     onClick={async () => {
                       if (isOnWaitlist) {
                         if (!onWartelisteRemove) return;
-                        const result = await onWartelisteRemove(stelle.id, t.id);
-                        if (!result?.ok) return;
+                        await onWartelisteRemove(stelle.id, t.id);
                         setDetailWaitlistTerminIds((prev) => prev.filter((terminId) => terminId !== t.id));
                         setDetailWaitlistInfo((prev) => {
                           const next = { ...prev };
@@ -842,21 +856,18 @@ function DetailScreen({
                       }
 
                       if (!onWarteliste) return;
-                      const result = await onWarteliste(stelle.id, t.id);
-                      if (!result?.ok) return;
+                      await onWarteliste(stelle.id, t.id);
 
-                      const nextInfo = result?.waitlist || null;
-                      if (!nextInfo) return;
-
+                      const nextTotal = Number(waitlistInfo?.total || 0) + 1;
                       setDetailWaitlistTerminIds((prev) =>
                         prev.includes(t.id) ? prev : [...prev, t.id]
                       );
                       setDetailWaitlistInfo((prev) => ({
                         ...prev,
                         [t.id]: {
-                          id: nextInfo?.id || prev?.[t.id]?.id || null,
-                          position: Number(nextInfo?.position) || prev?.[t.id]?.position || 1,
-                          total: Number(nextInfo?.total) || prev?.[t.id]?.total || 1,
+                          id: prev?.[t.id]?.id || null,
+                          position: prev?.[t.id]?.position || nextTotal,
+                          total: nextTotal,
                         },
                       }));
                     }}
@@ -2430,7 +2441,7 @@ function FreiwilligerProfil({
         setMeineWarteliste([]);
         return;
       }
-      setMeineWarteliste(data || []);
+        setMeineWarteliste(data || []);
     }
 
     loadMeineWarteliste();
@@ -2973,8 +2984,7 @@ function FreiwilligerProfil({
                   <button
                     onClick={async () => {
                       if (!onWartelisteRemove) return;
-                      const result = await onWartelisteRemove(w.stelle_id, w.termin_id);
-                      if (!result?.ok) return;
+                      await onWartelisteRemove(w.stelle_id, w.termin_id);
                       setMeineWarteliste((prev) => prev.filter((item) => item.id !== w.id));
                     }}
                     style={{
