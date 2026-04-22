@@ -1969,9 +1969,19 @@ export default function App() {
     if (selected?.id) await reloadSelected(selected.id);
   };
 
+
+  const runInBackground = (promise, label = "background task") => {
+    Promise.resolve(promise).catch((err) => {
+      console.error(`${label} fehlgeschlagen:`, err);
+    });
+  };
+
   const handleAbmelden = async (bewId, terminId) => {
     try {
-      console.log("ABMELDEN START", { bewId, terminId, userId: user?.data?.id });
+      const abmeldeStelle = stellen.find((s) =>
+        (s.termine || []).some((t) => t.id === terminId)
+      );
+      const targetStelleId = selected?.id || abmeldeStelle?.id || null;
 
       const { error: deleteBewError } = await supabase
         .from("bewerbungen")
@@ -2011,94 +2021,108 @@ export default function App() {
 
       showToast("Schade, dass du dieses Mal nicht dabei bist.", "#E85C5C");
 
-      const abmeldeStelle = stellen.find((s) =>
-        (s.termine || []).some((t) => t.id === terminId)
-      );
-
       if (abmeldeStelle) {
-        const { error: vereinNotifError } = await supabase
-          .from("verein_notifications")
-          .insert({
-            verein_id: abmeldeStelle.verein_id,
-            titel: "❌ Abmeldung",
-            text: `${user.data.name} hat sich von "${abmeldeStelle.titel}" abgemeldet.`,
-            typ: "abmeldung",
-            gelesen: false,
-          });
+        runInBackground(
+          supabase
+            .from("verein_notifications")
+            .insert({
+              verein_id: abmeldeStelle.verein_id,
+              titel: "❌ Abmeldung",
+              text: `${user.data.name} hat sich von "${abmeldeStelle.titel}" abgemeldet.`,
+              typ: "abmeldung",
+              gelesen: false,
+            }),
+          "verein_notifications abmeldung"
+        );
 
-        if (vereinNotifError) {
-          console.log("verein_notifications abmeldung failed:", vereinNotifError);
-        }
+        runInBackground(
+          loadVereinNotifications(abmeldeStelle.verein_id),
+          "loadVereinNotifications abmeldung"
+        );
 
-        await loadVereinNotifications(abmeldeStelle.verein_id);
-
-        await sendVereinPush({
-          vereinId: abmeldeStelle.verein_id,
-          notificationType: "abmeldung",
-          title: "❌ Abmeldung",
-          body: `${user.data.name} hat sich von "${abmeldeStelle.titel}" abgemeldet.`,
-          url: "/",
-        });
+        runInBackground(
+          sendVereinPush({
+            vereinId: abmeldeStelle.verein_id,
+            notificationType: "abmeldung",
+            title: "❌ Abmeldung",
+            body: `${user.data.name} hat sich von "${abmeldeStelle.titel}" abgemeldet.`,
+            url: "/",
+          }),
+          "sendVereinPush abmeldung"
+        );
       }
-
-      console.log("🚀 MOVEUP RPC START handleAbmelden", { terminId, bewId });
 
       const { data: moveupResult, error: moveupError } = await supabase.rpc(
         "process_waitlist_for_termin",
         { p_termin_id: terminId }
       );
 
-      console.log("📦 MOVEUP RPC RESULT handleAbmelden", {
-        terminId,
-        bewId,
-        moveupResult,
-        moveupError,
-      });
-
       if (moveupError) {
         console.error("PROCESS WAITLIST FEHLER:", moveupError);
       } else if (moveupResult?.promoted) {
-        await supabase.from("notifications").insert({
-          user_id: moveupResult.freiwilliger_id,
-          titel: "🎉 Du wurdest nachgerückt!",
-          text: `Ein Platz bei "${abmeldeStelle?.titel || "einer Stelle"}" ist frei geworden – du wurdest automatisch angemeldet! +10 Punkte`,
-          typ: "platz_frei",
-          gelesen: false,
-        });
+        runInBackground(
+          supabase.from("notifications").insert({
+            user_id: moveupResult.freiwilliger_id,
+            titel: "🎉 Du wurdest nachgerückt!",
+            text: `Ein Platz bei "${abmeldeStelle?.titel || "einer Stelle"}" ist frei geworden – du wurdest automatisch angemeldet! +10 Punkte`,
+            typ: "platz_frei",
+            gelesen: false,
+          }),
+          "notifications moveup"
+        );
 
-        await sendVolunteerPush({
-          gemeindeId,
-          notificationType: "freie_plaetze",
-          freiwilligerIds: [moveupResult.freiwilliger_id],
-          title: "🎉 Du wurdest nachgerückt!",
-          body: `Ein Platz bei "${abmeldeStelle?.titel || "einer Stelle"}" ist frei geworden – du wurdest automatisch angemeldet!`,
-          url: "/",
-        });
+        runInBackground(
+          sendVolunteerPush({
+            gemeindeId,
+            notificationType: "freie_plaetze",
+            freiwilligerIds: [moveupResult.freiwilliger_id],
+            title: "🎉 Du wurdest nachgerückt!",
+            body: `Ein Platz bei "${abmeldeStelle?.titel || "einer Stelle"}" ist frei geworden – du wurdest automatisch angemeldet!`,
+            url: "/",
+          }),
+          "sendVolunteerPush moveup"
+        );
 
         if (abmeldeStelle) {
-          await supabase.from("verein_notifications").insert({
-            verein_id: abmeldeStelle.verein_id,
-            titel: "📋 Warteliste nachgerückt",
-            text: `${moveupResult.name || "Ein Freiwilliger"} ist bei "${abmeldeStelle.titel}" automatisch nachgerückt.`,
-            typ: "warteliste",
-            gelesen: false,
-          });
+          runInBackground(
+            supabase.from("verein_notifications").insert({
+              verein_id: abmeldeStelle.verein_id,
+              titel: "📋 Warteliste nachgerückt",
+              text: `${moveupResult.name || "Ein Freiwilliger"} ist bei "${abmeldeStelle.titel}" automatisch nachgerückt.`,
+              typ: "warteliste",
+              gelesen: false,
+            }),
+            "verein_notifications moveup"
+          );
 
-          await loadVereinNotifications(abmeldeStelle.verein_id);
+          runInBackground(
+            loadVereinNotifications(abmeldeStelle.verein_id),
+            "loadVereinNotifications moveup"
+          );
 
-          await sendVereinPush({
-            vereinId: abmeldeStelle.verein_id,
-            notificationType: "warteliste",
-            title: "📋 Warteliste nachgerückt",
-            body: `${moveupResult.name || "Ein Freiwilliger"} ist bei "${abmeldeStelle.titel}" automatisch nachgerückt.`,
-            url: "/",
-          });
+          runInBackground(
+            sendVereinPush({
+              vereinId: abmeldeStelle.verein_id,
+              notificationType: "warteliste",
+              title: "📋 Warteliste nachgerückt",
+              body: `${moveupResult.name || "Ein Freiwilliger"} ist bei "${abmeldeStelle.titel}" automatisch nachgerückt.`,
+              url: "/",
+            }),
+            "sendVereinPush moveup"
+          );
         }
       }
 
-      await loadStellen(gemeindeId, user?.data?.plz, user?.data?.umkreis);
-      if (selected?.id) await reloadSelected(selected.id);
+      if (targetStelleId) {
+        await reloadSelected(targetStelleId);
+      }
+
       goBack();
+
+      runInBackground(
+        loadStellen(gemeindeId, user?.data?.plz, user?.data?.umkreis),
+        "loadStellen nach Abmeldung"
+      );
     } catch (err) {
       console.error("ABMELDEN FEHLER:", err);
       showToast("Fehler beim Abmelden.", "#E85C5C");
@@ -3214,52 +3238,53 @@ export default function App() {
           onBestaetigen={handleBestaetigen}
           onStornieren={async (bewId, terminId) => {
             try {
+              const targetStelleId = selected?.id || null;
+
               await supabase.from("bewerbungen").delete().eq("id", bewId);
               await supabase.rpc("increment_plaetze", { termin_id: terminId });
-
-              console.log("🚀 MOVEUP RPC START onStornieren", { terminId, bewId });
 
               const { data: moveupResult, error: moveupError } = await supabase.rpc(
                 "process_waitlist_for_termin",
                 { p_termin_id: terminId }
               );
 
-              console.log("📦 MOVEUP RPC RESULT onStornieren", {
-                terminId,
-                bewId,
-                moveupResult,
-                moveupError,
-              });
-
               if (moveupError) {
                 console.error("PROCESS WAITLIST FEHLER:", moveupError);
               } else if (moveupResult?.promoted) {
-                await supabase.from("notifications").insert({
-                  user_id: moveupResult.freiwilliger_id,
-                  titel: "🎉 Du wurdest nachgerückt!",
-                  text: `Du bist von der Warteliste bei "${selected.titel}" nachgerückt und automatisch angemeldet!`,
-                  typ: "platz_frei",
-                  gelesen: false,
-                });
+                runInBackground(
+                  supabase.from("notifications").insert({
+                    user_id: moveupResult.freiwilliger_id,
+                    titel: "🎉 Du wurdest nachgerückt!",
+                    text: `Du bist von der Warteliste bei "${selected.titel}" nachgerückt und automatisch angemeldet!`,
+                    typ: "platz_frei",
+                    gelesen: false,
+                  }),
+                  "notifications verein moveup"
+                );
 
-                await sendVolunteerPush({
-                  gemeindeId,
-                  notificationType: "freie_plaetze",
-                  freiwilligerIds: [moveupResult.freiwilliger_id],
-                  title: "🎉 Du wurdest nachgerückt!",
-                  body: `Du bist bei "${selected.titel}" automatisch nachgerückt.`,
-                  url: "/",
-                });
+                runInBackground(
+                  sendVolunteerPush({
+                    gemeindeId,
+                    notificationType: "freie_plaetze",
+                    freiwilligerIds: [moveupResult.freiwilliger_id],
+                    title: "🎉 Du wurdest nachgerückt!",
+                    body: `Du bist bei "${selected.titel}" automatisch nachgerückt.`,
+                    url: "/",
+                  }),
+                  "sendVolunteerPush verein moveup"
+                );
               }
 
               showToast("✓ Anmeldung storniert.", "#E85C5C");
-              await loadStellen(gemeindeId);
-              const { data } = await supabase
-                .from("stellen")
-                .select("*, vereine(*), termine(*, bewerbungen(*)), warteliste(*)")
-                .eq("id", selected.id)
-                .single();
-              if (data) setSelected(data);
+
+              if (targetStelleId) {
+                await reloadSelected(targetStelleId);
+              }
+
+              runInBackground(
+                loadStellen(gemeindeId),
+                "loadStellen nach Verein-Storno"
+              );
             } catch (error) {
               console.error("Verein Anmeldung stornieren fehlgeschlagen:", error);
               showToast("Fehler beim Stornieren.", "#E85C5C");
