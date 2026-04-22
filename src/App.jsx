@@ -692,83 +692,55 @@ export default function App() {
     }
   };
 
-  const getCurrentFreiwilligerRecord = async () => {
-    if (!user || user?.type !== "freiwilliger") {
-      return { id: null, authId: null, name: user?.data?.name || "", email: user?.data?.email || "" };
-    }
-
-    const authId = user?.data?.auth_id || null;
+  const getCurrentWartelisteFreiwilliger = async () => {
+    const authId = user?.data?.auth_id || user?.auth_id || null;
     const fallbackId = user?.data?.id || null;
 
     if (authId) {
       const { data, error } = await supabase
         .from("freiwillige")
-        .select("id, auth_id, name, email")
+        .select("id, auth_id")
         .eq("auth_id", authId)
         .maybeSingle();
 
       if (error) {
         console.error("FREIWILLIGER LOOKUP FEHLER:", error);
-        throw error;
       }
 
-      if (data?.id) {
-        return {
-          id: data.id,
-          authId: data.auth_id || authId,
-          name: data.name || user?.data?.name || "",
-          email: data.email || user?.data?.email || "",
-        };
-      }
+      if (data?.id) return data;
     }
 
     if (fallbackId) {
       const { data, error } = await supabase
         .from("freiwillige")
-        .select("id, auth_id, name, email")
+        .select("id, auth_id")
         .eq("id", fallbackId)
         .maybeSingle();
 
       if (error) {
         console.error("FREIWILLIGER FALLBACK LOOKUP FEHLER:", error);
-        throw error;
       }
 
-      if (data?.id) {
-        return {
-          id: data.id,
-          authId: data.auth_id || authId || null,
-          name: data.name || user?.data?.name || "",
-          email: data.email || user?.data?.email || "",
-        };
-      }
+      if (data?.id) return data;
     }
 
-    throw new Error("Kein freiwillige-Datensatz für den eingeloggten Nutzer gefunden.");
+    return null;
   };
 
   // ── Warteliste ─────────────────────────────────────────────────────────────
   const handleWarteliste = async (stelleId, terminId) => {
     if (!user) {
       navigateTo("login");
-      return;
+      return { ok: false, status: "login_required" };
     }
 
     try {
-      const freiwilligerRecord = await getCurrentFreiwilligerRecord();
-      const waitlistUserId = freiwilligerRecord?.id;
-
-      console.log("WL INSERT DEBUG", {
-        userData: user?.data,
-        freiwilligerRecord,
-        waitlistUserId,
-        stelleId,
-        terminId,
-      });
+      const freiwilligerRecord = await getCurrentWartelisteFreiwilliger();
+      const waitlistUserId = freiwilligerRecord?.id || null;
 
       if (!waitlistUserId) {
-        showToast("Dein Profil konnte nicht eindeutig zugeordnet werden.", "#E85C5C");
-        return;
+        showToast("Freiwilligenprofil konnte nicht gefunden werden.", "#E85C5C");
+        return { ok: false, status: "missing_freiwilliger" };
       }
 
       const { data: existingList, error: existingError } = await supabase
@@ -778,19 +750,10 @@ export default function App() {
         .order("position", { ascending: true })
         .order("created_at", { ascending: true });
 
-      console.log("WL EXISTING DEBUG", {
-        terminId,
-        existingList,
-        waitlistUserId,
-        match: (existingList || []).find(
-          (w) => String(w?.freiwilliger_id) === String(waitlistUserId)
-        ),
-      });
-
       if (existingError) {
         console.error("WARTELISTE CHECK FEHLER:", existingError);
         showToast("Fehler beim Prüfen der Warteliste.", "#E85C5C");
-        return;
+        return { ok: false, status: "check_failed" };
       }
 
       const existing = (existingList || []).find(
@@ -800,66 +763,125 @@ export default function App() {
       if (existing) {
         showToast(`Wartelistenplatz ${existing.position}`, "#E8A87C");
         if (selected?.id) await reloadSelected(selected.id);
-        return;
+        return {
+          ok: true,
+          status: "already_on_waitlist",
+          waitlist: {
+            id: existing.id || null,
+            position: Number(existing.position) || 1,
+            total: (existingList || []).length || 1,
+          },
+        };
       }
 
       const position = (existingList?.length || 0) + 1;
 
-      const { error: insertError } = await supabase.from("warteliste").insert({
-        stelle_id: stelleId,
-        termin_id: terminId,
-        freiwilliger_id: waitlistUserId,
-        name: freiwilligerRecord?.name || user?.data?.name || "",
-        email: freiwilligerRecord?.email || user?.data?.email || "",
-        position,
-      });
+      const { data: insertedRow, error: insertError } = await supabase
+        .from("warteliste")
+        .insert({
+          stelle_id: stelleId,
+          termin_id: terminId,
+          freiwilliger_id: waitlistUserId,
+          name: user.data.name,
+          email: user.data.email,
+          position,
+        })
+        .select("id, position")
+        .single();
 
       if (insertError) {
-        if (insertError.code === "23505") {
+        if (insertError.code === "23505" || insertError.code === "409") {
+          const { data: refreshedList } = await supabase
+            .from("warteliste")
+            .select("id, position, freiwilliger_id")
+            .eq("termin_id", terminId)
+            .order("position", { ascending: true })
+            .order("created_at", { ascending: true });
+
+          const duplicate = (refreshedList || []).find(
+            (w) => String(w?.freiwilliger_id) === String(waitlistUserId)
+          );
+
           showToast("Du stehst bereits auf der Warteliste.", "#E8A87C");
           if (selected?.id) await reloadSelected(selected.id);
-          return;
+          return {
+            ok: true,
+            status: "already_on_waitlist",
+            waitlist: duplicate
+              ? {
+                  id: duplicate.id || null,
+                  position: Number(duplicate.position) || 1,
+                  total: (refreshedList || []).length || 1,
+                }
+              : null,
+          };
         }
         console.error("WARTELISTE INSERT FEHLER:", insertError);
         showToast("Fehler beim Eintragen in die Warteliste.", "#E85C5C");
-        return;
+        return { ok: false, status: "insert_failed" };
       }
 
       showToast(`✓ Wartelistenplatz ${position}`, "#E8A87C");
       await loadStellen(gemeindeId, user.data.plz, user.data.umkreis);
       if (selected?.id) await reloadSelected(selected.id);
+      return {
+        ok: true,
+        status: "added_to_waitlist",
+        waitlist: {
+          id: insertedRow?.id || null,
+          position: Number(insertedRow?.position) || position,
+          total: position,
+        },
+      };
     } catch (error) {
       console.error("HANDLE WARTELISTE FEHLER:", error);
       showToast("Fehler beim Eintragen in die Warteliste.", "#E85C5C");
+      return { ok: false, status: "exception" };
     }
   };
 
 
   const handleWartelisteRemove = async (stelleId, terminId) => {
+    if (!user) return { ok: false, status: "login_required" };
+
     try {
-      const freiwilligerRecord = await getCurrentFreiwilligerRecord();
-      const waitlistUserId = freiwilligerRecord?.id;
+      const freiwilligerRecord = await getCurrentWartelisteFreiwilliger();
+      const waitlistUserId = freiwilligerRecord?.id || null;
 
-      if (!waitlistUserId) return;
+      if (!waitlistUserId) {
+        showToast("Freiwilligenprofil konnte nicht gefunden werden.", "#E85C5C");
+        return { ok: false, status: "missing_freiwilliger" };
+      }
 
-      const { error } = await supabase
+      const { data: removedRows, error } = await supabase
         .from("warteliste")
         .delete()
         .eq("termin_id", terminId)
-        .eq("freiwilliger_id", waitlistUserId);
+        .eq("freiwilliger_id", waitlistUserId)
+        .select("id");
 
       if (error) {
         console.error("WARTELISTE DELETE FEHLER:", error);
         showToast("Fehler beim Entfernen von der Warteliste.", "#E85C5C");
-        return;
+        return { ok: false, status: "remove_failed" };
       }
 
-      showToast("Du wurdest von der Warteliste entfernt.", "#E8A87C");
+      const wasRemoved = Array.isArray(removedRows) ? removedRows.length > 0 : false;
+
+      if (wasRemoved) {
+        showToast("Du wurdest von der Warteliste entfernt.", "#E8A87C");
+      }
+
       await loadStellen(gemeindeId, user?.data?.plz, user?.data?.umkreis);
       if (selected?.id) await reloadSelected(selected.id);
+      return {
+        ok: true,
+        status: wasRemoved ? "removed_from_waitlist" : "not_on_waitlist",
+      };
     } catch (error) {
       console.error("WARTELISTE REMOVE FEHLER:", error);
       showToast("Fehler beim Entfernen von der Warteliste.", "#E85C5C");
+      return { ok: false, status: "exception" };
     }
   };
 
