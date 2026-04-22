@@ -879,6 +879,125 @@ export default function App() {
     }
   };
 
+
+  const moveUpNextWaitlistVolunteer = async ({ terminId, stelle }) => {
+    if (!terminId) {
+      return { ok: false, status: "missing_termin_id" };
+    }
+
+    try {
+      const { data: nextOnList, error: nextOnListError } = await supabase
+        .from("warteliste")
+        .select("id, stelle_id, termin_id, freiwilliger_id, name, email, position, created_at")
+        .eq("termin_id", terminId)
+        .order("position", { ascending: true })
+        .order("created_at", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+
+      if (nextOnListError) {
+        console.error("WARTELISTE LADEN FEHLER:", nextOnListError);
+        return { ok: false, status: "load_failed", error: nextOnListError };
+      }
+
+      if (!nextOnList) {
+        return { ok: true, status: "no_waitlist_entry" };
+      }
+
+      const { data: erfolg, error: bookError } = await supabase.rpc("book_slot", {
+        p_stelle_id: nextOnList.stelle_id,
+        p_termin_id: terminId,
+        p_freiwilliger_id: nextOnList.freiwilliger_id,
+        p_name: nextOnList.name,
+        p_email: nextOnList.email,
+      });
+
+      if (bookError) {
+        console.error("BOOK SLOT FEHLER:", bookError);
+        return { ok: false, status: "book_failed", error: bookError };
+      }
+
+      if (!erfolg) {
+        return { ok: false, status: "book_declined" };
+      }
+
+      const { error: wlDeleteError } = await supabase
+        .from("warteliste")
+        .delete()
+        .eq("id", nextOnList.id);
+
+      if (wlDeleteError) {
+        console.error("WARTELISTE DELETE FEHLER:", wlDeleteError);
+      }
+
+      const { data: restListe, error: restListeError } = await supabase
+        .from("warteliste")
+        .select("id")
+        .eq("termin_id", terminId)
+        .order("position", { ascending: true })
+        .order("created_at", { ascending: true });
+
+      if (restListeError) {
+        console.error("WARTELISTE RESTLISTE FEHLER:", restListeError);
+      }
+
+      if (restListe?.length) {
+        for (let i = 0; i < restListe.length; i += 1) {
+          const { error: reorderError } = await supabase
+            .from("warteliste")
+            .update({ position: i + 1 })
+            .eq("id", restListe[i].id);
+
+          if (reorderError) {
+            console.error("WARTELISTE POSITION UPDATE FEHLER:", reorderError);
+          }
+        }
+      }
+
+      await supabase.from("notifications").insert({
+        user_id: nextOnList.freiwilliger_id,
+        titel: "🎉 Du wurdest nachgerückt!",
+        text: `Ein Platz bei "${stelle?.titel || "einer Stelle"}" ist frei geworden – du wurdest automatisch angemeldet! +10 Punkte`,
+        typ: "platz_frei",
+        gelesen: false,
+      });
+
+      await sendVolunteerPush({
+        gemeindeId,
+        notificationType: "freie_plaetze",
+        freiwilligerIds: [nextOnList.freiwilliger_id],
+        title: "🎉 Du wurdest nachgerückt!",
+        body: `Ein Platz bei "${stelle?.titel || "einer Stelle"}" ist frei geworden – du wurdest automatisch angemeldet!`,
+        url: "/",
+      });
+
+      if (stelle?.verein_id) {
+        await supabase.from("verein_notifications").insert({
+          verein_id: stelle.verein_id,
+          titel: "🔄 Warteliste nachgerückt",
+          text: `${nextOnList.name} ist automatisch von der Warteliste nachgerückt.`,
+          typ: "warteliste",
+          gelesen: false,
+        });
+
+        await loadVereinNotifications(stelle.verein_id);
+
+        await sendVereinPush({
+          vereinId: stelle.verein_id,
+          notificationType: "warteliste",
+          title: "🔄 Warteliste nachgerückt",
+          body: `${nextOnList.name} ist automatisch von der Warteliste nachgerückt.`,
+          url: "/",
+        });
+      }
+
+      return { ok: true, status: "moved_up", nextOnList };
+    } catch (error) {
+      console.error("WARTELISTE NACHRUECKEN FEHLER:", error);
+      return { ok: false, status: "unexpected_error", error };
+    }
+  };
+
   const logout = async () => {
     const freiwilligerId =
       user?.type === "freiwilliger" ? user?.data?.id : null;
@@ -2103,100 +2222,13 @@ export default function App() {
         });
       }
 
-      const { data: nextOnList, error: nextOnListError } = await supabase
-        .from("warteliste")
-        .select("*")
-        .eq("termin_id", terminId)
-        .order("position", { ascending: true })
-        .order("created_at", { ascending: true })
-        .limit(1)
-        .maybeSingle();
+      const moveUpResult = await moveUpNextWaitlistVolunteer({
+        terminId,
+        stelle: abmeldeStelle,
+      });
 
-      if (nextOnListError) {
-        console.error("WARTELISTE LADEN FEHLER:", nextOnListError);
-      }
-
-      console.log("NEXT ON LIST", nextOnList);
-
-      if (nextOnList) {
-        const { data: erfolg, error: bookError } = await supabase.rpc("book_slot", {
-          p_stelle_id: nextOnList.stelle_id,
-          p_termin_id: terminId,
-          p_freiwilliger_id: nextOnList.freiwilliger_id,
-          p_name: nextOnList.name,
-          p_email: nextOnList.email,
-        });
-
-        console.log("BOOK SLOT RESULT", { erfolg, bookError });
-
-        if (bookError) {
-          console.error("BOOK SLOT FEHLER:", bookError);
-          showToast("Fehler beim Nachrücken.", "#E85C5C");
-        } else if (erfolg) {
-          const { error: wlDeleteError } = await supabase
-            .from("warteliste")
-            .delete()
-            .eq("id", nextOnList.id);
-
-          if (wlDeleteError) {
-            console.error("WARTELISTE DELETE FEHLER:", wlDeleteError);
-          }
-
-          const { data: restListe } = await supabase
-            .from("warteliste")
-            .select("id")
-            .eq("termin_id", terminId)
-            .order("position", { ascending: true })
-            .order("created_at", { ascending: true });
-
-          if (restListe) {
-            for (let i = 0; i < restListe.length; i++) {
-              await supabase
-                .from("warteliste")
-                .update({ position: i + 1 })
-                .eq("id", restListe[i].id);
-            }
-          }
-
-          await supabase.from("notifications").insert({
-            user_id: nextOnList.freiwilliger_id,
-            titel: "🎉 Du wurdest nachgerückt!",
-            text: `Ein Platz bei "${abmeldeStelle?.titel || "einer Stelle"}" ist frei geworden – du wurdest automatisch angemeldet! +10 Punkte`,
-            typ: "platz_frei",
-            gelesen: false,
-          });
-
-          await sendVolunteerPush({
-            gemeindeId,
-            notificationType: "freie_plaetze",
-            freiwilligerIds: [nextOnList.freiwilliger_id],
-            title: "🎉 Du wurdest nachgerückt!",
-            body: `Ein Platz bei "${abmeldeStelle?.titel || "einer Stelle"}" ist frei geworden – du wurdest automatisch angemeldet!`,
-            url: "/",
-          });
-
-          if (abmeldeStelle?.verein_id) {
-            await supabase
-              .from("verein_notifications")
-              .insert({
-                verein_id: abmeldeStelle.verein_id,
-                titel: "🔄 Warteliste nachgerückt",
-                text: `${nextOnList.name} ist automatisch von der Warteliste nachgerückt.`,
-                typ: "warteliste",
-                gelesen: false,
-              });
-
-            await loadVereinNotifications(abmeldeStelle.verein_id);
-
-            await sendVereinPush({
-              vereinId: abmeldeStelle.verein_id,
-              notificationType: "warteliste",
-              title: "🔄 Warteliste nachgerückt",
-              body: `${nextOnList.name} ist automatisch von der Warteliste nachgerückt.`,
-              url: "/",
-            });
-          }
-        }
+      if (!moveUpResult?.ok && moveUpResult?.status !== "no_waitlist_entry") {
+        showToast("Fehler beim Nachrücken.", "#E85C5C");
       }
 
       await loadStellen(gemeindeId, user?.data?.plz, user?.data?.umkreis);
@@ -3320,43 +3352,13 @@ export default function App() {
               await supabase.from("bewerbungen").delete().eq("id", bewId);
               await supabase.rpc("increment_plaetze", { termin_id: terminId });
 
-              const { data: nextOnList } = await supabase
-                .from("warteliste")
-                .select("*")
-                .eq("termin_id", terminId)
-                .order("created_at", { ascending: true })
-                .limit(1)
-                .maybeSingle();
+              const moveUpResult = await moveUpNextWaitlistVolunteer({
+                terminId,
+                stelle: selected,
+              });
 
-              if (nextOnList) {
-                const { data: erfolg } = await supabase.rpc("book_slot", {
-                  p_stelle_id: nextOnList.stelle_id,
-                  p_termin_id: terminId,
-                  p_freiwilliger_id: nextOnList.freiwilliger_id,
-                  p_name: nextOnList.name,
-                  p_email: nextOnList.email,
-                });
-
-                if (erfolg) {
-                  await supabase.from("notifications").insert({
-                    user_id: nextOnList.freiwilliger_id,
-                    titel: "🎉 Du wurdest nachgerückt!",
-                    text: `Du bist von der Warteliste bei "${selected.titel}" nachgerückt und automatisch angemeldet!`,
-                    typ: "platz_frei",
-                    gelesen: false,
-                  });
-
-                  await sendVolunteerPush({
-                    gemeindeId,
-                    notificationType: "freie_plaetze",
-                    freiwilligerIds: [nextOnList.freiwilliger_id],
-                    title: "🎉 Du wurdest nachgerückt!",
-                    body: `Du bist bei "${selected.titel}" automatisch nachgerückt.`,
-                    url: "/",
-                  });
-                }
-
-                await supabase.from("warteliste").delete().eq("id", nextOnList.id);
+              if (!moveUpResult?.ok && moveUpResult?.status !== "no_waitlist_entry") {
+                console.error("AUTOMATISCHES NACHRUECKEN FEHLER:", moveUpResult?.error || moveUpResult);
               }
 
               showToast("✓ Anmeldung storniert.", "#E85C5C");
