@@ -2041,10 +2041,19 @@ export default function App() {
         });
       }
 
+      console.log("🚀 MOVEUP RPC START handleAbmelden", { terminId, bewId });
+
       const { data: moveupResult, error: moveupError } = await supabase.rpc(
         "process_waitlist_for_termin",
         { p_termin_id: terminId }
       );
+
+      console.log("📦 MOVEUP RPC RESULT handleAbmelden", {
+        terminId,
+        bewId,
+        moveupResult,
+        moveupError,
+      });
 
       if (moveupError) {
         console.error("PROCESS WAITLIST FEHLER:", moveupError);
@@ -3208,10 +3217,19 @@ export default function App() {
               await supabase.from("bewerbungen").delete().eq("id", bewId);
               await supabase.rpc("increment_plaetze", { termin_id: terminId });
 
+              console.log("🚀 MOVEUP RPC START onStornieren", { terminId, bewId });
+
               const { data: moveupResult, error: moveupError } = await supabase.rpc(
                 "process_waitlist_for_termin",
                 { p_termin_id: terminId }
               );
+
+              console.log("📦 MOVEUP RPC RESULT onStornieren", {
+                terminId,
+                bewId,
+                moveupResult,
+                moveupError,
+              });
 
               if (moveupError) {
                 console.error("PROCESS WAITLIST FEHLER:", moveupError);
