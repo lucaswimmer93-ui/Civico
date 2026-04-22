@@ -692,23 +692,20 @@ export default function App() {
     }
   };
 
-  const getCurrentWartelisteFreiwilliger = async () => {
-    let authUid = null;
 
-    try {
-      const { data, error } = await supabase.auth.getUser();
-      if (error) {
-        console.error("AUTH USER LOOKUP FEHLER:", error);
-      }
-      authUid = data?.user?.id || null;
-    } catch (error) {
-      console.error("AUTH USER LOOKUP EXCEPTION:", error);
-    }
-
-    const authId = authUid || user?.data?.auth_id || user?.auth_id || null;
+  const getCurrentFreiwilligerId = async () => {
+    let authId = user?.data?.auth_id || null;
 
     if (!authId) {
-      return null;
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError) {
+        console.error("AUTH SESSION LOOKUP FEHLER:", sessionError);
+      }
+      authId = sessionData?.session?.user?.id || null;
+    }
+
+    if (!authId) {
+      throw new Error("Keine gültige auth_id gefunden.");
     }
 
     const { data, error } = await supabase
@@ -718,164 +715,105 @@ export default function App() {
       .single();
 
     if (error) {
-      console.error("FREIWILLIGER LOOKUP FEHLER:", error);
-      return null;
+      console.error("FREIWILLIGER RESOLVE FEHLER:", error);
+      throw error;
     }
 
     if (!data?.id) {
-      return null;
+      throw new Error("Kein Freiwilligen-Datensatz zur auth_id gefunden.");
     }
 
-    return data;
+    return data.id;
   };
 
   // ── Warteliste ─────────────────────────────────────────────────────────────
   const handleWarteliste = async (stelleId, terminId) => {
     if (!user) {
       navigateTo("login");
-      return { ok: false, status: "login_required" };
+      return;
     }
 
     try {
-      const freiwilligerRecord = await getCurrentWartelisteFreiwilliger();
-      const waitlistUserId = freiwilligerRecord?.id || null;
-
-      if (!waitlistUserId) {
-        showToast("Freiwilligenprofil konnte nicht gefunden werden.", "#E85C5C");
-        return { ok: false, status: "missing_freiwilliger" };
-      }
-
       const { data: existingList, error: existingError } = await supabase
         .from("warteliste")
         .select("id, position, freiwilliger_id")
-        .eq("termin_id", terminId)
-        .order("position", { ascending: true })
-        .order("created_at", { ascending: true });
+        .eq("termin_id", terminId);
 
       if (existingError) {
         console.error("WARTELISTE CHECK FEHLER:", existingError);
         showToast("Fehler beim Prüfen der Warteliste.", "#E85C5C");
-        return { ok: false, status: "check_failed" };
+        return;
       }
 
       const existing = (existingList || []).find(
-        (w) => String(w?.freiwilliger_id) === String(waitlistUserId)
+        (w) => String(w.freiwilliger_id) === String(user.data.id)
       );
 
       if (existing) {
         showToast(`Wartelistenplatz ${existing.position}`, "#E8A87C");
-        if (selected?.id) await reloadSelected(selected.id);
-        return {
-          ok: true,
-          status: "already_on_waitlist",
-          waitlist: {
-            id: existing.id || null,
-            position: Number(existing.position) || 1,
-            total: (existingList || []).length || 1,
-          },
-        };
+        return;
       }
 
       const position = (existingList?.length || 0) + 1;
 
-      const { data: insertedRow, error: insertError } = await supabase
-        .from("warteliste")
-        .insert({
-          stelle_id: stelleId,
-          termin_id: terminId,
-          freiwilliger_id: waitlistUserId,
-          name: user.data.name,
-          email: user.data.email,
-          position,
-        })
-        .select("id, position")
-        .single();
+      const { error: insertError } = await supabase.from("warteliste").insert({
+        stelle_id: stelleId,
+        termin_id: terminId,
+        freiwilliger_id: user.data.id,
+        name: user.data.name,
+        email: user.data.email,
+        position,
+      });
 
       if (insertError) {
-        if (insertError.code === "23505" || insertError.status === 409) {
-          const { data: refreshedList } = await supabase
-            .from("warteliste")
-            .select("id, position, freiwilliger_id")
-            .eq("termin_id", terminId)
-            .order("position", { ascending: true })
-            .order("created_at", { ascending: true });
-
-          const duplicate = (refreshedList || []).find(
-            (w) => String(w?.freiwilliger_id) === String(waitlistUserId)
-          );
-
+        if (insertError.code === "23505") {
           showToast("Du stehst bereits auf der Warteliste.", "#E8A87C");
-          if (selected?.id) await reloadSelected(selected.id);
-          return {
-            ok: true,
-            status: "already_on_waitlist",
-            waitlist: duplicate
-              ? {
-                  id: duplicate.id || null,
-                  position: Number(duplicate.position) || 1,
-                  total: (refreshedList || []).length || 1,
-                }
-              : null,
-          };
+          return;
         }
-
         console.error("WARTELISTE INSERT FEHLER:", insertError);
         showToast("Fehler beim Eintragen in die Warteliste.", "#E85C5C");
-        return { ok: false, status: "insert_failed", error: insertError };
+        return;
       }
 
-      showToast(`✓ Wartelistenplatz ${insertedRow?.position || position}`, "#E8A87C");
+      showToast(`✓ Wartelistenplatz ${position}`, "#E8A87C");
       await loadStellen(gemeindeId, user.data.plz, user.data.umkreis);
-      if (selected?.id) await reloadSelected(selected.id);
-      return {
-        ok: true,
-        status: "added_to_waitlist",
-        waitlist: {
-          id: insertedRow?.id || null,
-          position: Number(insertedRow?.position) || position,
-          total: position,
-        },
-      };
+      if (selected?.id) {
+        const { data: refreshedSelected } = await supabase
+          .from("stellen")
+          .select("*, vereine(*), termine(*, bewerbungen(*)), warteliste(*)")
+          .eq("id", selected.id)
+          .single();
+        if (refreshedSelected) setSelected(refreshedSelected);
+      }
     } catch (error) {
       console.error("HANDLE WARTELISTE FEHLER:", error);
       showToast("Fehler beim Eintragen in die Warteliste.", "#E85C5C");
-      return { ok: false, status: "unexpected_error", error };
     }
   };
 
 
   const handleWartelisteRemove = async (stelleId, terminId) => {
-    if (!user) return { ok: false, status: "missing_user" };
+    if (!user?.data?.id) return;
 
     try {
-      const freiwilligerRecord = await getCurrentWartelisteFreiwilliger();
-      const waitlistUserId = freiwilligerRecord?.id || null;
-
-      if (!waitlistUserId) {
-        showToast("Freiwilligenprofil konnte nicht gefunden werden.", "#E85C5C");
-        return { ok: false, status: "missing_freiwilliger" };
-      }
-
       const { error } = await supabase
         .from("warteliste")
         .delete()
         .eq("termin_id", terminId)
-        .eq("freiwilliger_id", waitlistUserId);
+        .eq("freiwilliger_id", user.data.id);
 
       if (error) {
         console.error("WARTELISTE DELETE FEHLER:", error);
         showToast("Fehler beim Entfernen von der Warteliste.", "#E85C5C");
-        return { ok: false, status: "delete_failed", error };
+        return;
       }
 
       showToast("Du wurdest von der Warteliste entfernt.", "#E8A87C");
       await loadStellen(gemeindeId, user?.data?.plz, user?.data?.umkreis);
       if (selected?.id) await reloadSelected(selected.id);
-      return { ok: true, status: "removed_from_waitlist" };
     } catch (error) {
       console.error("WARTELISTE REMOVE FEHLER:", error);
       showToast("Fehler beim Entfernen von der Warteliste.", "#E85C5C");
-      return { ok: false, status: "unexpected_error", error };
     }
   };
 
@@ -2103,17 +2041,16 @@ export default function App() {
         });
       }
 
-      const { data: waitlistMoveup, error: waitlistMoveupError } = await supabase.rpc(
+      const { data: moveupResult, error: moveupError } = await supabase.rpc(
         "process_waitlist_for_termin",
         { p_termin_id: terminId }
       );
 
-      if (waitlistMoveupError) {
-        console.error("PROCESS WAITLIST FEHLER:", waitlistMoveupError);
-        showToast("Fehler beim Nachrücken.", "#E85C5C");
-      } else if (waitlistMoveup?.promoted) {
+      if (moveupError) {
+        console.error("PROCESS WAITLIST FEHLER:", moveupError);
+      } else if (moveupResult?.promoted) {
         await supabase.from("notifications").insert({
-          user_id: waitlistMoveup.freiwilliger_id,
+          user_id: moveupResult.freiwilliger_id,
           titel: "🎉 Du wurdest nachgerückt!",
           text: `Ein Platz bei "${abmeldeStelle?.titel || "einer Stelle"}" ist frei geworden – du wurdest automatisch angemeldet! +10 Punkte`,
           typ: "platz_frei",
@@ -2123,30 +2060,28 @@ export default function App() {
         await sendVolunteerPush({
           gemeindeId,
           notificationType: "freie_plaetze",
-          freiwilligerIds: [waitlistMoveup.freiwilliger_id],
+          freiwilligerIds: [moveupResult.freiwilliger_id],
           title: "🎉 Du wurdest nachgerückt!",
           body: `Ein Platz bei "${abmeldeStelle?.titel || "einer Stelle"}" ist frei geworden – du wurdest automatisch angemeldet!`,
           url: "/",
         });
 
-        if (abmeldeStelle?.verein_id) {
-          await supabase
-            .from("verein_notifications")
-            .insert({
-              verein_id: abmeldeStelle.verein_id,
-              titel: "🔄 Warteliste nachgerückt",
-              text: `${waitlistMoveup.name || "Ein Freiwilliger"} ist automatisch von der Warteliste nachgerückt.`,
-              typ: "warteliste",
-              gelesen: false,
-            });
+        if (abmeldeStelle) {
+          await supabase.from("verein_notifications").insert({
+            verein_id: abmeldeStelle.verein_id,
+            titel: "📋 Warteliste nachgerückt",
+            text: `${moveupResult.name || "Ein Freiwilliger"} ist bei "${abmeldeStelle.titel}" automatisch nachgerückt.`,
+            typ: "warteliste",
+            gelesen: false,
+          });
 
           await loadVereinNotifications(abmeldeStelle.verein_id);
 
           await sendVereinPush({
             vereinId: abmeldeStelle.verein_id,
             notificationType: "warteliste",
-            title: "🔄 Warteliste nachgerückt",
-            body: `${waitlistMoveup.name || "Ein Freiwilliger"} ist automatisch von der Warteliste nachgerückt.`,
+            title: "📋 Warteliste nachgerückt",
+            body: `${moveupResult.name || "Ein Freiwilliger"} ist bei "${abmeldeStelle.titel}" automatisch nachgerückt.`,
             url: "/",
           });
         }
@@ -3273,16 +3208,16 @@ export default function App() {
               await supabase.from("bewerbungen").delete().eq("id", bewId);
               await supabase.rpc("increment_plaetze", { termin_id: terminId });
 
-              const { data: waitlistMoveup, error: waitlistMoveupError } = await supabase.rpc(
+              const { data: moveupResult, error: moveupError } = await supabase.rpc(
                 "process_waitlist_for_termin",
                 { p_termin_id: terminId }
               );
 
-              if (waitlistMoveupError) {
-                console.error("PROCESS WAITLIST FEHLER:", waitlistMoveupError);
-              } else if (waitlistMoveup?.promoted) {
+              if (moveupError) {
+                console.error("PROCESS WAITLIST FEHLER:", moveupError);
+              } else if (moveupResult?.promoted) {
                 await supabase.from("notifications").insert({
-                  user_id: waitlistMoveup.freiwilliger_id,
+                  user_id: moveupResult.freiwilliger_id,
                   titel: "🎉 Du wurdest nachgerückt!",
                   text: `Du bist von der Warteliste bei "${selected.titel}" nachgerückt und automatisch angemeldet!`,
                   typ: "platz_frei",
@@ -3292,7 +3227,7 @@ export default function App() {
                 await sendVolunteerPush({
                   gemeindeId,
                   notificationType: "freie_plaetze",
-                  freiwilligerIds: [waitlistMoveup.freiwilliger_id],
+                  freiwilligerIds: [moveupResult.freiwilliger_id],
                   title: "🎉 Du wurdest nachgerückt!",
                   body: `Du bist bei "${selected.titel}" automatisch nachgerückt.`,
                   url: "/",
