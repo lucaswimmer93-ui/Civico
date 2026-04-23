@@ -36,84 +36,45 @@ const getVereinLogoSrc = (verein) => {
 };
 
 const getTerminPlaetze = (termin) => {
-  const statsAngemeldet = Number(
-    termin?.angemeldet_count ??
-      termin?.termin_stats?.angemeldet_count
-  );
-  const statsWarteliste = Number(
-    termin?.warteliste_count ??
-      termin?.termin_stats?.warteliste_count
-  );
-  const statsGesamtPlaetze = Number(
-    termin?.gesamt_plaetze_count ??
-      termin?.termin_stats?.gesamt_plaetze
-  );
-  const statsFreiePlaetze = Number(
-    termin?.freie_plaetze_count ??
-      termin?.termin_stats?.freie_plaetze_count
-  );
-
   const aktiveBewerbungen = (termin?.bewerbungen || []).filter(bewerbungIstAktiv).length;
-  const gesamtPlaetze = Number.isFinite(statsGesamtPlaetze) && statsGesamtPlaetze >= 0
-    ? statsGesamtPlaetze
-    : Number(
-        termin?.gesamt_plaetze ??
-          termin?.max_helfer ??
-          termin?.plaetze ??
-          (Number.isFinite(Number(termin?.freie_plaetze))
-            ? Number(termin.freie_plaetze) + aktiveBewerbungen
-            : 0)
-      );
+  const gesamtPlaetze = Number(
+    termin?.gesamt_plaetze ??
+      termin?.max_helfer ??
+      termin?.plaetze ??
+      (Number.isFinite(Number(termin?.freie_plaetze))
+        ? Number(termin.freie_plaetze) + aktiveBewerbungen
+        : 0)
+  );
+  const freiePlaetze = Math.max(0, gesamtPlaetze - aktiveBewerbungen);
 
-  const angemeldet = Number.isFinite(statsAngemeldet) && statsAngemeldet >= 0
-    ? (gesamtPlaetze > 0 ? Math.min(gesamtPlaetze, statsAngemeldet) : statsAngemeldet)
-    : (gesamtPlaetze > 0 ? Math.min(gesamtPlaetze, aktiveBewerbungen) : aktiveBewerbungen);
-
-  const freiePlaetze = Number.isFinite(statsFreiePlaetze) && statsFreiePlaetze >= 0
-    ? statsFreiePlaetze
-    : Math.max(0, gesamtPlaetze - aktiveBewerbungen);
+  const angemeldet = gesamtPlaetze > 0
+    ? Math.min(gesamtPlaetze, aktiveBewerbungen)
+    : aktiveBewerbungen;
 
   return {
     gesamtPlaetze,
     freiePlaetze,
     angemeldet,
-    warteliste: Number.isFinite(statsWarteliste) && statsWarteliste >= 0 ? statsWarteliste : Number((termin?.warteliste || []).length || 0),
     belegt: freiePlaetze <= 0,
   };
 };
 
 
-const resolveCurrentFreiwilligerId = async (user) => {
-  let authId = user?.data?.auth_id || user?.auth_id || null;
+const getTerminWartelisteCount = (termin, stelle = null) => {
+  const directCount = Number(
+    termin?.termin_stats?.warteliste_count ??
+    termin?.warteliste_count ??
+    termin?.stats?.warteliste_count
+  );
+  if (Number.isFinite(directCount)) return Math.max(0, directCount);
 
-  if (!authId) {
-    try {
-      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-      if (sessionError) {
-        console.error("AUTH SESSION LOOKUP FEHLER:", sessionError);
-      }
-      authId = sessionData?.session?.user?.id || null;
-    } catch (error) {
-      console.error("AUTH SESSION LOOKUP EXCEPTION:", error);
-    }
+  if (Array.isArray(termin?.warteliste)) return termin.warteliste.length;
+
+  if (Array.isArray(stelle?.warteliste)) {
+    return stelle.warteliste.filter((w) => w?.termin_id === termin?.id).length;
   }
 
-  if (!authId) {
-    return null;
-  }
-
-  const { data, error } = await supabase
-    .from("freiwillige")
-    .select("id")
-    .eq("auth_id", authId)
-    .maybeSingle();
-
-  if (error) {
-    console.error("FREIWILLIGER RESOLVE FEHLER:", error);
-    return null;
-  }
-
-  return data?.id ? String(data.id) : null;
+  return 0;
 };
 
 const berechneTerminStunden = (termin, stelle = null) => {
@@ -304,7 +265,6 @@ function DetailScreen({
   const [detailTerminChatOpen, setDetailTerminChatOpen] = useState({});
   const [detailWaitlistTerminIds, setDetailWaitlistTerminIds] = useState([]);
   const [detailWaitlistInfo, setDetailWaitlistInfo] = useState({});
-  const [detailWaitlistLoading, setDetailWaitlistLoading] = useState(true);
 
   useEffect(() => {
     let active = true;
@@ -312,24 +272,14 @@ function DetailScreen({
     async function loadDetailWaitlist() {
       const terminIds = (termine || []).map((termin) => termin?.id).filter(Boolean);
 
-      if (active) setDetailWaitlistLoading(true);
+      const myUserIds = [user?.data?.auth_id, user?.data?.id]
+        .filter(Boolean)
+        .map((value) => String(value));
 
-      if (user?.type === "verein" || terminIds.length === 0) {
+      if (myUserIds.length === 0 || user?.type === "verein" || terminIds.length === 0) {
         if (active) {
           setDetailWaitlistTerminIds([]);
           setDetailWaitlistInfo({});
-          setDetailWaitlistLoading(false);
-        }
-        return;
-      }
-
-      const resolvedFreiwilligerId = await resolveCurrentFreiwilligerId(user);
-
-      if (!resolvedFreiwilligerId) {
-        if (active) {
-          setDetailWaitlistTerminIds([]);
-          setDetailWaitlistInfo({});
-          setDetailWaitlistLoading(false);
         }
         return;
       }
@@ -347,7 +297,6 @@ function DetailScreen({
         console.error("DETAIL WARTELISTE LADEN FEHLER:", error);
         setDetailWaitlistTerminIds([]);
         setDetailWaitlistInfo({});
-        setDetailWaitlistLoading(false);
         return;
       }
 
@@ -361,8 +310,8 @@ function DetailScreen({
       const info = {};
       const ids = [];
       for (const [terminId, rows] of Object.entries(grouped)) {
-        const myIndex = rows.findIndex(
-          (row) => String(row?.freiwilliger_id) === String(resolvedFreiwilligerId)
+        const myIndex = rows.findIndex((row) =>
+          myUserIds.includes(String(row?.freiwilliger_id))
         );
         if (myIndex >= 0) {
           const myRow = rows[myIndex];
@@ -377,7 +326,6 @@ function DetailScreen({
 
       setDetailWaitlistTerminIds(ids);
       setDetailWaitlistInfo(info);
-      setDetailWaitlistLoading(false);
     }
 
     loadDetailWaitlist();
@@ -647,10 +595,10 @@ function DetailScreen({
                     bewerbungIstAktiv(b)
                 )
               : null;
-            const { freiePlaetze, angemeldet, warteliste, belegt } = getTerminPlaetze(t);
+            const { freiePlaetze, angemeldet, belegt } = getTerminPlaetze(t);
+            const wartelisteCount = getTerminWartelisteCount(t, stelle);
             const waitlistInfo = detailWaitlistInfo?.[t.id] || null;
             const isOnWaitlist = !!waitlistInfo;
-            const isWaitlistLoading = detailWaitlistLoading && user && user?.type !== "verein" && belegt;
             return (
               <div
                 key={t.id}
@@ -709,16 +657,16 @@ function DetailScreen({
                         ? "Ausgebucht"
                         : `Noch ${freiePlaetze} Helfer gesucht`}
                     </div>
-                    {warteliste > 0 && (
+                    {wartelisteCount > 0 && (
                       <div
                         style={{
                           fontSize: 12,
-                          color: "#8B5E34",
+                          color: "#A05A2C",
                           fontWeight: "bold",
                           marginTop: 2,
                         }}
                       >
-                        {warteliste} auf Warteliste
+                        {wartelisteCount} {wartelisteCount === 1 ? "Person" : "Personen"} auf Warteliste
                       </div>
                     )}
                   </div>
@@ -884,73 +832,54 @@ function DetailScreen({
                     ⏳ Termin läuft gerade – Anmeldung nicht mehr möglich
                   </div>
                 ) : user && user?.type !== "verein" ? (
-                  isWaitlistLoading ? (
-                    <div
-                      style={{
-                        width: "100%",
-                        padding: "10px",
-                        borderRadius: 10,
-                        border: "1px solid #E0D8C8",
-                        background: "#F6F1E8",
-                        color: "#8B7355",
-                        fontSize: 13,
-                        fontFamily: "inherit",
-                        fontWeight: "bold",
-                        textAlign: "center",
-                      }}
-                    >
-                      Wartelistenstatus wird geladen …
-                    </div>
-                  ) : (
-                    <button
-                      onClick={async () => {
-                        if (isOnWaitlist) {
-                          if (!onWartelisteRemove) return;
-                          await onWartelisteRemove(stelle.id, t.id);
-                          setDetailWaitlistTerminIds((prev) => prev.filter((terminId) => terminId !== t.id));
-                          setDetailWaitlistInfo((prev) => {
-                            const next = { ...prev };
-                            delete next[t.id];
-                            return next;
-                          });
-                          return;
-                        }
+                  <button
+                    onClick={async () => {
+                      if (isOnWaitlist) {
+                        if (!onWartelisteRemove) return;
+                        await onWartelisteRemove(stelle.id, t.id);
+                        setDetailWaitlistTerminIds((prev) => prev.filter((terminId) => terminId !== t.id));
+                        setDetailWaitlistInfo((prev) => {
+                          const next = { ...prev };
+                          delete next[t.id];
+                          return next;
+                        });
+                        return;
+                      }
 
-                        if (!onWarteliste) return;
-                        await onWarteliste(stelle.id, t.id);
+                      if (!onWarteliste) return;
+                      await onWarteliste(stelle.id, t.id);
 
-                        const nextTotal = Number(waitlistInfo?.total || 0) + 1;
-                        setDetailWaitlistTerminIds((prev) =>
-                          prev.includes(t.id) ? prev : [...prev, t.id]
-                        );
-                        setDetailWaitlistInfo((prev) => ({
-                          ...prev,
-                          [t.id]: {
-                            id: prev?.[t.id]?.id || null,
-                            position: prev?.[t.id]?.position || nextTotal,
-                            total: nextTotal,
-                          },
-                        }));
-                      }}
-                      style={{
-                        width: "100%",
-                        padding: "10px",
-                        borderRadius: 10,
-                        border: `1px solid ${isOnWaitlist ? "#D9C8A8" : "#E8A87C"}`,
-                        background: isOnWaitlist ? "#F6EFE4" : "transparent",
-                        color: isOnWaitlist ? "#8B7355" : "#E8A87C",
-                        fontSize: 13,
-                        fontFamily: "inherit",
-                        fontWeight: "bold",
-                        cursor: "pointer",
-                        opacity: isOnWaitlist ? 0.95 : 1,
-                      }}
-                    >
-                      {isOnWaitlist
-                        ? `❌ Warteliste verlassen · Platz ${waitlistInfo?.position || '-'} von ${waitlistInfo?.total || '-'}`
-                        : "📋 Auf die Warteliste"}
-                    </button>
-                  )
+                      const nextTotal = Number(waitlistInfo?.total || 0) + 1;
+                      setDetailWaitlistTerminIds((prev) =>
+                        prev.includes(t.id) ? prev : [...prev, t.id]
+                      );
+                      setDetailWaitlistInfo((prev) => ({
+                        ...prev,
+                        [t.id]: {
+                          id: prev?.[t.id]?.id || null,
+                          position: prev?.[t.id]?.position || nextTotal,
+                          total: nextTotal,
+                        },
+                      }));
+                    }}
+                    style={{
+                      width: "100%",
+                      padding: "10px",
+                      borderRadius: 10,
+                      border: `1px solid ${isOnWaitlist ? "#D9C8A8" : "#E8A87C"}`,
+                      background: isOnWaitlist ? "#F6EFE4" : "transparent",
+                      color: isOnWaitlist ? "#8B7355" : "#E8A87C",
+                      fontSize: 13,
+                      fontFamily: "inherit",
+                      fontWeight: "bold",
+                      cursor: "pointer",
+                      opacity: isOnWaitlist ? 0.95 : 1,
+                    }}
+                  >
+                    {isOnWaitlist
+                      ? `❌ Warteliste verlassen · Platz ${waitlistInfo?.position || '-'} von ${waitlistInfo?.total || '-'}`
+                      : "📋 Auf die Warteliste"}
+                  </button>
                 ) : null}
               </div>
             );
@@ -2463,55 +2392,45 @@ function FreiwilligerProfil({
   useEffect(() => {
     let active = true;
 
-    async function loadMeineWarteliste() {
-      const resolvedFreiwilligerId = await resolveCurrentFreiwilligerId(user);
-
-      if (!resolvedFreiwilligerId) {
-        if (active) setMeineWarteliste([]);
-        return;
-      }
-
-      const { data, error } = await supabase
-        .from("warteliste")
-        .select(`
+    supabase
+      .from("warteliste")
+      .select(`
+        id,
+        position,
+        created_at,
+        termin_id,
+        stelle_id,
+        termine:termin_id (
           id,
-          position,
-          created_at,
-          termin_id,
-          stelle_id,
-          termine:termin_id (
-            id,
-            datum,
-            startzeit,
-            endzeit
-          ),
-          stellen:stelle_id (
-            id,
-            titel,
-            ort,
-            vereine (
-              name
-            )
+          datum,
+          startzeit,
+          endzeit
+        ),
+        stellen:stelle_id (
+          id,
+          titel,
+          ort,
+          vereine (
+            name
           )
-        `)
-        .eq("freiwilliger_id", resolvedFreiwilligerId)
-        .order("created_at", { ascending: true });
-
-      if (!active) return;
-      if (error) {
-        console.error("MEINE WARTELISTE LADEN FEHLER:", error);
-        setMeineWarteliste([]);
-        return;
-      }
+        )
+      `)
+      .eq("freiwilliger_id", user.data.id)
+      .order("created_at", { ascending: true })
+      .then(({ data, error }) => {
+        if (!active) return;
+        if (error) {
+          console.error("MEINE WARTELISTE LADEN FEHLER:", error);
+          setMeineWarteliste([]);
+          return;
+        }
         setMeineWarteliste(data || []);
-    }
-
-    loadMeineWarteliste();
+      });
 
     return () => {
       active = false;
     };
-  }, [user?.data?.id, user?.data?.auth_id]);
+  }, [user.data.id]);
 
 
   useEffect(() => {

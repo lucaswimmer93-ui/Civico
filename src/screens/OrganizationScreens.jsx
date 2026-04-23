@@ -24,41 +24,42 @@ const aktiveBewerbungen = (bewerbungen = []) =>
 
 const getTerminPlaetze = (termin) => {
   const aktive = aktiveBewerbungen(termin?.bewerbungen || []);
-  const statsAngemeldet = Number(
-    termin?.angemeldet_count ??
-      termin?.termin_stats?.angemeldet_count
+  const gesamtPlaetze = Number(
+    termin?.gesamt_plaetze ??
+      termin?.max_helfer ??
+      termin?.plaetze ??
+      (Number.isFinite(Number(termin?.freie_plaetze))
+        ? Number(termin.freie_plaetze) + aktive.length
+        : 0)
   );
-  const statsGesamtPlaetze = Number(
-    termin?.gesamt_plaetze_count ??
-      termin?.termin_stats?.gesamt_plaetze
-  );
-  const statsFreiePlaetze = Number(
-    termin?.freie_plaetze_count ??
-      termin?.termin_stats?.freie_plaetze_count
-  );
-
-  const gesamtPlaetze = Number.isFinite(statsGesamtPlaetze) && statsGesamtPlaetze >= 0
-    ? statsGesamtPlaetze
-    : Number(
-        termin?.gesamt_plaetze ??
-          termin?.max_helfer ??
-          termin?.plaetze ??
-          (Number.isFinite(Number(termin?.freie_plaetze))
-            ? Number(termin.freie_plaetze) + aktive.length
-            : 0)
-      );
-
-  const freiePlaetze = Number.isFinite(statsFreiePlaetze) && statsFreiePlaetze >= 0
-    ? statsFreiePlaetze
-    : Math.max(0, gesamtPlaetze - aktive.length);
-
+  const freiePlaetze = Math.max(0, gesamtPlaetze - aktive.length);
   return {
     freiePlaetze,
-    angemeldet: Number.isFinite(statsAngemeldet) && statsAngemeldet >= 0
-      ? (gesamtPlaetze > 0 ? Math.min(gesamtPlaetze, statsAngemeldet) : statsAngemeldet)
-      : (gesamtPlaetze > 0 ? Math.min(gesamtPlaetze, aktive.length) : aktive.length),
+    angemeldet: gesamtPlaetze > 0 ? Math.min(gesamtPlaetze, aktive.length) : aktive.length,
   };
 };
+
+const getTerminWartelisteCount = (termin, stelle = null, wartelistenMap = null) => {
+  const directCount = Number(
+    termin?.termin_stats?.warteliste_count ??
+    termin?.warteliste_count ??
+    termin?.stats?.warteliste_count
+  );
+  if (Number.isFinite(directCount)) return Math.max(0, directCount);
+
+  if (Array.isArray(termin?.warteliste)) return termin.warteliste.length;
+
+  if (wartelistenMap && Array.isArray(wartelistenMap[termin?.id])) {
+    return wartelistenMap[termin.id].length;
+  }
+
+  if (Array.isArray(stelle?.warteliste)) {
+    return stelle.warteliste.filter((w) => w?.termin_id === termin?.id).length;
+  }
+
+  return 0;
+};
+
 function VereinDashboard({
   user,
   stellen,
@@ -1097,18 +1098,21 @@ function VereinStelleDetail({
               <div style={{ fontSize: 12, color: "#3A7D44", marginBottom: 10 }}>
                 {getTerminPlaetze(t).freiePlaetze} Plätze frei
               </div>
-              {((wartelisten?.[t.id]?.length || 0) > 0) && (
-                <div
-                  style={{
-                    fontSize: 12,
-                    color: (wartelisten[t.id].length >= 3) ? "#B53A2D" : "#A05A2C",
-                    fontWeight: "bold",
-                    marginBottom: 10,
-                  }}
-                >
-                  📋 {wartelisten[t.id].length} in der Warteliste
-                </div>
-              )}
+              {(() => {
+                const wartelisteCount = getTerminWartelisteCount(t, stelle, wartelisten);
+                return wartelisteCount > 0 ? (
+                  <div
+                    style={{
+                      fontSize: 12,
+                      color: wartelisteCount >= 3 ? "#B53A2D" : "#A05A2C",
+                      fontWeight: "bold",
+                      marginBottom: 10,
+                    }}
+                  >
+                    📋 {wartelisteCount} {wartelisteCount === 1 ? "Person" : "Personen"} auf Warteliste
+                  </div>
+                ) : null;
+              })()}
 
               {/* Termin-Aktionen für bevorstehende Termine */}
               {nochNichtGestartet && (
@@ -1274,7 +1278,10 @@ function VereinStelleDetail({
                     ) : (
                       <>
                         <SectionLabel>
-                          Angemeldete ({aktiveTeilnehmer.length})
+                          {(() => {
+                            const wartelisteCount = getTerminWartelisteCount(t, stelle, wartelisten);
+                            return `Angemeldete (${aktiveTeilnehmer.length})${wartelisteCount > 0 ? ` · Warteliste (${wartelisteCount})` : ""}`;
+                          })()}
                         </SectionLabel>
                         {aktiveTeilnehmer.length === 0 ? (
                           <div style={{ fontSize: 12, color: "#8B7355" }}>
