@@ -24,18 +24,39 @@ const aktiveBewerbungen = (bewerbungen = []) =>
 
 const getTerminPlaetze = (termin) => {
   const aktive = aktiveBewerbungen(termin?.bewerbungen || []);
-  const gesamtPlaetze = Number(
-    termin?.gesamt_plaetze ??
-      termin?.max_helfer ??
-      termin?.plaetze ??
-      (Number.isFinite(Number(termin?.freie_plaetze))
-        ? Number(termin.freie_plaetze) + aktive.length
-        : 0)
+  const statsAngemeldet = Number(
+    termin?.angemeldet_count ??
+      termin?.termin_stats?.angemeldet_count
   );
-  const freiePlaetze = Math.max(0, gesamtPlaetze - aktive.length);
+  const statsGesamtPlaetze = Number(
+    termin?.gesamt_plaetze_count ??
+      termin?.termin_stats?.gesamt_plaetze
+  );
+  const statsFreiePlaetze = Number(
+    termin?.freie_plaetze_count ??
+      termin?.termin_stats?.freie_plaetze_count
+  );
+
+  const gesamtPlaetze = Number.isFinite(statsGesamtPlaetze) && statsGesamtPlaetze >= 0
+    ? statsGesamtPlaetze
+    : Number(
+        termin?.gesamt_plaetze ??
+          termin?.max_helfer ??
+          termin?.plaetze ??
+          (Number.isFinite(Number(termin?.freie_plaetze))
+            ? Number(termin.freie_plaetze) + aktive.length
+            : 0)
+      );
+
+  const freiePlaetze = Number.isFinite(statsFreiePlaetze) && statsFreiePlaetze >= 0
+    ? statsFreiePlaetze
+    : Math.max(0, gesamtPlaetze - aktive.length);
+
   return {
     freiePlaetze,
-    angemeldet: gesamtPlaetze > 0 ? Math.min(gesamtPlaetze, aktive.length) : aktive.length,
+    angemeldet: Number.isFinite(statsAngemeldet) && statsAngemeldet >= 0
+      ? (gesamtPlaetze > 0 ? Math.min(gesamtPlaetze, statsAngemeldet) : statsAngemeldet)
+      : (gesamtPlaetze > 0 ? Math.min(gesamtPlaetze, aktive.length) : aktive.length),
   };
 };
 function VereinDashboard({

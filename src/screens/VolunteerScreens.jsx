@@ -36,44 +36,67 @@ const getVereinLogoSrc = (verein) => {
 };
 
 const getTerminPlaetze = (termin) => {
-  const aktiveBewerbungen = (termin?.bewerbungen || []).filter(bewerbungIstAktiv).length;
-  const gesamtPlaetze = Number(
-    termin?.gesamt_plaetze ??
-      termin?.max_helfer ??
-      termin?.plaetze ??
-      (Number.isFinite(Number(termin?.freie_plaetze))
-        ? Number(termin.freie_plaetze) + aktiveBewerbungen
-        : 0)
+  const statsAngemeldet = Number(
+    termin?.angemeldet_count ??
+      termin?.termin_stats?.angemeldet_count
   );
-  const freiePlaetze = Math.max(0, gesamtPlaetze - aktiveBewerbungen);
+  const statsWarteliste = Number(
+    termin?.warteliste_count ??
+      termin?.termin_stats?.warteliste_count
+  );
+  const statsGesamtPlaetze = Number(
+    termin?.gesamt_plaetze_count ??
+      termin?.termin_stats?.gesamt_plaetze
+  );
+  const statsFreiePlaetze = Number(
+    termin?.freie_plaetze_count ??
+      termin?.termin_stats?.freie_plaetze_count
+  );
 
-  const angemeldet = gesamtPlaetze > 0
-    ? Math.min(gesamtPlaetze, aktiveBewerbungen)
-    : aktiveBewerbungen;
+  const aktiveBewerbungen = (termin?.bewerbungen || []).filter(bewerbungIstAktiv).length;
+  const gesamtPlaetze = Number.isFinite(statsGesamtPlaetze) && statsGesamtPlaetze >= 0
+    ? statsGesamtPlaetze
+    : Number(
+        termin?.gesamt_plaetze ??
+          termin?.max_helfer ??
+          termin?.plaetze ??
+          (Number.isFinite(Number(termin?.freie_plaetze))
+            ? Number(termin.freie_plaetze) + aktiveBewerbungen
+            : 0)
+      );
+
+  const angemeldet = Number.isFinite(statsAngemeldet) && statsAngemeldet >= 0
+    ? (gesamtPlaetze > 0 ? Math.min(gesamtPlaetze, statsAngemeldet) : statsAngemeldet)
+    : (gesamtPlaetze > 0 ? Math.min(gesamtPlaetze, aktiveBewerbungen) : aktiveBewerbungen);
+
+  const freiePlaetze = Number.isFinite(statsFreiePlaetze) && statsFreiePlaetze >= 0
+    ? statsFreiePlaetze
+    : Math.max(0, gesamtPlaetze - aktiveBewerbungen);
 
   return {
     gesamtPlaetze,
     freiePlaetze,
     angemeldet,
+    warteliste: Number.isFinite(statsWarteliste) && statsWarteliste >= 0 ? statsWarteliste : Number((termin?.warteliste || []).length || 0),
     belegt: freiePlaetze <= 0,
   };
 };
 
 
 const resolveCurrentFreiwilligerId = async (user) => {
-  let authUid = null;
+  let authId = user?.data?.auth_id || user?.auth_id || null;
 
-  try {
-    const { data, error } = await supabase.auth.getUser();
-    if (error) {
-      console.error("AUTH USER LOOKUP FEHLER:", error);
+  if (!authId) {
+    try {
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError) {
+        console.error("AUTH SESSION LOOKUP FEHLER:", sessionError);
+      }
+      authId = sessionData?.session?.user?.id || null;
+    } catch (error) {
+      console.error("AUTH SESSION LOOKUP EXCEPTION:", error);
     }
-    authUid = data?.user?.id || null;
-  } catch (error) {
-    console.error("AUTH USER LOOKUP EXCEPTION:", error);
   }
-
-  const authId = authUid || user?.data?.auth_id || user?.auth_id || null;
 
   if (!authId) {
     return null;
@@ -83,7 +106,7 @@ const resolveCurrentFreiwilligerId = async (user) => {
     .from("freiwillige")
     .select("id")
     .eq("auth_id", authId)
-    .single();
+    .maybeSingle();
 
   if (error) {
     console.error("FREIWILLIGER RESOLVE FEHLER:", error);
@@ -624,7 +647,7 @@ function DetailScreen({
                     bewerbungIstAktiv(b)
                 )
               : null;
-            const { freiePlaetze, angemeldet, belegt } = getTerminPlaetze(t);
+            const { freiePlaetze, angemeldet, warteliste, belegt } = getTerminPlaetze(t);
             const waitlistInfo = detailWaitlistInfo?.[t.id] || null;
             const isOnWaitlist = !!waitlistInfo;
             const isWaitlistLoading = detailWaitlistLoading && user && user?.type !== "verein" && belegt;
@@ -686,6 +709,18 @@ function DetailScreen({
                         ? "Ausgebucht"
                         : `Noch ${freiePlaetze} Helfer gesucht`}
                     </div>
+                    {warteliste > 0 && (
+                      <div
+                        style={{
+                          fontSize: 12,
+                          color: "#8B5E34",
+                          fontWeight: "bold",
+                          marginTop: 2,
+                        }}
+                      >
+                        {warteliste} auf Warteliste
+                      </div>
+                    )}
                   </div>
                 </div>
                 {meineBew ? (() => {
