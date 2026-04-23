@@ -1292,6 +1292,59 @@ export default function App() {
 
 
 
+  const fetchTerminStats = async (terminIds = []) => {
+    const cleanTerminIds = [...new Set((terminIds || []).filter(Boolean))];
+    if (!cleanTerminIds.length) return [];
+
+    const { data, error } = await supabase.rpc("get_termin_stats", {
+      p_termin_ids: cleanTerminIds,
+    });
+
+    if (error) {
+      console.error("TERMIN STATS LADEN FEHLER:", error);
+      return [];
+    }
+
+    return Array.isArray(data) ? data : [];
+  };
+
+  const mergeTerminStatsIntoStellen = async (stellenRows = []) => {
+    const terminIds = (stellenRows || [])
+      .flatMap((stelle) => stelle?.termine || [])
+      .map((termin) => termin?.id)
+      .filter(Boolean);
+
+    const statsRows = await fetchTerminStats(terminIds);
+    const statsMap = new Map(
+      (statsRows || []).map((row) => [String(row.termin_id), row])
+    );
+
+    return (stellenRows || []).map((stelle) => ({
+      ...stelle,
+      termine: (stelle?.termine || []).map((termin) => {
+        const stats = statsMap.get(String(termin?.id)) || null;
+        return {
+          ...termin,
+          termin_stats: stats,
+          angemeldet_count: Number(stats?.angemeldet_count || 0),
+          warteliste_count: Number(stats?.warteliste_count || 0),
+          gesamt_plaetze_count: Number(
+            stats?.gesamt_plaetze ??
+            termin?.gesamt_plaetze ??
+            termin?.max_helfer ??
+            termin?.plaetze ??
+            0
+          ),
+          freie_plaetze_count: Number(
+            stats?.freie_plaetze_count ??
+            termin?.freie_plaetze ??
+            0
+          ),
+        };
+      }),
+    }));
+  };
+
   const fetchStellenWithRelations = async ({ stelleIds = null } = {}) => {
     let query = supabase
       .from("stellen")
@@ -1309,11 +1362,12 @@ export default function App() {
     if (error) throw error;
 
     if (!Array.isArray(stelleIds) || !stelleIds.length) {
-      return data || [];
+      return await mergeTerminStatsIntoStellen(data || []);
     }
 
     const orderMap = new Map(stelleIds.map((id, index) => [id, index]));
-    return (data || []).sort((a, b) => (orderMap.get(a.id) ?? 999999) - (orderMap.get(b.id) ?? 999999));
+    const ordered = (data || []).sort((a, b) => (orderMap.get(a.id) ?? 999999) - (orderMap.get(b.id) ?? 999999));
+    return await mergeTerminStatsIntoStellen(ordered);
   };
 
   const loadStellen = async (
