@@ -2,6 +2,22 @@ import React, { useState, useEffect } from 'react';
 import { T, KATEGORIEN, SKILLS, getSkillLabel, getKat, getMedaille, getNextMedaille, getMedailleName, IMPRESSUM_TEXT, DATENSCHUTZ_TEXT, AGB_TEXT, formatDate, isTerminNochNichtGestartet, isTerminAktuell, supabase } from '../core/shared';
 
 
+
+function getAvatarPublicUrl(value) {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  if (
+    trimmed.startsWith("http://") ||
+    trimmed.startsWith("https://") ||
+    trimmed.startsWith("data:image/") ||
+    trimmed.startsWith("blob:")
+  ) {
+    return trimmed;
+  }
+  return supabase.storage.from("avatars").getPublicUrl(trimmed).data.publicUrl;
+}
+
 const BEWERBUNG_INAKTIV_STATUS = ["storniert", "abgesagt", "cancelled", "canceled"];
 
 function bewerbungIstAktiv(bewerbung) {
@@ -414,19 +430,12 @@ function VereineListe({
                 }}
               >
                 {(() => {
-                  const rawLogoUrl =
-                    typeof v.logo_url === "string" ? v.logo_url.trim() : "";
-                  const logoUrlIstBild =
-                    rawLogoUrl &&
-                    (rawLogoUrl.startsWith("http://") ||
-                      rawLogoUrl.startsWith("https://") ||
-                      rawLogoUrl.startsWith("data:image/") ||
-                      rawLogoUrl.startsWith("blob:"));
+                  const logoSrc = getAvatarPublicUrl(v.logo || v.logo_url || "");
 
-                  if (logoUrlIstBild) {
+                  if (logoSrc) {
                     return (
                       <img
-                        src={rawLogoUrl}
+                        src={logoSrc}
                         alt={v.name || "Logo"}
                         style={{
                           width: "100%",
@@ -440,25 +449,6 @@ function VereineListe({
                   const rawLogo =
                     typeof v.logo === "string" ? v.logo.trim() : "";
 
-                  if (
-                    rawLogo &&
-                    (rawLogo.startsWith("http://") ||
-                      rawLogo.startsWith("https://") ||
-                      rawLogo.startsWith("data:image/") ||
-                      rawLogo.startsWith("blob:"))
-                  ) {
-                    return (
-                      <img
-                        src={rawLogo}
-                        alt={v.name || "Logo"}
-                        style={{
-                          width: "100%",
-                          height: "100%",
-                          objectFit: "cover",
-                        }}
-                      />
-                    );
-                  }
 
                   if (rawLogo && rawLogo.length <= 3) {
                     return rawLogo;
