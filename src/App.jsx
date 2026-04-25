@@ -543,7 +543,7 @@ export default function App() {
     }
   };
 
-  const loadVereinFollowers = async (vereinId) => {
+  const loadVereinFollowers = async (vereinId, vereinAuthId = null) => {
     if (!vereinId) {
       setVereinFollowers([]);
       return;
@@ -551,28 +551,28 @@ export default function App() {
     try {
       const { data: followRows, error: followError } = await supabase
         .from("follows")
-        .select("freiwilliger_id")
+        .select("id, freiwilliger_id, created_at, freiwillige:freiwilliger_id ( id, auth_id, name, email, avatar_url )")
         .eq("typ", "verein")
-        .eq("ziel_id", vereinId);
+        .eq("ziel_id", vereinId)
+        .order("created_at", { ascending: false });
 
       if (followError) throw followError;
 
-      const ids = [...new Set((followRows || []).map((row) => row.freiwilliger_id).filter(Boolean))];
-
-      if (!ids.length) {
-        setVereinFollowers([]);
-        return;
+      const uniqueRows = [];
+      const seen = new Set();
+      for (const row of followRows || []) {
+        if (!row?.freiwilliger_id || seen.has(row.freiwilliger_id)) continue;
+        if (vereinAuthId && row?.freiwillige?.auth_id === vereinAuthId) continue;
+        seen.add(row.freiwilliger_id);
+        uniqueRows.push({
+          id: row.id,
+          freiwilliger_id: row.freiwilliger_id,
+          freiwillige: row.freiwillige || null,
+          created_at: row.created_at || null,
+        });
       }
 
-      const { data: freiwilligeRows, error: freiwilligeError } = await supabase
-        .from("freiwillige")
-        .select("id, name")
-        .in("id", ids);
-
-      if (freiwilligeError) throw freiwilligeError;
-
-      const freiwilligeMap = new Map((freiwilligeRows || []).map((row) => [row.id, row]));
-      setVereinFollowers(ids.map((id) => ({ freiwilliger_id: id, freiwillige: freiwilligeMap.get(id) || null })));
+      setVereinFollowers(uniqueRows);
     } catch (error) {
       console.error("VEREIN FOLLOWER LADEN FEHLER:", error);
       setVereinFollowers([]);
@@ -1636,7 +1636,7 @@ export default function App() {
             loadVereine(effectiveGemeindeId);
             setScreen("dashboard");
             autoArchivieren(verein.id);
-            loadVereinFollowers(verein.id);
+            loadVereinFollowers(verein.id, verein.auth_id);
             loadVereinNotifications(verein.id);
             return;
           }
@@ -3066,7 +3066,7 @@ export default function App() {
             }
             if (type === "verein") {
               autoArchivieren(data.id);
-              loadVereinFollowers(data.id);
+              loadVereinFollowers(data.id, data.auth_id);
               loadVereinNotifications(data.id);
             }
           }}
@@ -3558,6 +3558,11 @@ export default function App() {
           onBack={goBack}
           onSave={async (stelleData, termineData) => {
             try {
+              if (user?.data?.verifiziert !== true) {
+                showToast("Dein Verein muss erst verifiziert werden, bevor du Stellen erstellen kannst.", "#E8A87C");
+                return;
+              }
+
               const cleanStelle = {
                 titel: stelleData?.titel || "",
                 beschreibung: stelleData?.beschreibung || "",
