@@ -2235,24 +2235,17 @@ export default function App() {
     });
 
     if (terminIstVollstaendigBearbeitet) {
-      await supabase.from("warteliste").delete().eq("termin_id", bew.termin_id);
-      await supabase.from("termine").delete().eq("id", bew.termin_id);
+      // Historische Daten nicht löschen: Bewerbungen, Warteliste und Termine bleiben
+      // für Auswertung, Chats und 12-Monats-Rückblick erhalten.
+      await supabase
+        .from("stellen")
+        .update({ archiviert: true })
+        .eq("id", bew.stelle_id);
 
-      const { count: restTermineCount } = await supabase
-        .from("termine")
-        .select("id", { count: "exact", head: true })
-        .eq("stelle_id", bew.stelle_id);
-
-      if ((restTermineCount || 0) === 0) {
-        await supabase.from("stellen").delete().eq("id", bew.stelle_id);
-
-        setStellen((prev) => prev.filter((s) => s.id !== bew.stelle_id));
-        if (selected?.id === bew.stelle_id) {
-          setSelected(null);
-          goBack();
-        }
-      } else if (selected?.id === bew.stelle_id) {
-        await reloadSelected(bew.stelle_id);
+      setStellen((prev) => prev.filter((s) => s.id !== bew.stelle_id));
+      if (selected?.id === bew.stelle_id) {
+        setSelected(null);
+        goBack();
       }
     } else if (selected?.id === bew.stelle_id) {
       await reloadSelected(bew.stelle_id);
@@ -3377,29 +3370,8 @@ export default function App() {
                 throw rpcError;
               }
 
-              // Betroffene Anmeldungen und Warteliste für diesen Termin entfernen,
-              // damit der Termin wirklich verschwindet und niemand angemeldet bleibt.
-              const { error: bewerbungenDeleteError } = await supabase
-                .from("bewerbungen")
-                .delete()
-                .eq("termin_id", terminId);
-
-              if (bewerbungenDeleteError) throw bewerbungenDeleteError;
-
-              const { error: wartelisteDeleteError } = await supabase
-                .from("warteliste")
-                .delete()
-                .eq("termin_id", terminId);
-
-              if (wartelisteDeleteError) throw wartelisteDeleteError;
-
-              const { error: terminDeleteError } = await supabase
-                .from("termine")
-                .delete()
-                .eq("id", terminId);
-
-              if (terminDeleteError) throw terminDeleteError;
-
+              // Termin nur absagen, nicht löschen. Bewerbungen, Warteliste und Chats
+              // bleiben für Verlauf, Analyse und Rückblick erhalten.
               showToast("✓ Termin abgesagt.", "#E85C5C");
               await loadStellen(gemeindeId);
               const { data } = await supabase
@@ -3542,15 +3514,10 @@ export default function App() {
                 nicht_erschienen: nichtErschienen,
               });
             await supabase
-              .from("bewerbungen")
-              .delete()
-              .eq("stelle_id", selected.id);
-            await supabase
-              .from("termine")
-              .delete()
-              .eq("stelle_id", selected.id);
-            await supabase.from("stellen").delete().eq("id", selected.id);
-            showToast("Stelle gelöscht.", "#E85C5C");
+              .from("stellen")
+              .update({ archiviert: true })
+              .eq("id", selected.id);
+            showToast("Stelle archiviert.", "#E8A87C");
             await loadStellen(gemeindeId);
             goBack();
           }}
