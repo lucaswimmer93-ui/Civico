@@ -549,15 +549,9 @@ export default function App() {
       return;
     }
     try {
-      const { data: vereinRow } = await supabase
-        .from("vereine")
-        .select("id, auth_id")
-        .eq("id", vereinId)
-        .maybeSingle();
-
       const { data: followRows, error: followError } = await supabase
         .from("follows")
-        .select("id, freiwilliger_id")
+        .select("freiwilliger_id")
         .eq("typ", "verein")
         .eq("ziel_id", vereinId);
 
@@ -572,17 +566,13 @@ export default function App() {
 
       const { data: freiwilligeRows, error: freiwilligeError } = await supabase
         .from("freiwillige")
-        .select("id, auth_id, name, email, avatar_url")
+        .select("id, name")
         .in("id", ids);
 
       if (freiwilligeError) throw freiwilligeError;
 
       const freiwilligeMap = new Map((freiwilligeRows || []).map((row) => [row.id, row]));
-      const followers = ids
-        .map((id) => ({ freiwilliger_id: id, freiwillige: freiwilligeMap.get(id) || null }))
-        .filter((row) => row.freiwillige?.auth_id !== vereinRow?.auth_id);
-
-      setVereinFollowers(followers);
+      setVereinFollowers(ids.map((id) => ({ freiwilliger_id: id, freiwillige: freiwilligeMap.get(id) || null })));
     } catch (error) {
       console.error("VEREIN FOLLOWER LADEN FEHLER:", error);
       setVereinFollowers([]);
@@ -638,7 +628,7 @@ export default function App() {
       const { error } = await supabase
         .from("follows")
         .insert({
-          freiwilliger_id: freiwilligerId,
+          freiwilliger_id: user.data.id,
           typ: "verein",
           ziel_id: vereinId,
         });
@@ -683,7 +673,7 @@ export default function App() {
       const { error } = await supabase
         .from("follows")
         .insert({
-          freiwilliger_id: freiwilligerId,
+          freiwilliger_id: user.data.id,
           typ: "kategorie",
           ziel_wert: katId,
         });
@@ -755,10 +745,8 @@ export default function App() {
         return;
       }
 
-      const freiwilligerId = await getCurrentFreiwilligerId();
-
       const existing = (existingList || []).find(
-        (w) => String(w.freiwilliger_id) === String(freiwilligerId)
+        (w) => String(w.freiwilliger_id) === String(user.data.id)
       );
 
       if (existing) {
@@ -771,7 +759,7 @@ export default function App() {
       const { error: insertError } = await supabase.from("warteliste").insert({
         stelle_id: stelleId,
         termin_id: terminId,
-        freiwilliger_id: freiwilligerId,
+        freiwilliger_id: user.data.id,
         name: user.data.name,
         email: user.data.email,
         position,
@@ -808,12 +796,11 @@ export default function App() {
     if (!user?.data?.id) return;
 
     try {
-      const freiwilligerId = await getCurrentFreiwilligerId();
       const { error } = await supabase
         .from("warteliste")
         .delete()
         .eq("termin_id", terminId)
-        .eq("freiwilliger_id", freiwilligerId);
+        .eq("freiwilliger_id", user.data.id);
 
       if (error) {
         console.error("WARTELISTE DELETE FEHLER:", error);
@@ -1587,7 +1574,7 @@ export default function App() {
           },
           verein: async () => {
             const { data } = await supabase
-              .from("vereine")
+              .from(VEREINE_SOURCE)
               .select("*")
               .eq("auth_id", session.user.id)
               .maybeSingle();
@@ -1943,7 +1930,7 @@ export default function App() {
         const { data: erfolg, error } = await supabase.rpc("book_slot", {
           p_stelle_id: stelleId,
           p_termin_id: terminId,
-          p_freiwilliger_id: freiwilligerId,
+          p_freiwilliger_id: user.data.id,
           p_name: user.data.name,
           p_email: user.data.email,
         });
@@ -2028,10 +2015,7 @@ export default function App() {
   };
 
   const handleTerminWechsel = async (bewId, alterTerminId) => {
-    await supabase
-      .from("bewerbungen")
-      .update({ status: "storniert" })
-      .eq("id", bewId);
+    await supabase.from("bewerbungen").delete().eq("id", bewId);
     await supabase.rpc("increment_plaetze", { termin_id: alterTerminId });
     setTerminWechselModus(true);
     showToast("Wähle einen neuen Termin →");
@@ -2055,11 +2039,11 @@ export default function App() {
 
       const { error: deleteBewError } = await supabase
         .from("bewerbungen")
-        .update({ status: "storniert" })
+        .delete()
         .eq("id", bewId);
 
       if (deleteBewError) {
-        console.error("BEWERBUNG STORNIEREN FEHLER:", deleteBewError);
+        console.error("BEWERBUNG DELETE FEHLER:", deleteBewError);
         showToast("Fehler beim Abmelden.", "#E85C5C");
         return;
       }
@@ -2251,12 +2235,23 @@ export default function App() {
     });
 
     if (terminIstVollstaendigBearbeitet) {
-      await supabase
-        .from("termine")
-        .update({ status: "abgeschlossen" })
-        .eq("id", bew.termin_id);
+      await supabase.from("warteliste").delete().eq("termin_id", bew.termin_id);
+      await supabase.from("termine").delete().eq("id", bew.termin_id);
 
-      if (selected?.id === bew.stelle_id) {
+      const { count: restTermineCount } = await supabase
+        .from("termine")
+        .select("id", { count: "exact", head: true })
+        .eq("stelle_id", bew.stelle_id);
+
+      if ((restTermineCount || 0) === 0) {
+        await supabase.from("stellen").delete().eq("id", bew.stelle_id);
+
+        setStellen((prev) => prev.filter((s) => s.id !== bew.stelle_id));
+        if (selected?.id === bew.stelle_id) {
+          setSelected(null);
+          goBack();
+        }
+      } else if (selected?.id === bew.stelle_id) {
         await reloadSelected(bew.stelle_id);
       }
     } else if (selected?.id === bew.stelle_id) {
@@ -2684,7 +2679,6 @@ export default function App() {
               <FreiwilligenDashboard
                 user={user}
                 stellen={stellen}
-                vereine={vereine}
                 follows={follows}
                 onOpenDetail={(stelle) => openDetail(stelle)}
                 onOpenKommunikation={() => setHomeTab("kommunikation")}
@@ -3047,24 +3041,12 @@ export default function App() {
       {/* LOGIN */}
       {screen === "login" && (
         <LoginScreen
-          onLogin={async (type, data, gid) => {
-            if (typeof window !== "undefined") {
+          onLogin={(type, data, gid) => {
+                        if (typeof window !== "undefined") {
               sessionStorage.removeItem("civico_auth_flow");
             }
             setStoredLastRole(type);
-
-            let safeData = data;
-            if (type === "verein" && data?.auth_id) {
-              const { data: freshVerein } = await supabase
-                .from("vereine")
-                .select("*")
-                .eq("auth_id", data.auth_id)
-                .maybeSingle();
-              if (freshVerein) safeData = freshVerein;
-            }
-
-            setUser({ type, data: safeData });
-            data = safeData;
+            setUser({ type, data });
             const effectiveGemeindeId = data?.effective_gemeinde_id || data?.gemeinde_id || gid || null;
             setGemeindeId(effectiveGemeindeId);
             if (type === "freiwilliger") {
@@ -3312,10 +3294,7 @@ export default function App() {
             try {
               const targetStelleId = selected?.id || null;
 
-              await supabase
-                .from("bewerbungen")
-                .update({ status: "storniert" })
-                .eq("id", bewId);
+              await supabase.from("bewerbungen").delete().eq("id", bewId);
               await supabase.rpc("increment_plaetze", { termin_id: terminId });
 
               const { data: moveupResult, error: moveupError } = await supabase.rpc(
@@ -3383,7 +3362,7 @@ export default function App() {
 
               const { error: updateError } = await supabase
                 .from("termine")
-                .update({ abgesagt: true, status: "abgesagt" })
+                .update({ abgesagt: true })
                 .eq("id", terminId);
 
               if (updateError) throw updateError;
@@ -3397,14 +3376,28 @@ export default function App() {
                 throw rpcError;
               }
 
-              // Historie erhalten: Anmeldungen werden nur als abgesagt markiert,
-              // Termin bleibt für Analyse, Chat und Rückblick in der DB.
+              // Betroffene Anmeldungen und Warteliste für diesen Termin entfernen,
+              // damit der Termin wirklich verschwindet und niemand angemeldet bleibt.
               const { error: bewerbungenDeleteError } = await supabase
                 .from("bewerbungen")
-                .update({ status: "abgesagt" })
+                .delete()
                 .eq("termin_id", terminId);
 
               if (bewerbungenDeleteError) throw bewerbungenDeleteError;
+
+              const { error: wartelisteDeleteError } = await supabase
+                .from("warteliste")
+                .delete()
+                .eq("termin_id", terminId);
+
+              if (wartelisteDeleteError) throw wartelisteDeleteError;
+
+              const { error: terminDeleteError } = await supabase
+                .from("termine")
+                .delete()
+                .eq("id", terminId);
+
+              if (terminDeleteError) throw terminDeleteError;
 
               showToast("✓ Termin abgesagt.", "#E85C5C");
               await loadStellen(gemeindeId);
@@ -3548,10 +3541,15 @@ export default function App() {
                 nicht_erschienen: nichtErschienen,
               });
             await supabase
-              .from("stellen")
-              .update({ archiviert: true, archived: true, status: "archiviert" })
-              .eq("id", selected.id);
-            showToast("Stelle archiviert.", "#E85C5C");
+              .from("bewerbungen")
+              .delete()
+              .eq("stelle_id", selected.id);
+            await supabase
+              .from("termine")
+              .delete()
+              .eq("stelle_id", selected.id);
+            await supabase.from("stellen").delete().eq("id", selected.id);
+            showToast("Stelle gelöscht.", "#E85C5C");
             await loadStellen(gemeindeId);
             goBack();
           }}
@@ -3754,7 +3752,7 @@ export default function App() {
               for (const t of abgesagt) {
                 const { error: markCancelledError } = await supabase
                   .from("termine")
-                  .update({ abgesagt: true, status: "abgesagt" })
+                  .update({ abgesagt: true })
                   .eq("id", t.id);
                 if (markCancelledError) throw markCancelledError;
 
@@ -3766,9 +3764,21 @@ export default function App() {
 
                 const { error: bewerbungenDeleteError } = await supabase
                   .from("bewerbungen")
-                  .update({ status: "abgesagt" })
+                  .delete()
                   .eq("termin_id", t.id);
                 if (bewerbungenDeleteError) throw bewerbungenDeleteError;
+
+                const { error: wartelisteDeleteError } = await supabase
+                  .from("warteliste")
+                  .delete()
+                  .eq("termin_id", t.id);
+                if (wartelisteDeleteError) throw wartelisteDeleteError;
+
+                const { error: terminDeleteError } = await supabase
+                  .from("termine")
+                  .delete()
+                  .eq("id", t.id);
+                if (terminDeleteError) throw terminDeleteError;
               }
               // Verschobene Termine updaten
               const geaendert = termineData.filter((t) => !t.absagen && t.id);
