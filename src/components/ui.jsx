@@ -273,44 +273,57 @@ function StelleCard({ stelle, verein, onClick, user, highlight = false }) {
 }
 
 function VereineListe({
-  stellen,
+  vereine = [],
+  stellen = [],
   user,
   follows,
   onToggleFollow,
   onVereinClick,
   gemeindeId,
 }) {
-  // Unique Vereine aus Stellen extrahieren
-  const vereineMap = {};
-  stellen.forEach((s) => {
-    if (s.vereine && s.verein_id) {
-      if (!vereineMap[s.verein_id]) {
-        vereineMap[s.verein_id] = {
-          ...s.vereine,
-          stellenAnzahl: 0,
-          kategorien: [],
-        };
-      }
-      vereineMap[s.verein_id].stellenAnzahl++;
-      if (
-        s.kategorie &&
-        !vereineMap[s.verein_id].kategorien.includes(s.kategorie)
-      ) {
-        vereineMap[s.verein_id].kategorien.push(s.kategorie);
-      }
+  // Vereine dürfen NICHT aus Stellen abgeleitet werden.
+  // Sonst verschwinden Vereine aus Suche/Follows, sobald sie keine offene Stelle haben.
+  const stellenMetaByVereinId = new Map();
+
+  (stellen || []).forEach((s) => {
+    if (!s?.verein_id) return;
+
+    const current = stellenMetaByVereinId.get(s.verein_id) || {
+      stellenAnzahl: 0,
+      kategorien: [],
+    };
+
+    current.stellenAnzahl += 1;
+
+    if (s.kategorie && !current.kategorien.includes(s.kategorie)) {
+      current.kategorien.push(s.kategorie);
     }
+
+    stellenMetaByVereinId.set(s.verein_id, current);
   });
-  const vereine = Object.values(vereineMap);
+
+  const vereinsListe = (vereine || []).map((v) => {
+    const meta = stellenMetaByVereinId.get(v.id) || {
+      stellenAnzahl: 0,
+      kategorien: [],
+    };
+
+    return {
+      ...v,
+      stellenAnzahl: meta.stellenAnzahl,
+      kategorien: meta.kategorien,
+    };
+  });
 
   const [vereinSearch, setVereinSearch] = useState("");
-  const gefilterteVereine = vereine.filter(
+  const gefilterteVereine = vereinsListe.filter(
     (v) =>
       !vereinSearch ||
       v.name?.toLowerCase().includes(vereinSearch.toLowerCase()) ||
       v.ort?.toLowerCase().includes(vereinSearch.toLowerCase())
   );
 
-  if (vereine.length === 0) {
+  if (vereinsListe.length === 0) {
     return (
       <EmptyState
         icon="🏢"
@@ -497,8 +510,9 @@ function VereineListe({
                       borderRadius: 5,
                     }}
                   >
-                    🌱 {v.stellenAnzahl} Stelle
-                    {v.stellenAnzahl !== 1 ? "n" : ""}
+                    {v.stellenAnzahl > 0
+                      ? `🌱 ${v.stellenAnzahl} Stelle${v.stellenAnzahl !== 1 ? "n" : ""}`
+                      : "Aktuell keine offene Stelle"}
                   </span>
                 </div>
               </div>
