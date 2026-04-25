@@ -3200,7 +3200,8 @@ function StelleBearbeitenScreen({ stelle, verein, onBack, onSave }) {
 }
 
 function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
-  const [historischeStellen, setHistorischeStellen] = useState([]);
+  const [analyseStellen, setAnalyseStellen] = useState([]);
+  const [analyseLoading, setAnalyseLoading] = useState(false);
   const [snapshots, setSnapshots] = useState([]);
   const [followerAnalyse, setFollowerAnalyse] = useState(null);
   const [stelleFollower, setStelleFollower] = useState([]);
@@ -3214,26 +3215,32 @@ function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
     topZusagen: 0,
   });
   const [activeTab, setActiveTab] = useState("uebersicht");
-  const analyseStellen = historischeStellen.length ? historischeStellen : stellen;
 
   useEffect(() => {
     if (!vereinId) return;
-    const seit = new Date();
-    seit.setMonth(seit.getMonth() - 12);
 
+    let cancelled = false;
+    const vor12Monaten = new Date();
+    vor12Monaten.setMonth(vor12Monaten.getMonth() - 12);
+
+    setAnalyseLoading(true);
     supabase
       .from("stellen")
-      .select("*, termine(*, bewerbungen(*))")
+      .select("*, termine(*, bewerbungen(*)), warteliste(*)")
       .eq("verein_id", vereinId)
-      .gte("created_at", seit.toISOString())
+      .gte("created_at", vor12Monaten.toISOString())
       .order("created_at", { ascending: false })
       .then(({ data, error }) => {
+        if (cancelled) return;
         if (error) {
-          console.error("Historische Analyse-Stellen konnten nicht geladen werden:", error);
-          setHistorischeStellen([]);
+          console.error("Analyse-Stellen konnten nicht geladen werden:", error);
+          setAnalyseStellen([]);
           return;
         }
-        setHistorischeStellen(Array.isArray(data) ? data : []);
+        setAnalyseStellen(Array.isArray(data) ? data : []);
+      })
+      .finally(() => {
+        if (!cancelled) setAnalyseLoading(false);
       });
 
     supabase
@@ -3310,6 +3317,10 @@ function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
         topZusagen: Number(topZusageRow?.zusagen || 0),
       });
     });
+
+    return () => {
+      cancelled = true;
+    };
   }, [vereinId]);
 
   const aktiveBewerbungen = (bewerbungen = []) =>
@@ -3318,12 +3329,19 @@ function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
       return !["storniert", "abgesagt", "cancelled", "canceled"].includes(status);
     });
 
+  const statistikStellen = analyseStellen.length > 0 ? analyseStellen : (stellen || []);
+
+  const istAktiveStelle = (stelle) => {
+    const status = String(stelle?.status || "").toLowerCase();
+    return !stelle?.archiviert && !stelle?.archived && status !== "archiviert" && status !== "abgesagt";
+  };
+
   const gesamtAufrufe =
-    analyseStellen.reduce((s, x) => s + (x.aufrufe || 0), 0) +
+    statistikStellen.reduce((s, x) => s + (x.aufrufe || 0), 0) +
     snapshots.reduce((s, x) => s + (x.aufrufe || 0), 0);
 
   const gesamtAnmeldungen =
-    analyseStellen.reduce(
+    statistikStellen.reduce(
       (summe, stelle) =>
         summe +
         (stelle.termine || []).reduce(
@@ -3334,7 +3352,7 @@ function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
     ) + snapshots.reduce((s, x) => s + (x.anmeldungen || 0), 0);
 
   const gesamtErschienen =
-    analyseStellen.reduce(
+    statistikStellen.reduce(
       (summe, stelle) =>
         summe +
         (stelle.termine || []).reduce(
@@ -3346,7 +3364,7 @@ function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
     ) + snapshots.reduce((s, x) => s + (x.erschienen || 0), 0);
 
   const gesamtNichtErschienen =
-    analyseStellen.reduce(
+    statistikStellen.reduce(
       (summe, stelle) =>
         summe +
         (stelle.termine || []).reduce(
@@ -3363,7 +3381,12 @@ function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
   const noShowQuote =
     gesamtAnmeldungen > 0 ? Math.round((gesamtNichtErschienen / gesamtAnmeldungen) * 100) : 0;
 
-  const liveStellen = stellen.filter((stelle) => (stelle.termine || []).length > 0);
+  const liveStellen = statistikStellen.filter(
+    (stelle) => istAktiveStelle(stelle) && (stelle.termine || []).length > 0
+  );
+  const historischeStellen = statistikStellen.filter(
+    (stelle) => !istAktiveStelle(stelle) && (stelle.termine || []).length > 0
+  );
 
   return (
     <div>
@@ -3409,6 +3432,11 @@ function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
 
         {activeTab === "uebersicht" && (
           <div>
+            {analyseLoading && (
+              <div style={{ fontSize: 12, color: "#8B7355", marginBottom: 10 }}>
+                Analyse wird geladen …
+              </div>
+            )}
             <SectionLabel>Verlässlichkeit & Nachfrage</SectionLabel>
             <div
               style={{
@@ -3829,7 +3857,9 @@ function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
               <EmptyState
                 icon="🌱"
                 text="Noch keine aktiven Stellen"
-                sub="Sobald dein Verein neue Termine veröffentlicht, erscheinen sie hier mit Quote und Reichweite."
+                sub={historischeStellen.length > 0
+                  ? "Aktuell ist nichts offen. Deine archivierten Einsätze bleiben darunter für die 12-Monats-Analyse sichtbar."
+                  : "Sobald dein Verein neue Termine veröffentlicht, erscheinen sie hier mit Quote und Reichweite."}
               />
             ) : (
               liveStellen.map((stelle) => {
@@ -3897,6 +3927,54 @@ function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
                   </div>
                 );
               })
+            )}
+
+            {historischeStellen.length > 0 && (
+              <div style={{ marginTop: 18 }}>
+                <SectionLabel>Historie letzte 12 Monate</SectionLabel>
+                {historischeStellen.map((stelle) => {
+                  const anmeldungen = (stelle.termine || []).reduce(
+                    (summe, termin) => summe + aktiveBewerbungen(termin.bewerbungen || []).length,
+                    0
+                  );
+                  const erschienen = (stelle.termine || []).reduce(
+                    (summe, termin) => summe + (termin.bewerbungen || []).filter((b) => bewerbungIstErschienen(b)).length,
+                    0
+                  );
+                  const noShow = (stelle.termine || []).reduce(
+                    (summe, termin) => summe + (termin.bewerbungen || []).filter((b) => bewerbungIstNoShow(b)).length,
+                    0
+                  );
+                  const quote = anmeldungen > 0 ? Math.round((erschienen / anmeldungen) * 100) : 0;
+                  return (
+                    <div
+                      key={stelle.id}
+                      style={{
+                        background: "#FAF7F2",
+                        borderRadius: 14,
+                        padding: "16px",
+                        marginBottom: 12,
+                        border: "1px solid #E0D8C8",
+                        opacity: 0.92,
+                      }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 10 }}>
+                        <div style={{ fontSize: 18, fontWeight: "bold", color: "#2C2416" }}>{stelle.titel}</div>
+                        <span style={{ fontSize: 11, background: "#EDE8DE", padding: "4px 8px", borderRadius: 999, color: "#8B7355" }}>
+                          archiviert
+                        </span>
+                      </div>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 11, background: "#EDE8DE", padding: "3px 8px", borderRadius: 6, color: "#5B9BD5" }}>👁️ {stelle.aufrufe || 0} Aufrufe</span>
+                        <span style={{ fontSize: 11, background: "#EDE8DE", padding: "3px 8px", borderRadius: 6, color: "#3A7D44" }}>✅ {anmeldungen} Anmeldungen</span>
+                        <span style={{ fontSize: 11, background: "#EDE8DE", padding: "3px 8px", borderRadius: 6, color: "#6BAF7A" }}>🎯 {erschienen} Erschienen</span>
+                        <span style={{ fontSize: 11, background: "#EDE8DE", padding: "3px 8px", borderRadius: 6, color: "#E85C5C" }}>❌ {noShow} No-Show</span>
+                        <span style={{ fontSize: 11, background: "#EDE8DE", padding: "3px 8px", borderRadius: 6, color: quote >= 70 ? "#3A7D44" : "#E8A87C" }}>📊 {quote}% Quote</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
             )}
           </div>
         )}

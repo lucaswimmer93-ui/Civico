@@ -171,8 +171,6 @@ function LoginScreen({
       .eq("auth_id", user.id)
       .maybeSingle();
 
-    // E-Mail-Bestaetigung ist nicht gleich Vereins-Verifizierung.
-    // Der Wert vereine.verifiziert bleibt ein Admin-/Gemeinde-Status.
 
     if (!profil && !profilError && (type === "freiwilliger" || type === "verein")) {
       const meta = user.user_metadata || {};
