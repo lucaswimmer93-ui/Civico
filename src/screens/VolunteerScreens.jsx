@@ -1542,6 +1542,7 @@ function VereinProfilPublic({
 function FreiwilligenDashboard({
   user,
   stellen,
+  vereine = [],
   follows = { vereine: [], kategorien: [] },
   onOpenDetail,
   onOpenKommunikation,
@@ -1719,7 +1720,7 @@ function FreiwilligenDashboard({
   );
 
   const gefolgteVereine = [...new Set(follows?.vereine || [])]
-    .map((vereinId) => (stellen || []).find((s) => s.verein_id === vereinId)?.vereine)
+    .map((vereinId) => (vereine || []).find((v) => v.id === vereinId))
     .filter(Boolean)
     .slice(0, 3);
 
