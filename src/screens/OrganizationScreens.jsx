@@ -3247,9 +3247,18 @@ function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
       .from("analyse_snapshots")
       .select("*")
       .eq("verein_id", vereinId)
-      .order("created_at", { ascending: false })
-      .then(({ data }) => {
-        if (data) setSnapshots(data);
+      .then(({ data, error }) => {
+        if (error) {
+          console.error("Analyse-Snapshots konnten nicht geladen werden:", error);
+          setSnapshots([]);
+          return;
+        }
+        const rows = Array.isArray(data) ? data : [];
+        setSnapshots([...rows].sort((a, b) => {
+          const da = new Date(a.created_at || a.erstellt_am || a.updated_at || 0).getTime();
+          const db = new Date(b.created_at || b.erstellt_am || b.updated_at || 0).getTime();
+          return db - da;
+        }));
       });
 
     supabase
@@ -3387,6 +3396,17 @@ function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
   const historischeStellen = statistikStellen.filter(
     (stelle) => !istAktiveStelle(stelle) && (stelle.termine || []).length > 0
   );
+
+  const snapshotStellen = (snapshots || []).map((snap, index) => ({
+    id: snap.id || `${snap.stelle_titel || "snapshot"}-${snap.created_at || snap.erstellt_am || index}`,
+    titel: snap.stelle_titel || snap.titel || "Archivierte Stelle",
+    kategorie: snap.kategorie || "",
+    aufrufe: Number(snap.aufrufe || 0),
+    anmeldungen: Number(snap.anmeldungen || 0),
+    erschienen: Number(snap.erschienen || 0),
+    nicht_erschienen: Number(snap.nicht_erschienen || snap.no_show || 0),
+    created_at: snap.created_at || snap.erstellt_am || snap.updated_at || null,
+  }));
 
   return (
     <div>
@@ -3857,7 +3877,7 @@ function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
               <EmptyState
                 icon="🌱"
                 text="Noch keine aktiven Stellen"
-                sub={historischeStellen.length > 0
+                sub={(historischeStellen.length > 0 || snapshotStellen.length > 0)
                   ? "Aktuell ist nichts offen. Deine archivierten Einsätze bleiben darunter für die 12-Monats-Analyse sichtbar."
                   : "Sobald dein Verein neue Termine veröffentlicht, erscheinen sie hier mit Quote und Reichweite."}
               />
@@ -3969,6 +3989,42 @@ function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
                         <span style={{ fontSize: 11, background: "#EDE8DE", padding: "3px 8px", borderRadius: 6, color: "#3A7D44" }}>✅ {anmeldungen} Anmeldungen</span>
                         <span style={{ fontSize: 11, background: "#EDE8DE", padding: "3px 8px", borderRadius: 6, color: "#6BAF7A" }}>🎯 {erschienen} Erschienen</span>
                         <span style={{ fontSize: 11, background: "#EDE8DE", padding: "3px 8px", borderRadius: 6, color: "#E85C5C" }}>❌ {noShow} No-Show</span>
+                        <span style={{ fontSize: 11, background: "#EDE8DE", padding: "3px 8px", borderRadius: 6, color: quote >= 70 ? "#3A7D44" : "#E8A87C" }}>📊 {quote}% Quote</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {snapshotStellen.length > 0 && (
+              <div style={{ marginTop: 18 }}>
+                <SectionLabel>Archiv-Snapshots</SectionLabel>
+                {snapshotStellen.map((snap) => {
+                  const quote = snap.anmeldungen > 0 ? Math.round((snap.erschienen / snap.anmeldungen) * 100) : 0;
+                  return (
+                    <div
+                      key={snap.id}
+                      style={{
+                        background: "#FAF7F2",
+                        borderRadius: 14,
+                        padding: "16px",
+                        marginBottom: 12,
+                        border: "1px solid #E0D8C8",
+                        opacity: 0.92,
+                      }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 10 }}>
+                        <div style={{ fontSize: 18, fontWeight: "bold", color: "#2C2416" }}>{snap.titel}</div>
+                        <span style={{ fontSize: 11, background: "#EDE8DE", padding: "4px 8px", borderRadius: 999, color: "#8B7355" }}>
+                          Snapshot
+                        </span>
+                      </div>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        <span style={{ fontSize: 11, background: "#EDE8DE", padding: "3px 8px", borderRadius: 6, color: "#5B9BD5" }}>👁️ {snap.aufrufe} Aufrufe</span>
+                        <span style={{ fontSize: 11, background: "#EDE8DE", padding: "3px 8px", borderRadius: 6, color: "#3A7D44" }}>✅ {snap.anmeldungen} Anmeldungen</span>
+                        <span style={{ fontSize: 11, background: "#EDE8DE", padding: "3px 8px", borderRadius: 6, color: "#6BAF7A" }}>🎯 {snap.erschienen} Erschienen</span>
+                        <span style={{ fontSize: 11, background: "#EDE8DE", padding: "3px 8px", borderRadius: 6, color: "#E85C5C" }}>❌ {snap.nicht_erschienen} No-Show</span>
                         <span style={{ fontSize: 11, background: "#EDE8DE", padding: "3px 8px", borderRadius: 6, color: quote >= 70 ? "#3A7D44" : "#E8A87C" }}>📊 {quote}% Quote</span>
                       </div>
                     </div>
