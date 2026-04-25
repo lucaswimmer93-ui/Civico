@@ -543,36 +543,46 @@ export default function App() {
     }
   };
 
-  const loadVereinFollowers = async (vereinId, vereinAuthId = null) => {
+  const loadVereinFollowers = async (vereinId) => {
     if (!vereinId) {
       setVereinFollowers([]);
       return;
     }
     try {
+      const { data: vereinRow } = await supabase
+        .from("vereine")
+        .select("id, auth_id")
+        .eq("id", vereinId)
+        .maybeSingle();
+
       const { data: followRows, error: followError } = await supabase
         .from("follows")
-        .select("id, freiwilliger_id, created_at, freiwillige:freiwilliger_id ( id, auth_id, name, email, avatar_url )")
+        .select("id, freiwilliger_id")
         .eq("typ", "verein")
-        .eq("ziel_id", vereinId)
-        .order("created_at", { ascending: false });
+        .eq("ziel_id", vereinId);
 
       if (followError) throw followError;
 
-      const uniqueRows = [];
-      const seen = new Set();
-      for (const row of followRows || []) {
-        if (!row?.freiwilliger_id || seen.has(row.freiwilliger_id)) continue;
-        if (vereinAuthId && row?.freiwillige?.auth_id === vereinAuthId) continue;
-        seen.add(row.freiwilliger_id);
-        uniqueRows.push({
-          id: row.id,
-          freiwilliger_id: row.freiwilliger_id,
-          freiwillige: row.freiwillige || null,
-          created_at: row.created_at || null,
-        });
+      const ids = [...new Set((followRows || []).map((row) => row.freiwilliger_id).filter(Boolean))];
+
+      if (!ids.length) {
+        setVereinFollowers([]);
+        return;
       }
 
-      setVereinFollowers(uniqueRows);
+      const { data: freiwilligeRows, error: freiwilligeError } = await supabase
+        .from("freiwillige")
+        .select("id, auth_id, name, email, avatar_url")
+        .in("id", ids);
+
+      if (freiwilligeError) throw freiwilligeError;
+
+      const freiwilligeMap = new Map((freiwilligeRows || []).map((row) => [row.id, row]));
+      const followers = ids
+        .map((id) => ({ freiwilliger_id: id, freiwillige: freiwilligeMap.get(id) || null }))
+        .filter((row) => row.freiwillige?.auth_id !== vereinRow?.auth_id);
+
+      setVereinFollowers(followers);
     } catch (error) {
       console.error("VEREIN FOLLOWER LADEN FEHLER:", error);
       setVereinFollowers([]);
@@ -628,7 +638,7 @@ export default function App() {
       const { error } = await supabase
         .from("follows")
         .insert({
-          freiwilliger_id: user.data.id,
+          freiwilliger_id: freiwilligerId,
           typ: "verein",
           ziel_id: vereinId,
         });
@@ -673,7 +683,7 @@ export default function App() {
       const { error } = await supabase
         .from("follows")
         .insert({
-          freiwilliger_id: user.data.id,
+          freiwilliger_id: freiwilligerId,
           typ: "kategorie",
           ziel_wert: katId,
         });
@@ -745,8 +755,10 @@ export default function App() {
         return;
       }
 
+      const freiwilligerId = await getCurrentFreiwilligerId();
+
       const existing = (existingList || []).find(
-        (w) => String(w.freiwilliger_id) === String(user.data.id)
+        (w) => String(w.freiwilliger_id) === String(freiwilligerId)
       );
 
       if (existing) {
@@ -759,7 +771,7 @@ export default function App() {
       const { error: insertError } = await supabase.from("warteliste").insert({
         stelle_id: stelleId,
         termin_id: terminId,
-        freiwilliger_id: user.data.id,
+        freiwilliger_id: freiwilligerId,
         name: user.data.name,
         email: user.data.email,
         position,
@@ -796,11 +808,12 @@ export default function App() {
     if (!user?.data?.id) return;
 
     try {
+      const freiwilligerId = await getCurrentFreiwilligerId();
       const { error } = await supabase
         .from("warteliste")
         .delete()
         .eq("termin_id", terminId)
-        .eq("freiwilliger_id", user.data.id);
+        .eq("freiwilliger_id", freiwilligerId);
 
       if (error) {
         console.error("WARTELISTE DELETE FEHLER:", error);
@@ -1574,7 +1587,7 @@ export default function App() {
           },
           verein: async () => {
             const { data } = await supabase
-              .from(VEREINE_SOURCE)
+              .from("vereine")
               .select("*")
               .eq("auth_id", session.user.id)
               .maybeSingle();
@@ -1636,7 +1649,7 @@ export default function App() {
             loadVereine(effectiveGemeindeId);
             setScreen("dashboard");
             autoArchivieren(verein.id);
-            loadVereinFollowers(verein.id, verein.auth_id);
+            loadVereinFollowers(verein.id);
             loadVereinNotifications(verein.id);
             return;
           }
@@ -1930,7 +1943,7 @@ export default function App() {
         const { data: erfolg, error } = await supabase.rpc("book_slot", {
           p_stelle_id: stelleId,
           p_termin_id: terminId,
-          p_freiwilliger_id: user.data.id,
+          p_freiwilliger_id: freiwilligerId,
           p_name: user.data.name,
           p_email: user.data.email,
         });
@@ -3034,12 +3047,24 @@ export default function App() {
       {/* LOGIN */}
       {screen === "login" && (
         <LoginScreen
-          onLogin={(type, data, gid) => {
-                        if (typeof window !== "undefined") {
+          onLogin={async (type, data, gid) => {
+            if (typeof window !== "undefined") {
               sessionStorage.removeItem("civico_auth_flow");
             }
             setStoredLastRole(type);
-            setUser({ type, data });
+
+            let safeData = data;
+            if (type === "verein" && data?.auth_id) {
+              const { data: freshVerein } = await supabase
+                .from("vereine")
+                .select("*")
+                .eq("auth_id", data.auth_id)
+                .maybeSingle();
+              if (freshVerein) safeData = freshVerein;
+            }
+
+            setUser({ type, data: safeData });
+            data = safeData;
             const effectiveGemeindeId = data?.effective_gemeinde_id || data?.gemeinde_id || gid || null;
             setGemeindeId(effectiveGemeindeId);
             if (type === "freiwilliger") {
@@ -3066,7 +3091,7 @@ export default function App() {
             }
             if (type === "verein") {
               autoArchivieren(data.id);
-              loadVereinFollowers(data.id, data.auth_id);
+              loadVereinFollowers(data.id);
               loadVereinNotifications(data.id);
             }
           }}
@@ -3558,11 +3583,6 @@ export default function App() {
           onBack={goBack}
           onSave={async (stelleData, termineData) => {
             try {
-              if (user?.data?.verifiziert !== true) {
-                showToast("Dein Verein muss erst verifiziert werden, bevor du Stellen erstellen kannst.", "#E8A87C");
-                return;
-              }
-
               const cleanStelle = {
                 titel: stelleData?.titel || "",
                 beschreibung: stelleData?.beschreibung || "",
