@@ -3216,6 +3216,80 @@ function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
   });
   const [activeTab, setActiveTab] = useState("uebersicht");
 
+  const baueWochenanalyseAusDaten = (stellenRows = []) => {
+    const tage = ["Sonntag", "Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag"];
+    const basis = tage.map((tag) => ({ wochentag: tag, zusagen: 0, erschienen: 0, no_show: 0, quote: 0 }));
+
+    (stellenRows || []).forEach((stelle) => {
+      (stelle.termine || []).forEach((termin) => {
+        if (!termin?.datum) return;
+        const datum = new Date(termin.datum);
+        if (Number.isNaN(datum.getTime())) return;
+        const row = basis[datum.getDay()];
+        const bewerbungen = aktiveBewerbungen(termin.bewerbungen || []);
+        row.zusagen += bewerbungen.length;
+        row.erschienen += bewerbungen.filter((b) => bewerbungIstErschienen(b)).length;
+        row.no_show += bewerbungen.filter((b) => bewerbungIstNoShow(b)).length;
+      });
+    });
+
+    return basis.map((row) => ({
+      ...row,
+      quote: row.zusagen > 0 ? Math.round((row.erschienen / row.zusagen) * 100) : 0,
+    }));
+  };
+
+  const setWochenInsightsAusRows = (rows = []) => {
+    if (!rows.length) {
+      setWochenInsights({
+        besterTag: null,
+        besteQuote: 0,
+        schwaechsterTag: null,
+        schwaechsteQuote: 0,
+        topZusageTag: null,
+        topZusagen: 0,
+      });
+      return;
+    }
+
+    const rowsMitDaten = rows.filter((r) => Number(r.zusagen || 0) > 0 || Number(r.erschienen || 0) > 0 || Number(r.no_show || 0) > 0);
+    if (!rowsMitDaten.length) {
+      setWochenInsights({
+        besterTag: null,
+        besteQuote: 0,
+        schwaechsterTag: null,
+        schwaechsteQuote: 0,
+        topZusageTag: null,
+        topZusagen: 0,
+      });
+      return;
+    }
+
+    const bester = [...rowsMitDaten].sort((a, b) => {
+      if ((b.quote || 0) !== (a.quote || 0)) return (b.quote || 0) - (a.quote || 0);
+      return (b.erschienen || 0) - (a.erschienen || 0);
+    })[0];
+
+    const schwaechster = [...rowsMitDaten].sort((a, b) => {
+      if ((a.quote || 0) !== (b.quote || 0)) return (a.quote || 0) - (b.quote || 0);
+      return (b.no_show || 0) - (a.no_show || 0);
+    })[0];
+
+    const topZusage = [...rowsMitDaten].sort((a, b) => {
+      if ((b.zusagen || 0) !== (a.zusagen || 0)) return (b.zusagen || 0) - (a.zusagen || 0);
+      return (b.erschienen || 0) - (a.erschienen || 0);
+    })[0];
+
+    setWochenInsights({
+      besterTag: bester?.wochentag || null,
+      besteQuote: Number(bester?.quote || 0),
+      schwaechsterTag: schwaechster?.wochentag || null,
+      schwaechsteQuote: Number(schwaechster?.quote || 0),
+      topZusageTag: topZusage?.wochentag || null,
+      topZusagen: Number(topZusage?.zusagen || 0),
+    });
+  };
+
   useEffect(() => {
     if (!vereinId) return;
 
@@ -3223,43 +3297,100 @@ function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
     const vor12Monaten = new Date();
     vor12Monaten.setMonth(vor12Monaten.getMonth() - 12);
 
-    setAnalyseLoading(true);
-    supabase
-      .from("stellen")
-      .select("*, termine(*, bewerbungen(*)), warteliste(*)")
-      .eq("verein_id", vereinId)
-      .gte("created_at", vor12Monaten.toISOString())
-      .order("created_at", { ascending: false })
-      .then(({ data, error }) => {
-        if (cancelled) return;
-        if (error) {
-          console.error("Analyse-Stellen konnten nicht geladen werden:", error);
-          setAnalyseStellen([]);
-          return;
-        }
-        setAnalyseStellen(Array.isArray(data) ? data : []);
-      })
-      .finally(() => {
-        if (!cancelled) setAnalyseLoading(false);
-      });
+    const ladeAnalyse = async () => {
+      setAnalyseLoading(true);
+      try {
+        // Analyse kommt aus echten Tabellen. analyse_snapshots ist in deiner DB aktuell leer.
+        const { data: stellenRows, error: stellenError } = await supabase
+          .from("stellen")
+          .select("id,verein_id,titel,status,archiviert,archived,created_at,updated_at,aufrufe,kategorie")
+          .eq("verein_id", vereinId)
+          .gte("created_at", vor12Monaten.toISOString())
+          .order("created_at", { ascending: false });
 
-    supabase
-      .from("analyse_snapshots")
-      .select("*")
-      .eq("verein_id", vereinId)
-      .then(({ data, error }) => {
-        if (error) {
-          console.error("Analyse-Snapshots konnten nicht geladen werden:", error);
-          setSnapshots([]);
-          return;
+        if (stellenError) throw stellenError;
+
+        const stellenListe = Array.isArray(stellenRows) ? stellenRows : [];
+        const stellenIds = stellenListe.map((s) => s.id).filter(Boolean);
+
+        let termineRows = [];
+        let bewerbungenRows = [];
+
+        if (stellenIds.length > 0) {
+          const { data: termineData, error: termineError } = await supabase
+            .from("termine")
+            .select("id,stelle_id,datum,status,abgesagt,created_at")
+            .in("stelle_id", stellenIds);
+
+          if (termineError) throw termineError;
+          termineRows = Array.isArray(termineData) ? termineData : [];
+
+          const { data: bewerbungenData, error: bewerbungenError } = await supabase
+            .from("bewerbungen")
+            .select("id,stelle_id,termin_id,freiwilliger_id,status,bestaetigt,nicht_erschienen,created_at")
+            .in("stelle_id", stellenIds);
+
+          if (bewerbungenError) throw bewerbungenError;
+          bewerbungenRows = Array.isArray(bewerbungenData) ? bewerbungenData : [];
         }
-        const rows = Array.isArray(data) ? data : [];
-        setSnapshots([...rows].sort((a, b) => {
-          const da = new Date(a.created_at || a.erstellt_am || a.updated_at || 0).getTime();
-          const db = new Date(b.created_at || b.erstellt_am || b.updated_at || 0).getTime();
-          return db - da;
-        }));
-      });
+
+        const bewerbungenByTermin = new Map();
+        const bewerbungenOhneTerminByStelle = new Map();
+
+        bewerbungenRows.forEach((bewerbung) => {
+          if (bewerbung.termin_id) {
+            const liste = bewerbungenByTermin.get(bewerbung.termin_id) || [];
+            liste.push(bewerbung);
+            bewerbungenByTermin.set(bewerbung.termin_id, liste);
+          } else if (bewerbung.stelle_id) {
+            const liste = bewerbungenOhneTerminByStelle.get(bewerbung.stelle_id) || [];
+            liste.push(bewerbung);
+            bewerbungenOhneTerminByStelle.set(bewerbung.stelle_id, liste);
+          }
+        });
+
+        const termineByStelle = new Map();
+        termineRows.forEach((termin) => {
+          const liste = termineByStelle.get(termin.stelle_id) || [];
+          liste.push({
+            ...termin,
+            bewerbungen: bewerbungenByTermin.get(termin.id) || [],
+          });
+          termineByStelle.set(termin.stelle_id, liste);
+        });
+
+        const enriched = stellenListe.map((stelle) => {
+          const termine = termineByStelle.get(stelle.id) || [];
+          const direkteBewerbungen = bewerbungenOhneTerminByStelle.get(stelle.id) || [];
+          return {
+            ...stelle,
+            termine: termine.length > 0
+              ? termine
+              : direkteBewerbungen.length > 0
+                ? [{ id: `${stelle.id}-direkt`, stelle_id: stelle.id, bewerbungen: direkteBewerbungen }]
+                : [],
+          };
+        });
+
+        if (cancelled) return;
+        setAnalyseStellen(enriched);
+        setSnapshots([]);
+
+        const wochenRows = baueWochenanalyseAusDaten(enriched);
+        setWochenanalyse(wochenRows);
+        setWochenInsightsAusRows(wochenRows);
+      } catch (error) {
+        if (!cancelled) {
+          console.error("Analyse-Daten konnten nicht geladen werden:", error);
+          setAnalyseStellen([]);
+          setSnapshots([]);
+        }
+      } finally {
+        if (!cancelled) setAnalyseLoading(false);
+      }
+    };
+
+    ladeAnalyse();
 
     supabase
       .from("verein_follower_analyse")
@@ -3267,7 +3398,7 @@ function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
       .eq("verein_id", vereinId)
       .single()
       .then(({ data }) => {
-        if (data) setFollowerAnalyse(data);
+        if (!cancelled && data) setFollowerAnalyse(data);
       });
 
     supabase
@@ -3275,57 +3406,8 @@ function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
       .select("*")
       .eq("verein_id", vereinId)
       .then(({ data }) => {
-        if (data) setStelleFollower(data);
+        if (!cancelled) setStelleFollower(Array.isArray(data) ? data : []);
       });
-
-    supabase.rpc("get_verein_wochenanalyse", {
-      p_verein_id: vereinId,
-      p_monate: 12,
-    }).then(({ data, error }) => {
-      if (error) {
-        console.error("Wochenanalyse konnte nicht geladen werden:", error);
-        return;
-      }
-
-      const rows = Array.isArray(data) ? data : [];
-      setWochenanalyse(rows);
-
-      if (!rows.length) {
-        setWochenInsights({
-          besterTag: null,
-          besteQuote: 0,
-          schwaechsterTag: null,
-          schwaechsteQuote: 0,
-          topZusageTag: null,
-          topZusagen: 0,
-        });
-        return;
-      }
-
-      const bestaRow = [...rows].sort((a, b) => {
-        if ((b.quote || 0) !== (a.quote || 0)) return (b.quote || 0) - (a.quote || 0);
-        return (b.erschienen || 0) - (a.erschienen || 0);
-      })[0];
-
-      const schwachRow = [...rows].sort((a, b) => {
-        if ((a.quote || 0) !== (b.quote || 0)) return (a.quote || 0) - (b.quote || 0);
-        return (b.no_show || 0) - (a.no_show || 0);
-      })[0];
-
-      const topZusageRow = [...rows].sort((a, b) => {
-        if ((b.zusagen || 0) !== (a.zusagen || 0)) return (b.zusagen || 0) - (a.zusagen || 0);
-        return (b.erschienen || 0) - (a.erschienen || 0);
-      })[0];
-
-      setWochenInsights({
-        besterTag: bestaRow?.wochentag || null,
-        besteQuote: Number(bestaRow?.quote || 0),
-        schwaechsterTag: schwachRow?.wochentag || null,
-        schwaechsteQuote: Number(schwachRow?.quote || 0),
-        topZusageTag: topZusageRow?.wochentag || null,
-        topZusagen: Number(topZusageRow?.zusagen || 0),
-      });
-    });
 
     return () => {
       cancelled = true;
