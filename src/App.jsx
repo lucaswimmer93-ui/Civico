@@ -2679,6 +2679,7 @@ export default function App() {
               <FreiwilligenDashboard
                 user={user}
                 stellen={stellen}
+                vereine={vereine}
                 follows={follows}
                 onOpenDetail={(stelle) => openDetail(stelle)}
                 onOpenKommunikation={() => setHomeTab("kommunikation")}
