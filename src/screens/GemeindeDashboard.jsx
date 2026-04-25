@@ -620,7 +620,10 @@ export default function GemeindeDashboard({
   const handleStornieren = async (bewerbungId, terminId) => {
     try {
       setDetailActionLoading(true);
-      const { error: deleteError } = await supabase.from('bewerbungen').delete().eq('id', bewerbungId);
+      const { error: deleteError } = await supabase
+        .from('bewerbungen')
+        .update({ status: 'storniert' })
+        .eq('id', bewerbungId);
       if (deleteError) throw deleteError;
 
       const { error: incError } = await supabase.rpc('increment_plaetze', { termin_id: terminId });
@@ -653,10 +656,16 @@ export default function GemeindeDashboard({
   const handleTerminAbsagen = async (terminId) => {
     try {
       setDetailActionLoading(true);
-      const { error: bewerbungenError } = await supabase.from('bewerbungen').delete().eq('termin_id', terminId);
+      const { error: bewerbungenError } = await supabase
+        .from('bewerbungen')
+        .update({ status: 'abgesagt' })
+        .eq('termin_id', terminId);
       if (bewerbungenError) throw bewerbungenError;
 
-      const { error: terminError } = await supabase.from('termine').delete().eq('id', terminId);
+      const { error: terminError } = await supabase
+        .from('termine')
+        .update({ abgesagt: true, status: 'abgesagt' })
+        .eq('id', terminId);
       if (terminError) throw terminError;
 
       showToast?.('✓ Termin abgesagt.', '#E85C5C');
@@ -693,16 +702,13 @@ export default function GemeindeDashboard({
     if (!selectedStelle?.id) return;
     try {
       setDetailActionLoading(true);
-      const { error: bewerbungenError } = await supabase.from('bewerbungen').delete().eq('stelle_id', selectedStelle.id);
-      if (bewerbungenError) throw bewerbungenError;
-
-      const { error: termineError } = await supabase.from('termine').delete().eq('stelle_id', selectedStelle.id);
-      if (termineError) throw termineError;
-
-      const { error: stelleError } = await supabase.from('stellen').delete().eq('id', selectedStelle.id);
+      const { error: stelleError } = await supabase
+        .from('stellen')
+        .update({ archiviert: true, archived: true, status: 'archiviert' })
+        .eq('id', selectedStelle.id);
       if (stelleError) throw stelleError;
 
-      showToast?.('Stelle gelöscht.', '#E85C5C');
+      showToast?.('Stelle archiviert.', '#E85C5C');
       setSelectedStelle(null);
       await refreshStellen();
       setTab('stellen');
@@ -751,10 +757,16 @@ export default function GemeindeDashboard({
 
       const abgesagteTermine = editForm.termine.filter((t) => t.id && t.absagen);
       for (const termin of abgesagteTermine) {
-        const { error: bewerbungenError } = await supabase.from('bewerbungen').delete().eq('termin_id', termin.id);
+        const { error: bewerbungenError } = await supabase
+          .from('bewerbungen')
+          .update({ status: 'abgesagt' })
+          .eq('termin_id', termin.id);
         if (bewerbungenError) throw bewerbungenError;
 
-        const { error: terminDeleteError } = await supabase.from('termine').delete().eq('id', termin.id);
+        const { error: terminDeleteError } = await supabase
+          .from('termine')
+          .update({ abgesagt: true, status: 'abgesagt' })
+          .eq('id', termin.id);
         if (terminDeleteError) throw terminDeleteError;
       }
 

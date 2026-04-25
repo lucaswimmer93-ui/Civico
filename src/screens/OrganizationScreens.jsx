@@ -2749,17 +2749,13 @@ function VereinProfilEdit({
                 <div
                   style={{ fontSize: 13, color: "#C0392B", marginBottom: 12 }}
                 >
-                  ⚠️ Alle Daten werden unwiderruflich gelöscht.
+                  ⚠️ Direkte Löschung ist deaktiviert, damit Einsätze, Chats und Analysen nicht zerstört werden.
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
                   <button
                     onClick={async () => {
-                      await supabase
-                        .from("vereine")
-                        .delete()
-                        .eq("id", verein.id);
-                      await supabase.auth.signOut();
-                      window.location.reload();
+                      alert("Vereinskonto-Löschung ist aus Datenschutz- und Statistikgründen deaktiviert. Bitte Konto über Support deaktivieren/anonymisieren lassen.");
+                      setShowDelete(false);
                     }}
                     style={{
                       flex: 1,
@@ -2774,7 +2770,7 @@ function VereinProfilEdit({
                       fontWeight: "bold",
                     }}
                   >
-                    Ja, löschen
+                    Support kontaktieren
                   </button>
                   <button
                     onClick={() => setShowDelete(false)}
