@@ -5,6 +5,22 @@ import { getTerminDirectThreadsForVerein, getOrCreateTerminDirectThread, getOrCr
 import { supabase, T, KATEGORIEN, SKILLS, getSkillLabel, getKat, getMedaille, getNextMedaille, getMedailleName, IMPRESSUM_TEXT, DATENSCHUTZ_TEXT, AGB_TEXT, formatDate, getGemeindeByPlz, isKlarname, isTerminNochNichtGestartet, isTerminAktuell } from '../core/shared';
 import { Header, StelleCard, VereineListe, BottomBar, DatenschutzBox, Input, BigButton, Chip, InfoChip, SectionLabel, RoleCard, EmptyState, ErrorMsg } from '../components/ui';
 
+
+const getAvatarPublicUrl = (value) => {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  if (
+    trimmed.startsWith("http://") ||
+    trimmed.startsWith("https://") ||
+    trimmed.startsWith("data:image/") ||
+    trimmed.startsWith("blob:")
+  ) {
+    return trimmed;
+  }
+  return supabase.storage.from("avatars").getPublicUrl(trimmed).data.publicUrl;
+};
+
 const bewerbungIstErschienen = (bewerbung) =>
   bewerbung?.status === "erschienen" || Boolean(bewerbung?.bestaetigt);
 
@@ -2130,7 +2146,7 @@ function VereinProfilEdit({
   const [gegruendet, setGegruendet] = useState(
     verein.gegruendet ? String(verein.gegruendet) : ""
   );
-  const [logoUrl, setLogoUrl] = useState(verein.logo_url || "");
+  const [logoUrl, setLogoUrl] = useState(verein.logo || "");
   const [logoUploading, setLogoUploading] = useState(false);
   const [activeTab, setActiveTab] = useState("profil");
   const [neuesPasswort, setNeuesPasswort] = useState("");
@@ -2161,10 +2177,17 @@ function VereinProfilEdit({
       setLogoUploading(false);
       return;
     }
-    const { data: urlData } = supabase.storage
-      .from("avatars")
-      .getPublicUrl(path);
-    setLogoUrl(urlData.publicUrl + "?t=" + Date.now());
+    const { error: saveErr } = await supabase
+      .from("vereine")
+      .update({ logo: path })
+      .eq("id", verein.id);
+    if (saveErr) {
+      console.error("Logo speichern fehlgeschlagen:", saveErr);
+      showToast && showToast(saveErr.message || "Logo konnte nicht gespeichert werden.", "#E85C5C");
+      setLogoUploading(false);
+      return;
+    }
+    setLogoUrl(path);
     setLogoUploading(false);
     showToast && showToast("✓ Logo gespeichert!");
   };
@@ -2281,7 +2304,7 @@ function VereinProfilEdit({
             >
               {logoUrl ? (
                 <img
-                  src={logoUrl}
+                  src={getAvatarPublicUrl(logoUrl)}
                   alt="Logo"
                   style={{
                     width: 80,
@@ -2552,7 +2575,7 @@ function VereinProfilEdit({
                   kontakt_email: kontaktEmail,
                   mitglieder: parseInt(mitglieder) || 0,
                   gegruendet: parseInt(gegruendet) || 0,
-                  logo_url: logoUrl || null,
+                  ...(logoUrl ? { logo: logoUrl } : {}),
                 })
               }
               green

@@ -19,21 +19,23 @@ const bewerbungIstAktiv = (bewerbung) => {
   return !["storniert", "abgesagt", "cancelled", "canceled"].includes(status);
 };
 
-const getVereinLogoSrc = (verein) => {
-  const raw = verein?.logo_url || verein?.logo || "";
-  if (typeof raw !== "string") return "";
-  const value = raw.trim();
-  if (!value) return "";
+
+const getAvatarPublicUrl = (value) => {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim();
+  if (!trimmed) return "";
   if (
-    value.startsWith("http://") ||
-    value.startsWith("https://") ||
-    value.startsWith("data:image/") ||
-    value.startsWith("blob:")
+    trimmed.startsWith("http://") ||
+    trimmed.startsWith("https://") ||
+    trimmed.startsWith("data:image/") ||
+    trimmed.startsWith("blob:")
   ) {
-    return value;
+    return trimmed;
   }
-  return "";
+  return supabase.storage.from("avatars").getPublicUrl(trimmed).data.publicUrl;
 };
+
+const getVereinLogoSrc = (verein) => getAvatarPublicUrl(verein?.logo || verein?.logo_url || "");
 
 const getTerminPlaetze = (termin) => {
   const aktiveBewerbungen = (termin?.bewerbungen || []).filter(bewerbungIstAktiv).length;
@@ -2490,10 +2492,7 @@ function FreiwilligerProfil({
       showToast("Upload fehlgeschlagen.", "#E85C5C");
       return;
     }
-    const { data: urlData } = supabase.storage
-      .from("avatars")
-      .getPublicUrl(path);
-    const avatar_url = urlData.publicUrl + "?t=" + Date.now();
+    const avatar_url = path;
     const { error: profilErr } = await supabase
       .from("freiwillige")
       .update({ avatar_url })
@@ -2596,7 +2595,7 @@ function FreiwilligerProfil({
           >
             {user.data.avatar_url ? (
               <img
-                src={user.data.avatar_url}
+                src={getAvatarPublicUrl(user.data.avatar_url)}
                 alt="Profilbild"
                 style={{
                   width: 80,
@@ -3322,14 +3321,17 @@ function EinstellungenScreen({
       setAvatarUploading(false);
       return;
     }
-    const { data: urlData } = supabase.storage
-      .from("avatars")
-      .getPublicUrl(path);
-    const avatar_url = urlData.publicUrl + "?t=" + Date.now();
-    await supabase
+    const avatar_url = path;
+    const { error: profilErr } = await supabase
       .from("freiwillige")
       .update({ avatar_url })
       .eq("id", user.data.id);
+    if (profilErr) {
+      console.error("Profilbild speichern fehlgeschlagen:", profilErr);
+      showToast(profilErr.message || "Profilbild konnte nicht gespeichert werden.", "#E85C5C");
+      setAvatarUploading(false);
+      return;
+    }
     setUser((prev) => ({ ...prev, data: { ...prev.data, avatar_url } }));
     setAvatarUploading(false);
     showToast("✓ Foto gespeichert!");
@@ -3499,7 +3501,7 @@ function EinstellungenScreen({
             <div style={{ position: "relative", display: "inline-block" }}>
               {user.data.avatar_url ? (
                 <img
-                  src={user.data.avatar_url}
+                  src={getAvatarPublicUrl(user.data.avatar_url)}
                   alt="Avatar"
                   style={{
                     width: 80,
@@ -4236,7 +4238,7 @@ function FreiwilligerProfilVerein({
         >
           {profil?.avatar_url ? (
             <img
-              src={profil.avatar_url}
+              src={getAvatarPublicUrl(profil.avatar_url)}
               alt="Avatar"
               style={{
                 width: 80,
