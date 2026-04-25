@@ -171,23 +171,6 @@ function LoginScreen({
       .eq("auth_id", user.id)
       .maybeSingle();
 
-    if (
-      type === "verein" &&
-      profil &&
-      profil.verifiziert === false &&
-      user.email_confirmed_at
-    ) {
-      const { data: updatedProfil, error: updateProfilError } = await supabase
-        .from("vereine")
-        .update({ verifiziert: true })
-        .eq("auth_id", user.id)
-        .select("*")
-        .maybeSingle();
-
-      if (!updateProfilError && updatedProfil) {
-        profil = updatedProfil;
-      }
-    }
 
     if (!profil && !profilError && (type === "freiwilliger" || type === "verein")) {
       const meta = user.user_metadata || {};
@@ -224,7 +207,7 @@ function LoginScreen({
               telefon: meta.telefon || regTelefon || null,
               website: meta.website || regWebsite || null,
               logo: meta.logo || "🏢",
-              verifiziert: true,
+              verifiziert: false,
             };
 
       const { error: bootstrapError } = await supabase.from(table).insert(payload);
@@ -363,7 +346,7 @@ function LoginScreen({
           telefon: regTelefon || null,
           website: regWebsite || null,
           logo: "🏢",
-          verifiziert: true,
+          verifiziert: false,
         },
       },
     });

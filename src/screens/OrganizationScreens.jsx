@@ -115,6 +115,7 @@ function VereinDashboard({
   const [terminChatThreads, setTerminChatThreads] = useState([]);
   const [selectedCommunicationThread, setSelectedCommunicationThread] = useState(null);
   const [wartelistenByTermin, setWartelistenByTermin] = useState({});
+  const istVerifiziert = user?.data?.verifiziert === true;
 
   useEffect(() => {
     let active = true;
@@ -306,7 +307,7 @@ function VereinDashboard({
               border: "none",
               color: "#8B7355",
               fontSize: 13,
-              cursor: user?.data?.verifiziert === false ? "not-allowed" : "pointer",
+              cursor: !istVerifiziert ? "not-allowed" : "pointer",
               fontFamily: "inherit",
             }}
           >
@@ -507,7 +508,7 @@ function VereinDashboard({
           </button>
           <button
             onClick={() => {
-              if (user?.data?.verifiziert === false) {
+              if (!istVerifiziert) {
                 showToast(
                   "Dein Verein muss erst freigeschaltet werden.",
                   "#E8A87C"
@@ -521,14 +522,15 @@ function VereinDashboard({
               padding: "12px",
               borderRadius: 12,
               border: "none",
-              background: user?.data?.verifiziert === true
+              background: istVerifiziert
                 ? "linear-gradient(135deg, #2C2416, #4A3C28)"
                 : "#C4B89A",
               color: "#F4F0E8",
               fontSize: 14,
               fontFamily: "inherit",
               fontWeight: "bold",
-              cursor: "pointer",
+              cursor: istVerifiziert ? "pointer" : "not-allowed",
+              opacity: istVerifiziert ? 1 : 0.75,
             }}
           >
             + Neue Stelle
@@ -550,7 +552,7 @@ function VereinDashboard({
             👤 Profil
           </button>
         </div>
-        {user?.data?.verifiziert === false && (
+        {!istVerifiziert && (
           <div
             style={{
               background: "#FFF8E8",
@@ -1654,6 +1656,7 @@ function VereinStelleDetail({
 }
 
 function StelleErstellenScreen({ verein, onBack, onSave }) {
+  const istVerifiziert = verein?.verifiziert === true;
   const [titel, setTitel] = useState("");
   const [beschreibung, setBeschreibung] = useState("");
   const [kategorie, setKategorie] = useState("sozial");
@@ -1685,6 +1688,10 @@ function StelleErstellenScreen({ verein, onBack, onSave }) {
     setTermine((prev) => prev.filter((_, idx) => idx !== i));
 
   const handleSave = () => {
+    if (!istVerifiziert) {
+      setError("Dein Verein muss erst verifiziert werden, bevor du Stellen erstellen kannst.");
+      return;
+    }
     if (!titel || !beschreibung) {
       setError("Bitte Titel und Beschreibung ausfüllen.");
       return;
@@ -1725,6 +1732,11 @@ function StelleErstellenScreen({ verein, onBack, onSave }) {
     <div>
       <Header title="Neue Stelle" onBack={onBack} />
       <div style={{ padding: "20px 20px 100px" }}>
+        {!istVerifiziert && (
+          <div style={{ background: "#FFF8E1", border: "1px solid #E8C84A", color: "#8B6800", borderRadius: 12, padding: "12px 14px", marginBottom: 14, fontSize: 13, fontWeight: "bold" }}>
+            ⏳ Dein Verein ist noch nicht verifiziert. Neue Stellen können erst nach Freischaltung erstellt werden.
+          </div>
+        )}
         <Input
           label="Titel"
           value={titel}
