@@ -115,7 +115,6 @@ function VereinDashboard({
   const [terminChatThreads, setTerminChatThreads] = useState([]);
   const [selectedCommunicationThread, setSelectedCommunicationThread] = useState(null);
   const [wartelistenByTermin, setWartelistenByTermin] = useState({});
-  const istVerifiziert = user?.data?.verifiziert === true;
 
   useEffect(() => {
     let active = true;
@@ -307,7 +306,7 @@ function VereinDashboard({
               border: "none",
               color: "#8B7355",
               fontSize: 13,
-              cursor: !istVerifiziert ? "not-allowed" : "pointer",
+              cursor: user?.data?.verifiziert === false ? "not-allowed" : "pointer",
               fontFamily: "inherit",
             }}
           >
@@ -508,7 +507,7 @@ function VereinDashboard({
           </button>
           <button
             onClick={() => {
-              if (!istVerifiziert) {
+              if (user?.data?.verifiziert === false) {
                 showToast(
                   "Dein Verein muss erst freigeschaltet werden.",
                   "#E8A87C"
@@ -522,15 +521,14 @@ function VereinDashboard({
               padding: "12px",
               borderRadius: 12,
               border: "none",
-              background: istVerifiziert
+              background: user?.data?.verifiziert === true
                 ? "linear-gradient(135deg, #2C2416, #4A3C28)"
                 : "#C4B89A",
               color: "#F4F0E8",
               fontSize: 14,
               fontFamily: "inherit",
               fontWeight: "bold",
-              cursor: istVerifiziert ? "pointer" : "not-allowed",
-              opacity: istVerifiziert ? 1 : 0.75,
+              cursor: "pointer",
             }}
           >
             + Neue Stelle
@@ -552,7 +550,7 @@ function VereinDashboard({
             👤 Profil
           </button>
         </div>
-        {!istVerifiziert && (
+        {user?.data?.verifiziert === false && (
           <div
             style={{
               background: "#FFF8E8",
@@ -1656,7 +1654,6 @@ function VereinStelleDetail({
 }
 
 function StelleErstellenScreen({ verein, onBack, onSave }) {
-  const istVerifiziert = verein?.verifiziert === true;
   const [titel, setTitel] = useState("");
   const [beschreibung, setBeschreibung] = useState("");
   const [kategorie, setKategorie] = useState("sozial");
@@ -1688,10 +1685,6 @@ function StelleErstellenScreen({ verein, onBack, onSave }) {
     setTermine((prev) => prev.filter((_, idx) => idx !== i));
 
   const handleSave = () => {
-    if (!istVerifiziert) {
-      setError("Dein Verein muss erst verifiziert werden, bevor du Stellen erstellen kannst.");
-      return;
-    }
     if (!titel || !beschreibung) {
       setError("Bitte Titel und Beschreibung ausfüllen.");
       return;
@@ -1732,11 +1725,6 @@ function StelleErstellenScreen({ verein, onBack, onSave }) {
     <div>
       <Header title="Neue Stelle" onBack={onBack} />
       <div style={{ padding: "20px 20px 100px" }}>
-        {!istVerifiziert && (
-          <div style={{ background: "#FFF8E1", border: "1px solid #E8C84A", color: "#8B6800", borderRadius: 12, padding: "12px 14px", marginBottom: 14, fontSize: 13, fontWeight: "bold" }}>
-            ⏳ Dein Verein ist noch nicht verifiziert. Neue Stellen können erst nach Freischaltung erstellt werden.
-          </div>
-        )}
         <Input
           label="Titel"
           value={titel}
@@ -3212,6 +3200,7 @@ function StelleBearbeitenScreen({ stelle, verein, onBack, onSave }) {
 }
 
 function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
+  const [historischeStellen, setHistorischeStellen] = useState([]);
   const [snapshots, setSnapshots] = useState([]);
   const [followerAnalyse, setFollowerAnalyse] = useState(null);
   const [stelleFollower, setStelleFollower] = useState([]);
@@ -3225,9 +3214,28 @@ function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
     topZusagen: 0,
   });
   const [activeTab, setActiveTab] = useState("uebersicht");
+  const analyseStellen = historischeStellen.length ? historischeStellen : stellen;
 
   useEffect(() => {
     if (!vereinId) return;
+    const seit = new Date();
+    seit.setMonth(seit.getMonth() - 12);
+
+    supabase
+      .from("stellen")
+      .select("*, termine(*, bewerbungen(*))")
+      .eq("verein_id", vereinId)
+      .gte("created_at", seit.toISOString())
+      .order("created_at", { ascending: false })
+      .then(({ data, error }) => {
+        if (error) {
+          console.error("Historische Analyse-Stellen konnten nicht geladen werden:", error);
+          setHistorischeStellen([]);
+          return;
+        }
+        setHistorischeStellen(Array.isArray(data) ? data : []);
+      });
+
     supabase
       .from("analyse_snapshots")
       .select("*")
@@ -3311,11 +3319,11 @@ function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
     });
 
   const gesamtAufrufe =
-    stellen.reduce((s, x) => s + (x.aufrufe || 0), 0) +
+    analyseStellen.reduce((s, x) => s + (x.aufrufe || 0), 0) +
     snapshots.reduce((s, x) => s + (x.aufrufe || 0), 0);
 
   const gesamtAnmeldungen =
-    stellen.reduce(
+    analyseStellen.reduce(
       (summe, stelle) =>
         summe +
         (stelle.termine || []).reduce(
@@ -3326,7 +3334,7 @@ function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
     ) + snapshots.reduce((s, x) => s + (x.anmeldungen || 0), 0);
 
   const gesamtErschienen =
-    stellen.reduce(
+    analyseStellen.reduce(
       (summe, stelle) =>
         summe +
         (stelle.termine || []).reduce(
@@ -3338,7 +3346,7 @@ function AnalyseDashboard({ stellen, onBack, logout, vereinId }) {
     ) + snapshots.reduce((s, x) => s + (x.erschienen || 0), 0);
 
   const gesamtNichtErschienen =
-    stellen.reduce(
+    analyseStellen.reduce(
       (summe, stelle) =>
         summe +
         (stelle.termine || []).reduce(
