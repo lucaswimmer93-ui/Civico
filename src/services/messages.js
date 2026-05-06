@@ -176,7 +176,7 @@ export async function getOrCreateVereinGemeindeThread(vereinId = null) {
         last_message_at: new Date().toISOString(),
       },
     ])
-    .select()
+    .select("id, thread_id, sender_user_id, sender_role, body, created_at")
     .single();
 
   if (createError) throw createError;
@@ -508,15 +508,16 @@ export async function getTerminDirectThreadsForVerein(terminId) {
 /**
  * Nachrichten laden
  */
-export async function getThreadMessages(threadId) {
+export async function getThreadMessages(threadId, limit = 20) {
   const { data, error } = await supabase
     .from("messages")
-    .select("*")
+    .select("id, thread_id, sender_user_id, sender_role, body, created_at")
     .eq("thread_id", threadId)
-    .order("created_at", { ascending: true });
+    .order("created_at", { ascending: false })
+    .limit(limit);
 
   if (error) throw error;
-  return data ?? [];
+  return (data ?? []).reverse();
 }
 
 /**
@@ -587,7 +588,8 @@ export async function getThreadReadState(threadId) {
   const { data, error } = await supabase
     .from("message_read_status")
     .select("user_id, last_read_at")
-    .eq("thread_id", threadId);
+    .eq("thread_id", threadId)
+    .limit(10);
 
   if (error) throw error;
 
