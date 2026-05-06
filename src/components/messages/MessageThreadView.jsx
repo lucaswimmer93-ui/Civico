@@ -72,9 +72,9 @@ export default function MessageThreadView({
     try {
       const data = await getThreadMessages(threadId);
       setMessages(data || []);
-      await refreshReadState();
       setLoading(false);
 
+      // Read-Status darf den Chat nicht blockieren.
       markThreadAsRead(threadId)
         .then(async () => {
           await refreshReadState();
@@ -83,8 +83,12 @@ export default function MessageThreadView({
           }
         })
         .catch((readErr) => {
-          console.error("Fehler beim Setzen des Read-Status:", readErr);
+          console.warn("Read-Status konnte nicht gesetzt werden:", readErr?.message || readErr);
         });
+
+      refreshReadState().catch((readErr) => {
+        console.warn("Read-Status konnte nicht geladen werden:", readErr?.message || readErr);
+      });
     } catch (err) {
       console.error("Fehler beim Laden der Nachrichten:", err);
       setError(err?.message || "Nachrichten konnten nicht geladen werden.");
@@ -115,11 +119,20 @@ export default function MessageThreadView({
           table: "messages",
           filter: `thread_id=eq.${threadId}`,
         },
-        async () => {
+        async (payload) => {
           try {
+            if (payload?.eventType === "INSERT" && payload?.new) {
+              setMessages((prev) => {
+                if (prev.some((m) => m.id === payload.new.id)) return prev;
+                return [...prev, payload.new].slice(-20);
+              });
+              refreshReadState().catch(() => {});
+              return;
+            }
+
             const data = await getThreadMessages(threadId);
             setMessages(data || []);
-            await refreshReadState();
+            refreshReadState().catch(() => {});
           } catch (err) {
             console.error("Realtime-Update fehlgeschlagen:", err);
           }
@@ -164,9 +177,9 @@ export default function MessageThreadView({
 
     try {
       const newMessage = await sendMessage(threadId, draft.trim());
-      setMessages((prev) => [...prev, newMessage]);
+      setMessages((prev) => [...prev, newMessage].slice(-20));
       setDraft("");
-      await refreshReadState();
+      refreshReadState().catch(() => {});
 
       if (typeof onMessageSent === "function") {
         onMessageSent(newMessage);
